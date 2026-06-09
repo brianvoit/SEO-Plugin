@@ -90,19 +90,42 @@ function buildLabel(img) {
   const label = document.createElement('div');
   label.setAttribute(OVERLAY_ATTR, 'true');
 
+  const hasAlt        = img.hasAttribute('alt');
+  const altText       = img.getAttribute('alt') ?? '';
+  const ariaLabel     = img.getAttribute('aria-label');
+  const ariaLabelledBy = img.getAttribute('aria-labelledby');
+  const role          = img.getAttribute('role');
+  const ariaHidden    = img.getAttribute('aria-hidden');
+
+  const isPresentational = role === 'presentation' || role === 'none';
+  const isAriaHidden     = ariaHidden === 'true';
+  const ariaName         = ariaLabel || (ariaLabelledBy
+    ? document.getElementById(ariaLabelledBy)?.textContent?.trim()
+    : null);
+
   let bg, statusText, tooltipText;
-  if (!img.hasAttribute('alt')) {
+
+  if (!hasAlt && ariaName) {
+    bg          = 'rgba(180,95,6,0.92)';
+    statusText  = ariaName;
+    tooltipText = `ARIA label only — no alt attribute\naria-label: "${ariaName}"\nAdd an alt attribute for better SEO`;
+  } else if (!hasAlt) {
     bg          = 'rgba(220,38,38,0.92)';
     statusText  = 'MISSING ALT';
     tooltipText = 'No alt attribute — add one to improve accessibility and SEO';
-  } else if (img.alt === '') {
-    bg          = 'rgba(180,95,6,0.92)';
+  } else if (altText === '' && (isPresentational || isAriaHidden)) {
+    const signal = isPresentational ? `role="${role}"` : 'aria-hidden="true"';
+    bg          = 'rgba(100,116,139,0.92)';
     statusText  = 'Decorative';
-    tooltipText = 'Empty alt (alt="") — intentionally hidden from screen readers';
+    tooltipText = `Intentionally decorative (${signal}) — correctly hidden from screen readers`;
+  } else if (altText === '') {
+    bg          = 'rgba(180,95,6,0.92)';
+    statusText  = 'Empty alt';
+    tooltipText = 'alt="" — intent unclear. Add role="presentation" if decorative, or write real alt text';
   } else {
     bg          = 'rgba(22,163,74,0.92)';
-    statusText  = img.alt;
-    tooltipText = img.alt;
+    statusText  = altText;
+    tooltipText = altText;
   }
 
   label.style.cssText = [

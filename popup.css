@@ -17,6 +17,7 @@
   --hint-green: #15803d;
   --hint-amber: #b45309;
   --hint-red: #dc2626;
+  --hint-muted: #64748b;
   --heading-tag-bg: #eff6ff;
   --heading-tag-color: #1d4ed8;
 }
@@ -39,6 +40,7 @@
     --hint-green: #4ade80;
     --hint-amber: #fbbf24;
     --hint-red: #f87171;
+    --hint-muted: #94a3b8;
     --heading-tag-bg: #1e3a5f;
     --heading-tag-color: #93c5fd;
   }
@@ -231,8 +233,22 @@ main { padding: 4px 0 8px; }
   word-break: break-all;
 }
 
-/* Overlay toggle section */
-.overlay-section { padding-bottom: 11px; }
+/* Alt text header control */
+.alt-header-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 4px;
+}
+
+.alt-header-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
 
 .toggle-btn {
   display: flex;
@@ -293,6 +309,7 @@ main { padding: 4px 0 8px; }
 .hint-green { color: var(--hint-green); font-weight: 600; }
 .hint-amber { color: var(--hint-amber); font-weight: 600; }
 .hint-red   { color: var(--hint-red);   font-weight: 600; }
+.hint-muted { color: var(--hint-muted); font-weight: 600; }
 
 /* Count color states */
 .field-meta.is-count-green { color: var(--hint-green); }

@@ -10,6 +10,14 @@
   <header>
     <span class="logo">SEO Inspector</span>
     <div class="header-actions">
+      <div class="alt-header-control">
+        <span class="alt-header-label">ALT TEXT</span>
+        <button id="btn-overlay" class="toggle-btn" aria-pressed="false">
+          <span class="toggle-track">
+            <span class="toggle-thumb"></span>
+          </span>
+        </button>
+      </div>
       <button id="btn-settings" class="icon-btn" title="Settings">
         <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
           <path d="M14.5 1.5a3.5 3.5 0 0 0-4.9 4.9L2.1 13.9a1.5 1.5 0 0 0 2.1 2.1l7.5-7.5a3.5 3.5 0 0 0 4.9-4.9l-2.1 2.1-1.6-1.6 2.1-2.1a3.5 3.5 0 0 0-.5-.5z"/>
@@ -34,6 +42,13 @@
         Back
       </button>
     </div>
+
+    <section class="field-section">
+      <div class="field-header">
+        <span class="field-label">ALT TEXT OVERLAY</span>
+      </div>
+      <div class="field-hint">Labels images: <span class="hint-green">alt present</span> · <span class="hint-amber">empty alt / ARIA only</span> · <span class="hint-muted">decorative</span> · <span class="hint-red">missing</span></div>
+    </section>
 
     <section class="field-section">
       <div class="field-header">
@@ -190,19 +205,6 @@
       <div class="field-value" id="canonical-text"></div>
     </section>
 
-    <!-- Alt Text Overlay -->
-    <section class="field-section overlay-section">
-      <div class="field-header">
-        <span class="field-label">ALT TEXT OVERLAY</span>
-        <button id="btn-overlay" class="toggle-btn" aria-pressed="false">
-          <span class="toggle-track">
-            <span class="toggle-thumb"></span>
-          </span>
-          <span class="toggle-label" id="overlay-label">Off</span>
-        </button>
-      </div>
-      <div class="field-hint">Labels images: <span class="hint-green">alt present</span> · <span class="hint-amber">decorative</span> · <span class="hint-red">missing</span></div>
-    </section>
 
   </main>
 

@@ -224,9 +224,7 @@ function renderCanonical(data) {
 // ─── Render: overlay toggle ─────────────────────────────────────────────────
 
 function renderOverlayToggle(active) {
-  const btn = document.getElementById('btn-overlay');
-  btn.setAttribute('aria-pressed', String(active));
-  document.getElementById('overlay-label').textContent = active ? 'On' : 'Off';
+  document.getElementById('btn-overlay').setAttribute('aria-pressed', String(active));
 }
 
 // ─── Render: all ────────────────────────────────────────────────────────────

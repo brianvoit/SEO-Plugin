@@ -1,9 +1,7 @@
 const MAX_WORDS = 25;
 const MAX_CHARS = 180;
 
-// Fill this in after publishing to AMO. The slug is the part after
-// https://addons.mozilla.org/en-US/firefox/addon/<slug>/
-const AMO_SLUG = 'seo-inspector'; // TODO: replace with your actual AMO slug
+const GITHUB_REPO = 'brianvoit/SEO-Plugin';
 
 const DEFAULT_RANGES = {
   title: { min: 30, target: 55, max: 70 },
@@ -406,13 +404,13 @@ async function checkForUpdates() {
 
   try {
     const res = await fetch(
-      `https://addons.mozilla.org/api/v5/addons/addon/${AMO_SLUG}/`,
-      { headers: { Accept: 'application/json' } }
+      `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
+      { headers: { Accept: 'application/vnd.github+json' } }
     );
-    if (!res.ok) throw new Error(`AMO returned ${res.status}`);
+    if (!res.ok) throw new Error(`GitHub returned ${res.status}`);
     const data = await res.json();
-    const latest = data.current_version?.version ?? null;
-    if (!latest) throw new Error('Could not read version from AMO');
+    const latest = data.tag_name?.replace(/^v/, '') ?? null;
+    if (!latest) throw new Error('Could not read version from GitHub');
 
     statusEl.classList.remove('hidden', 'is-available', 'is-error');
 
@@ -421,9 +419,9 @@ async function checkForUpdates() {
     } else {
       statusEl.textContent = `v${latest} available →`;
       statusEl.classList.add('is-available');
-      statusEl.title = 'Click to open AMO listing';
+      statusEl.title = 'Click to view release on GitHub';
       statusEl.addEventListener('click', () => {
-        browser.tabs.create({ url: `https://addons.mozilla.org/firefox/addon/${AMO_SLUG}/` });
+        browser.tabs.create({ url: `https://github.com/${GITHUB_REPO}/releases/latest` });
       }, { once: true });
     }
   } catch (err) {

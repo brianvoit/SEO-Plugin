@@ -14,7 +14,7 @@
     }
   },
   "permissions": ["storage", "activeTab", "scripting", "tabs"],
-  "host_permissions": ["https://addons.mozilla.org/*"],
+  "host_permissions": ["https://api.github.com/*"],
   "action": {
     "default_popup": "popup.html",
     "default_icon": "icons/icon.svg"

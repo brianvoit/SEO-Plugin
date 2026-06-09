@@ -17,10 +17,7 @@
   "host_permissions": ["https://addons.mozilla.org/*"],
   "action": {
     "default_popup": "popup.html",
-    "default_icon": {
-      "48": "icons/icon-48.png",
-      "96": "icons/icon-96.png"
-    }
+    "default_icon": "icons/icon.svg"
   },
   "content_scripts": [
     {

@@ -1,6 +1,6 @@
-const OVERLAY_ATTR = 'data-seo-overlay';
-const WRAPPER_ATTR = 'data-seo-wrapper';
-const TOOLTIP_ID   = 'seo-inspector-tooltip';
+const OVERLAY_ATTR  = 'data-seo-overlay';
+const CONTAINER_ID  = 'seo-inspector-overlay';
+const TOOLTIP_ID    = 'seo-inspector-tooltip';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -11,10 +11,9 @@ function wordCount(text) {
 // ─── Page data ───────────────────────────────────────────────────────────────
 
 function getPageData() {
-  const titleEl    = document.querySelector('title');
-  const titleText  = titleEl ? titleEl.textContent.trim() : '';
-
-  const metaEl     = document.querySelector('meta[name="description"]');
+  const titleEl     = document.querySelector('title');
+  const titleText   = titleEl ? titleEl.textContent.trim() : '';
+  const metaEl      = document.querySelector('meta[name="description"]');
   const metaContent = metaEl ? metaEl.getAttribute('content') : null;
 
   const headings = Array.from(
@@ -37,14 +36,13 @@ function getPageData() {
   };
 }
 
-// ─── Alt overlay tooltip ─────────────────────────────────────────────────────
+// ─── Tooltip ─────────────────────────────────────────────────────────────────
 
 function getTooltip() {
   let tt = document.getElementById(TOOLTIP_ID);
   if (!tt) {
     tt = document.createElement('div');
     tt.id = TOOLTIP_ID;
-    tt.setAttribute(OVERLAY_ATTR, 'true');
     tt.style.cssText = [
       'position:fixed',
       'z-index:2147483647',
@@ -66,9 +64,7 @@ function getTooltip() {
 }
 
 function positionTooltip(tt, e) {
-  const offset = 16;
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
+  const offset = 16, vw = window.innerWidth, vh = window.innerHeight;
   let left = e.clientX + offset;
   let top  = e.clientY + offset;
   if (left + 300 > vw - 8) left = e.clientX - 300 - offset;
@@ -85,35 +81,16 @@ function attachTooltip(label, tooltipText) {
     positionTooltip(tt, e);
   });
   label.addEventListener('mousemove', e => positionTooltip(getTooltip(), e));
-  label.addEventListener('mouseout', () => { getTooltip().style.display = 'none'; });
+  label.addEventListener('mouseout',  () => { getTooltip().style.display = 'none'; });
 }
 
-// ─── Alt overlay injection ───────────────────────────────────────────────────
-
-function ensureWrapper(img) {
-  if (img.parentElement && img.parentElement.hasAttribute(WRAPPER_ATTR)) {
-    return img.parentElement;
-  }
-  const isBlock = getComputedStyle(img).display === 'block';
-  const wrapper = document.createElement('span');
-  wrapper.setAttribute(WRAPPER_ATTR, 'true');
-  wrapper.style.cssText = [
-    isBlock ? 'display:block' : 'display:inline-block',
-    'position:relative',
-    'max-width:100%',
-    'vertical-align:middle'
-  ].join(';');
-  img.parentNode.insertBefore(wrapper, img);
-  wrapper.appendChild(img);
-  return wrapper;
-}
+// ─── Overlay: fixed-position container, never touches page DOM structure ──────
 
 function buildLabel(img) {
   const label = document.createElement('div');
   label.setAttribute(OVERLAY_ATTR, 'true');
 
   let bg, statusText, tooltipText;
-
   if (!img.hasAttribute('alt')) {
     bg          = 'rgba(220,38,38,0.92)';
     statusText  = 'MISSING ALT';
@@ -129,10 +106,7 @@ function buildLabel(img) {
   }
 
   label.style.cssText = [
-    'position:absolute',
-    'top:0',
-    'left:0',
-    'right:0',
+    'position:fixed',          // positioned by applyOverlay / updatePositions
     `background:${bg}`,
     'color:#fff',
     'padding:3px 6px',
@@ -153,28 +127,69 @@ function buildLabel(img) {
 
 function applyOverlay() {
   removeOverlay();
+
+  // Transparent fixed container — sits above the page, never modifies it
+  const container = document.createElement('div');
+  container.id = CONTAINER_ID;
+  container.style.cssText = [
+    'position:fixed',
+    'top:0', 'left:0',
+    'width:0', 'height:0',   // zero size so it captures no mouse events itself
+    'overflow:visible',
+    'z-index:2147483646',
+    'pointer-events:none',
+  ].join(';');
+  document.body.appendChild(container);
+
+  // Build one label per visible image and store img reference
+  const entries = [];
   document.querySelectorAll('img').forEach(img => {
     const rect = img.getBoundingClientRect();
-    if (rect.width < 4 && rect.height < 4) return;
-    const wrapper = ensureWrapper(img);
-    wrapper.appendChild(buildLabel(img));
+    if (rect.width < 4 || rect.height < 4) return;
+    const label = buildLabel(img);
+    container.appendChild(label);
+    entries.push({ img, label });
   });
+
+  container._entries = entries;
+
+  // Position every label to match its image's current viewport rect
+  function updatePositions() {
+    entries.forEach(({ img, label }) => {
+      const r = img.getBoundingClientRect();
+      const offscreen = r.bottom < 0 || r.top > window.innerHeight ||
+                        r.right  < 0 || r.left > window.innerWidth;
+      if (offscreen || r.width < 4 || r.height < 4) {
+        label.style.display = 'none';
+        return;
+      }
+      label.style.display   = '';
+      label.style.top       = `${r.top}px`;
+      label.style.left      = `${r.left}px`;
+      label.style.width     = `${r.width}px`;
+    });
+  }
+
+  updatePositions();
+  container._update = () => requestAnimationFrame(updatePositions);
+  window.addEventListener('scroll', container._update, { passive: true });
+  window.addEventListener('resize', container._update, { passive: true });
 }
 
 function removeOverlay() {
-  // Hide tooltip immediately
+  const container = document.getElementById(CONTAINER_ID);
+  if (container) {
+    if (container._update) {
+      window.removeEventListener('scroll', container._update);
+      window.removeEventListener('resize', container._update);
+    }
+    container.remove();
+  }
   const tt = document.getElementById(TOOLTIP_ID);
-  if (tt) tt.style.display = 'none';
-
-  document.querySelectorAll(`[${OVERLAY_ATTR}]`).forEach(el => el.remove());
-  document.querySelectorAll(`[${WRAPPER_ATTR}]`).forEach(wrapper => {
-    const img = wrapper.querySelector('img');
-    if (img) wrapper.parentNode.insertBefore(img, wrapper);
-    wrapper.remove();
-  });
+  if (tt) { tt.style.display = 'none'; }
 }
 
-// ─── Init: restore overlay if sticky ─────────────────────────────────────────
+// ─── Init: restore overlay if it was active before navigation ────────────────
 
 browser.storage.local.get('altOverlayActive').then(({ altOverlayActive }) => {
   if (altOverlayActive) applyOverlay();

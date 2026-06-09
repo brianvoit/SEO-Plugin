@@ -25,8 +25,8 @@ jobs:
       - name: Sign extension
         run: |
           web-ext sign \
-            --api-key="${{ secrets.AMO_API_KEY }}" \
-            --api-secret="${{ secrets.AMO_API_SECRET }}" \
+            --api-key="${{ secrets.AMO_JWT_ISSUER }}" \
+            --api-secret="${{ secrets.AMO_JWT_SECRET }}" \
             --channel=unlisted \
             --ignore-files=".github/**" ".gitignore" ".git/**"
 

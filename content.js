@@ -218,6 +218,212 @@ browser.storage.local.get('altOverlayActive').then(({ altOverlayActive }) => {
   if (altOverlayActive) applyOverlay();
 });
 
+// ─── Alt text generator ──────────────────────────────────────────────────────
+
+const GENERATOR_ID = 'seo-inspector-alt-gen';
+
+function removeGenerator() {
+  document.getElementById(GENERATOR_ID)?.remove();
+}
+
+function createGeneratorPanel(img) {
+  removeGenerator();
+
+  const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const c = dark ? {
+    bg: '#1c1c1e', headerBg: '#2c2c2e', border: '#3a3a3c',
+    text: '#f2f2f7', muted: '#98989d', inputBg: '#2c2c2e', inputBorder: '#48484a'
+  } : {
+    bg: '#ffffff', headerBg: '#f8f9fa', border: '#e5e7eb',
+    text: '#111827', muted: '#9ca3af', inputBg: '#ffffff', inputBorder: '#d1d5db'
+  };
+
+  const rect = img.getBoundingClientRect();
+  const W    = 300;
+  const left = Math.min(Math.max(rect.left, 8), window.innerWidth - W - 8);
+  const top  = rect.bottom + 8;
+
+  const panel = document.createElement('div');
+  panel.id = GENERATOR_ID;
+  panel.style.cssText = [
+    'position:fixed', `top:${top}px`, `left:${left}px`, `width:${W}px`,
+    `background:${c.bg}`, `border:1px solid ${c.border}`,
+    'border-radius:8px', 'box-shadow:0 4px 20px rgba(0,0,0,0.18)',
+    'font:13px/1.5 -apple-system,system-ui,"Segoe UI",sans-serif',
+    `color:${c.text}`, 'z-index:2147483647', 'overflow:hidden',
+  ].join(';');
+
+  panel.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:${c.headerBg};border-bottom:1px solid ${c.border}">
+      <span style="font-size:9px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:${c.muted}">Suggested Alt Text</span>
+      <button id="sag-close" style="background:none;border:none;cursor:pointer;color:${c.muted};font-size:18px;line-height:1;padding:0">&times;</button>
+    </div>
+    <div id="sag-body" style="padding:10px">
+      <span style="color:${c.muted};font-size:12px">Generating…</span>
+    </div>`;
+
+  document.body.appendChild(panel);
+  panel.querySelector('#sag-close').addEventListener('click', removeGenerator);
+  panel._colors = c;
+
+  const dismiss = e => {
+    if (!panel.contains(e.target)) {
+      removeGenerator();
+      document.removeEventListener('click', dismiss);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', dismiss), 200);
+
+  return panel;
+}
+
+function showGeneratorResult(altText, usedVision) {
+  const panel = document.getElementById(GENERATOR_ID);
+  const body  = document.getElementById('sag-body');
+  if (!body || !panel) return;
+  const c = panel._colors;
+
+  body.innerHTML = `
+    <textarea id="sag-text" rows="3" style="width:100%;box-sizing:border-box;border:1px solid ${c.inputBorder};border-radius:5px;padding:7px 9px;font:13px/1.5 -apple-system,system-ui,sans-serif;resize:vertical;color:${c.text};background:${c.inputBg};outline:none">${altText}</textarea>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
+      <span style="font-size:10px;color:${c.muted}">${usedVision ? '✦ vision' : '✦ page context'}</span>
+      <button id="sag-copy" style="background:#2563eb;color:#fff;border:none;border-radius:4px;padding:4px 12px;font:600 12px/1.5 sans-serif;cursor:pointer">Copy</button>
+    </div>`;
+
+  document.getElementById('sag-copy').addEventListener('click', () => {
+    const val = document.getElementById('sag-text').value;
+    navigator.clipboard.writeText(val).then(() => {
+      const btn = document.getElementById('sag-copy');
+      btn.textContent = 'Copied!';
+      btn.style.background = '#16a34a';
+      setTimeout(() => { btn.textContent = 'Copy'; btn.style.background = '#2563eb'; }, 1500);
+    });
+  });
+}
+
+function showGeneratorError(msg) {
+  const body = document.getElementById('sag-body');
+  if (!body) return;
+  body.innerHTML = `<span style="color:#dc2626;font-size:12px">${msg}</span>`;
+}
+
+async function tryGetImageBase64(img) {
+  const maxDim = 800;
+
+  function drawToBase64(source, w, h) {
+    const scale  = Math.min(1, maxDim / Math.max(w, h, 1));
+    const canvas = document.createElement('canvas');
+    canvas.width  = Math.round(w * scale);
+    canvas.height = Math.round(h * scale);
+    canvas.getContext('2d').drawImage(source, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.75).split(',')[1];
+  }
+
+  // Try 1: draw the already-loaded img element (works if same-origin or CORS-allowed)
+  try {
+    return { data: drawToBase64(img, img.naturalWidth, img.naturalHeight), mimeType: 'image/jpeg' };
+  } catch { /* tainted canvas — cross-origin */ }
+
+  // Try 2: fetch with CORS mode (works if the server sends CORS headers)
+  try {
+    const blob = await fetch(img.src, { mode: 'cors' }).then(r => r.blob());
+    const bm   = await createImageBitmap(blob);
+    return { data: drawToBase64(bm, bm.width, bm.height), mimeType: 'image/jpeg' };
+  } catch { /* no CORS headers on the image server */ }
+
+  return null;
+}
+
+async function generateAltText(srcUrl) {
+  const img = Array.from(document.querySelectorAll('img')).find(i => i.src === srcUrl);
+  if (!img) return;
+
+  createGeneratorPanel(img);
+
+  const { claudeApiKey } = await browser.storage.local.get('claudeApiKey');
+  if (!claudeApiKey) {
+    showGeneratorError('No Claude API key — add one in Settings (⚙).');
+    return;
+  }
+
+  // Gather context
+  const pageTitle = document.querySelector('title')?.textContent?.trim() ?? '';
+  const pageMeta  = document.querySelector('meta[name="description"]')?.getAttribute('content') ?? '';
+  const filename  = srcUrl.split('/').pop().split('?')[0];
+  const caption   = img.closest('figure')?.querySelector('figcaption')?.textContent?.trim();
+  const linkText  = img.closest('a')?.textContent?.trim().replace(/\s+/g, ' ');
+
+  // Walk up DOM for the nearest preceding heading
+  let nearestHeading = '';
+  let el = img.parentElement;
+  for (let depth = 0; depth < 8 && el && el !== document.body; depth++) {
+    let sib = el.previousElementSibling;
+    while (sib) {
+      const h = sib.matches('h1,h2,h3,h4,h5,h6') ? sib : sib.querySelector('h1,h2,h3,h4,h5,h6');
+      if (h) { nearestHeading = h.textContent.trim(); break; }
+      sib = sib.previousElementSibling;
+    }
+    if (nearestHeading) break;
+    el = el.parentElement;
+  }
+
+  const context = [
+    pageTitle      && `Page title: "${pageTitle}"`,
+    pageMeta       && `Page meta description: "${pageMeta}"`,
+    nearestHeading && `Nearest heading: "${nearestHeading}"`,
+    caption        && `Figure caption: "${caption}"`,
+    linkText       && `Link text (image is a link): "${linkText}"`,
+    `Image filename: ${filename}`,
+    `Current alt: ${img.hasAttribute('alt') ? `"${img.alt}"` : 'absent'}`,
+  ].filter(Boolean).join('\n');
+
+  const system = `You write concise, accurate alt text following WCAG 2.1 AA guidelines.
+- Describe what the image communicates in context, not just what it depicts
+- Under 125 characters
+- No "Image of" or "Photo of" prefix
+- If it is purely decorative, respond with exactly: [decorative]
+- Return only the alt text, nothing else`;
+
+  const imageData   = await tryGetImageBase64(img);
+  const userContent = imageData
+    ? [
+        { type: 'image', source: { type: 'base64', media_type: imageData.mimeType, data: imageData.data } },
+        { type: 'text',  text: `Generate alt text.\n\n${context}` }
+      ]
+    : `Generate alt text (image inaccessible — use context only).\n\n${context}`;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 150,
+        system,
+        messages: [{ role: 'user', content: userContent }]
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message ?? `HTTP ${res.status}`);
+    }
+
+    const data    = await res.json();
+    const altText = data.content?.[0]?.text?.trim();
+    if (!altText) throw new Error('Empty response from Claude');
+
+    showGeneratorResult(altText, !!imageData);
+  } catch (err) {
+    showGeneratorError(`Error: ${err.message}`);
+  }
+}
+
 // ─── Message handler ──────────────────────────────────────────────────────────
 
 browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -238,5 +444,9 @@ browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       });
     });
     return true;
+  }
+
+  if (message.action === 'generateAltText') {
+    generateAltText(message.srcUrl);
   }
 });

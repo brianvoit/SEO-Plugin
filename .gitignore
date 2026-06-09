@@ -9,3 +9,6 @@
 # Python cache (from icon generation)
 __pycache__/
 *.pyc
+
+# web-ext build output
+web-ext-artifacts/

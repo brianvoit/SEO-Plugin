@@ -1,0 +1,45 @@
+name: Sign & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed to create releases
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install web-ext
+        run: npm install -g web-ext
+
+      - name: Sign extension
+        run: |
+          web-ext sign \
+            --api-key="${{ secrets.AMO_API_KEY }}" \
+            --api-secret="${{ secrets.AMO_API_SECRET }}" \
+            --channel=unlisted \
+            --ignore-files=".github/**" ".gitignore" ".git/**"
+
+      - name: Upload XPI as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: seo-inspector-signed
+          path: web-ext-artifacts/*.xpi
+          retention-days: 90
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: web-ext-artifacts/*.xpi
+          generate_release_notes: true

@@ -1,0 +1,11 @@
+# Claude Code session files
+.claude/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Python cache (from icon generation)
+__pycache__/
+*.pyc

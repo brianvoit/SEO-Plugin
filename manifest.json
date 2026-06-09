@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "SEO Inspector",
+  "version": "1.0",
+  "description": "Quick SEO metadata inspector — title, meta description, headings, canonical, and alt text overlay.",
+  "permissions": ["storage", "activeTab", "scripting", "tabs"],
+  "host_permissions": ["https://addons.mozilla.org/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "48": "icons/icon-48.png",
+      "96": "icons/icon-96.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

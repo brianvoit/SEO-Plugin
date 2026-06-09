@@ -219,6 +219,130 @@ function renderCanonical(data) {
   }
 }
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─── Render: word count ──────────────────────────────────────────────────────
+
+function renderWordCount(data) {
+  const count = data.bodyWordCount ?? 0;
+  const mins  = Math.max(1, Math.round(count / 200));
+  document.getElementById('wordcount-text').textContent =
+    `${count.toLocaleString()} words · ~${mins} min read`;
+}
+
+// ─── Render: indexability ────────────────────────────────────────────────────
+
+function renderIndexability(data) {
+  const list = document.getElementById('indexability-list');
+  list.innerHTML = '';
+  const { noindex, nofollow, canonicalMismatch, canonicalUrl } = data.indexability;
+
+  const issues = [];
+  if (noindex)          issues.push({ level: 'error',   text: 'noindex — excluded from search results' });
+  if (canonicalMismatch) issues.push({ level: 'warning', text: `Canonical → ${canonicalUrl}` });
+  if (nofollow)         issues.push({ level: 'warning', text: 'nofollow — outbound links not followed' });
+
+  (issues.length ? issues : [{ level: 'ok', text: 'Indexable' }]).forEach(({ level, text }) => {
+    const row  = document.createElement('div');
+    row.className = `index-row index-row--${level}`;
+    const dot  = document.createElement('span');
+    dot.className = 'index-dot';
+    const label = document.createElement('span');
+    label.className = 'index-text';
+    label.textContent = text;
+    row.appendChild(dot);
+    row.appendChild(label);
+    list.appendChild(row);
+  });
+}
+
+// ─── Render: open graph ──────────────────────────────────────────────────────
+
+const OG_KEYS = ['og:title','og:description','og:image','og:type','og:url'];
+const TW_KEYS = ['twitter:card','twitter:title','twitter:image'];
+
+function renderOpenGraph(data) {
+  const list = document.getElementById('og-list');
+  list.innerHTML = '';
+  const { og, twitter } = data.openGraph;
+  const hasTwitter = TW_KEYS.some(k => twitter[k] !== undefined);
+
+  OG_KEYS.forEach(key => appendOGRow(list, key, og[key]));
+  if (hasTwitter) TW_KEYS.forEach(key => appendOGRow(list, key, twitter[key]));
+}
+
+function appendOGRow(container, key, value) {
+  const row   = document.createElement('div');
+  row.className = 'og-row';
+  const label = key.replace('og:','').replace('twitter:','tw:');
+  const present = value !== undefined && value !== null && value !== '';
+
+  row.innerHTML = present
+    ? `<span class="og-key">${escapeHtml(label)}</span><span class="og-value" title="${escapeHtml(value)}">${escapeHtml(value.length > 45 ? value.slice(0,45)+'…' : value)}</span>`
+    : `<span class="og-key">${escapeHtml(label)}</span><span class="og-missing">missing</span>`;
+
+  container.appendChild(row);
+}
+
+// ─── Render: structured data ─────────────────────────────────────────────────
+
+let _schemas = [];
+
+function renderStructuredData(data) {
+  _schemas = data.structuredData ?? [];
+  const btn     = document.getElementById('btn-schema');
+  const summary = document.getElementById('schema-summary');
+
+  if (!_schemas.length) {
+    summary.textContent = 'None';
+    btn.disabled = true;
+  } else {
+    const types = _schemas.map(s => [].concat(s['@type'])[0]).filter(Boolean);
+    summary.textContent = types.length === 1 ? types[0] : `${types.length} types`;
+    btn.disabled = false;
+  }
+}
+
+function renderSchemaDetail() {
+  const content = document.getElementById('schema-detail-content');
+  content.innerHTML = '';
+
+  _schemas.forEach(schema => {
+    const type = [].concat(schema['@type']).join(' + ') || 'Unknown';
+    const card = document.createElement('div');
+    card.className = 'schema-card';
+
+    const header = document.createElement('div');
+    header.className = 'schema-type-name';
+    header.textContent = type;
+    card.appendChild(header);
+
+    Object.entries(schema).forEach(([key, val]) => {
+      if (key.startsWith('@')) return;
+      let display;
+      if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
+        display = String(val);
+        if (display.length > 80) display = display.slice(0, 80) + '…';
+      } else if (Array.isArray(val)) {
+        display = `${val.length} item${val.length !== 1 ? 's' : ''}`;
+      } else if (val && typeof val === 'object') {
+        display = val.name || val['@type'] || val.url || '(object)';
+      } else { return; }
+
+      const row = document.createElement('div');
+      row.className = 'schema-prop';
+      row.innerHTML = `<span class="schema-key">${escapeHtml(key)}</span><span class="schema-val">${escapeHtml(display)}</span>`;
+      card.appendChild(row);
+    });
+
+    content.appendChild(card);
+  });
+}
+
 // ─── Render: overlay toggle ─────────────────────────────────────────────────
 
 function renderOverlayToggle(active) {
@@ -230,8 +354,12 @@ function renderOverlayToggle(active) {
 function render(data, expandMeta = false) {
   renderTitle(data);
   renderMeta(data, expandMeta);
+  renderWordCount(data);
+  renderIndexability(data);
   renderHeadings(data);
   renderCanonical(data);
+  renderOpenGraph(data);
+  renderStructuredData(data);
   renderOverlayToggle(data.altOverlayActive);
 }
 
@@ -298,12 +426,32 @@ document.getElementById('btn-overlay').addEventListener('click', async () => {
 // ─── Settings panel ──────────────────────────────────────────────────────────
 
 const settingsPanel = document.getElementById('settings-panel');
+const schemaPanel   = document.getElementById('schema-panel');
 const mainContent   = document.getElementById('content');
 const updateFooter  = document.getElementById('update-footer');
 const errorBanner   = document.getElementById('error-state');
 
+function showSchemaPanel() {
+  if (!_schemas.length) return;
+  mainContent.classList.add('hidden');
+  updateFooter.classList.add('hidden');
+  errorBanner.classList.add('hidden');
+  settingsPanel.classList.add('hidden');
+  schemaPanel.classList.remove('hidden');
+  document.getElementById('btn-refresh').classList.add('hidden');
+  renderSchemaDetail();
+}
+
+function hideSchemaPanel() {
+  schemaPanel.classList.add('hidden');
+  updateFooter.classList.remove('hidden');
+  document.getElementById('btn-refresh').classList.remove('hidden');
+  mainContent.classList.remove('hidden');
+}
+
 function showSettings() {
   mainContent.classList.add('hidden');
+  schemaPanel.classList.add('hidden');
   updateFooter.classList.add('hidden');
   errorBanner.classList.add('hidden');
   settingsPanel.classList.remove('hidden');
@@ -333,6 +481,8 @@ function hideSettings() {
 
 document.getElementById('btn-settings').addEventListener('click', showSettings);
 document.getElementById('btn-settings-back').addEventListener('click', hideSettings);
+document.getElementById('btn-schema').addEventListener('click', showSchemaPanel);
+document.getElementById('btn-schema-back').addEventListener('click', hideSchemaPanel);
 
 // Show/hide API key
 document.getElementById('btn-toggle-key-vis').addEventListener('click', () => {

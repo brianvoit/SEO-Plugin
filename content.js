@@ -10,6 +10,63 @@ function wordCount(text) {
 
 // ─── Page data ───────────────────────────────────────────────────────────────
 
+function getBodyWordCount() {
+  const clone = document.body.cloneNode(true);
+  ['script','style','noscript','nav','header','footer','aside'].forEach(tag =>
+    clone.querySelectorAll(tag).forEach(el => el.remove())
+  );
+  ['navigation','banner','contentinfo','complementary'].forEach(role =>
+    clone.querySelectorAll(`[role="${role}"]`).forEach(el => el.remove())
+  );
+  const text = clone.textContent.replace(/\s+/g, ' ').trim();
+  return text ? text.split(' ').filter(Boolean).length : 0;
+}
+
+function getIndexability() {
+  const robotsMeta    = document.querySelector('meta[name="robots"]')?.getAttribute('content') ?? '';
+  const googlebotMeta = document.querySelector('meta[name="googlebot"]')?.getAttribute('content') ?? '';
+  const combined      = (robotsMeta + ',' + googlebotMeta).toLowerCase();
+
+  const noindex  = combined.includes('noindex');
+  const nofollow = combined.includes('nofollow');
+
+  const canonicalHref = document.querySelector('link[rel="canonical"]')?.getAttribute('href') ?? null;
+  let canonicalAbsolute = null;
+  if (canonicalHref) {
+    try { canonicalAbsolute = new URL(canonicalHref, window.location.href).href; } catch { canonicalAbsolute = canonicalHref; }
+  }
+
+  const norm = url => url.replace(/\/$/, '').split('#')[0];
+  const canonicalMismatch = !!(canonicalAbsolute && norm(canonicalAbsolute) !== norm(window.location.href));
+
+  return { noindex, nofollow, canonicalMismatch, canonicalUrl: canonicalAbsolute, robotsMeta: robotsMeta || null };
+}
+
+function getOpenGraph() {
+  const og = {}, twitter = {};
+  document.querySelectorAll('meta[property^="og:"], meta[name^="og:"]').forEach(m => {
+    const key = m.getAttribute('property') || m.getAttribute('name');
+    if (key) og[key] = m.getAttribute('content') ?? '';
+  });
+  document.querySelectorAll('meta[name^="twitter:"]').forEach(m => {
+    const key = m.getAttribute('name');
+    if (key) twitter[key] = m.getAttribute('content') ?? '';
+  });
+  return { og, twitter };
+}
+
+function getStructuredData() {
+  const schemas = [];
+  document.querySelectorAll('script[type="application/ld+json"]').forEach(script => {
+    try {
+      const parsed = JSON.parse(script.textContent);
+      const items  = Array.isArray(parsed) ? parsed : parsed['@graph'] ? parsed['@graph'] : [parsed];
+      schemas.push(...items.filter(item => item && item['@type']));
+    } catch { /* invalid JSON-LD */ }
+  });
+  return schemas;
+}
+
 function getPageData() {
   const titleEl     = document.querySelector('title');
   const titleText   = titleEl ? titleEl.textContent.trim() : '';
@@ -32,7 +89,11 @@ function getPageData() {
       ? { text: metaContent, charCount: metaContent.length, wordCount: wordCount(metaContent) }
       : null,
     headings,
-    canonical
+    canonical,
+    bodyWordCount:  getBodyWordCount(),
+    indexability:   getIndexability(),
+    openGraph:      getOpenGraph(),
+    structuredData: getStructuredData()
   };
 }
 

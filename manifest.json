@@ -3,6 +3,12 @@
   "name": "SEO Inspector",
   "version": "1.0",
   "description": "Quick SEO metadata inspector — title, meta description, headings, canonical, and alt text overlay.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "seo-inspector@brianvoit",
+      "strict_min_version": "109.0"
+    }
+  },
   "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "host_permissions": ["https://addons.mozilla.org/*"],
   "action": {

@@ -343,6 +343,30 @@ function renderSchemaDetail() {
   });
 }
 
+// ─── Render: dates ───────────────────────────────────────────────────────────
+
+function formatDate(str) {
+  if (!str) return null;
+  try {
+    const d = new Date(str);
+    if (isNaN(d.getTime())) return str;
+    return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  } catch { return str; }
+}
+
+function renderDates(data) {
+  const { published, modified } = data.dates ?? {};
+  const pubEl = document.getElementById('date-published');
+  const modEl = document.getElementById('date-modified');
+  const fmt = formatDate(published);
+  const fmtMod = formatDate(modified);
+
+  pubEl.textContent = fmt ?? '—';
+  pubEl.className = 'dates-value' + (fmt ? '' : ' dates-value--none');
+  modEl.textContent = fmtMod ?? '—';
+  modEl.className = 'dates-value' + (fmtMod ? '' : ' dates-value--none');
+}
+
 // ─── Render: overlay toggle ─────────────────────────────────────────────────
 
 function renderOverlayToggle(active) {
@@ -360,6 +384,7 @@ function render(data, expandMeta = false) {
   renderCanonical(data);
   renderOpenGraph(data);
   renderStructuredData(data);
+  renderDates(data);
   renderOverlayToggle(data.altOverlayActive);
 }
 

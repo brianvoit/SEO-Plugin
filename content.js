@@ -67,6 +67,32 @@ function getStructuredData() {
   return schemas;
 }
 
+function getDates() {
+  let published = null, modified = null;
+
+  document.querySelectorAll('script[type="application/ld+json"]').forEach(script => {
+    try {
+      const parsed = JSON.parse(script.textContent);
+      const items  = Array.isArray(parsed) ? parsed : parsed['@graph'] ? parsed['@graph'] : [parsed];
+      items.forEach(item => {
+        if (!item) return;
+        if (item.datePublished && !published) published = item.datePublished;
+        if (item.dateModified  && !modified)  modified  = item.dateModified;
+      });
+    } catch { /* invalid JSON-LD */ }
+  });
+
+  if (!published) published =
+    document.querySelector('meta[property="article:published_time"]')?.getAttribute('content') ??
+    document.querySelector('meta[name="date"]')?.getAttribute('content') ?? null;
+
+  if (!modified) modified =
+    document.querySelector('meta[property="article:modified_time"]')?.getAttribute('content') ??
+    document.querySelector('meta[name="last-modified"]')?.getAttribute('content') ?? null;
+
+  return { published, modified };
+}
+
 function getPageData() {
   const titleEl     = document.querySelector('title');
   const titleText   = titleEl ? titleEl.textContent.trim() : '';
@@ -93,7 +119,8 @@ function getPageData() {
     bodyWordCount:  getBodyWordCount(),
     indexability:   getIndexability(),
     openGraph:      getOpenGraph(),
-    structuredData: getStructuredData()
+    structuredData: getStructuredData(),
+    dates:          getDates()
   };
 }
 

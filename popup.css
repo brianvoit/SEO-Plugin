@@ -665,5 +665,28 @@ main { padding: 4px 0 8px; }
   white-space: nowrap;
 }
 
+/* ── Dates ────────────────────────────────────────────────────────────────── */
+
+.dates-section { padding-bottom: 12px; }
+
+.dates-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 5px;
+  font-size: 12px;
+}
+.dates-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--label);
+  min-width: 68px;
+  flex-shrink: 0;
+}
+.dates-value       { color: var(--text); }
+.dates-value--none { color: var(--text-none); }
+
 /* Utility */
 .hidden { display: none !important; }

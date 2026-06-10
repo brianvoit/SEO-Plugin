@@ -8,7 +8,6 @@
 </head>
 <body>
   <header>
-    <span class="logo">SEO Inspector</span>
     <div class="header-actions">
       <div class="alt-header-control">
         <span class="alt-header-label">ALT TEXT</span>
@@ -27,12 +26,6 @@
         <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M13.5 8A5.5 5.5 0 1 1 8 2.5a5.5 5.5 0 0 1 3.9 1.6L13.5 5.6"/>
           <polyline points="13.5 2 13.5 5.6 9.9 5.6"/>
-        </svg>
-      </button>
-      <button id="btn-close-sidebar" class="icon-btn hidden" title="Close sidebar">
-        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="3" y1="3" x2="13" y2="13"/>
-          <line x1="13" y1="3" x2="3" y2="13"/>
         </svg>
       </button>
     </div>
@@ -135,6 +128,75 @@
 
     <section class="field-section">
       <div class="field-header">
+        <span class="field-label">GOOGLE SEARCH CONSOLE</span>
+        <span id="gsc-status-badge" class="gsc-status-badge"></span>
+      </div>
+
+      <div id="gsc-setup-form">
+        <label class="wp-field">
+          <span class="wp-field-label">OAuth Client ID</span>
+          <input type="text" id="gsc-client-id" class="wp-input" placeholder="xxxxxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false" />
+        </label>
+        <label class="wp-field">
+          <span class="wp-field-label">OAuth Client Secret (optional)</span>
+          <input type="password" id="gsc-client-secret" class="wp-input" placeholder="Leave blank for Desktop app clients" autocomplete="off" spellcheck="false" />
+        </label>
+        <label class="wp-field">
+          <span class="wp-field-label">Redirect URI — register this in Google Cloud Console</span>
+          <div class="api-key-row">
+            <input type="text" id="gsc-redirect-uri" class="api-key-input" readonly />
+            <button id="btn-copy-redirect-uri" class="icon-btn" title="Copy redirect URI">
+              <svg id="gsc-redirect-icon-copy" class="icon-copy" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="5" y="4" width="9" height="11" rx="1.5"/>
+                <path d="M3 12H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1"/>
+              </svg>
+              <svg id="gsc-redirect-icon-check" class="icon-check hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="2 8 6 12 14 4"/>
+              </svg>
+            </button>
+          </div>
+        </label>
+        <div class="wp-form-actions">
+          <button id="btn-gsc-connect" class="save-key-btn">Connect Google Search Console</button>
+        </div>
+        <div id="gsc-connect-error" class="field-hint hint-red hidden"></div>
+        <div class="field-hint">Create an OAuth Client (type "Desktop app") in Google Cloud Console, enable the "Google Search Console API", and add the redirect URI above. Credentials are stored locally and used only to talk directly to Google.</div>
+      </div>
+
+      <div id="gsc-connected-info" class="hidden">
+        <div class="field-hint" id="gsc-connected-since"></div>
+        <button id="btn-gsc-disconnect" class="settings-back-btn">Disconnect</button>
+      </div>
+    </section>
+
+    <section class="field-section">
+      <div class="field-header">
+        <span class="field-label">BRANDED TERMS</span>
+        <button id="btn-add-brand-domain" class="save-key-btn">+ Add Domain</button>
+      </div>
+      <div id="brand-domains-empty" class="field-hint hidden">No branded terms configured yet.</div>
+      <div id="brand-domains-list" class="wp-sites-list"></div>
+
+      <div id="brand-domain-form" class="wp-site-form hidden">
+        <label class="wp-field">
+          <span class="wp-field-label">Domain</span>
+          <input type="text" id="brand-domain-host" class="wp-input" placeholder="example.com" autocomplete="off" spellcheck="false" />
+        </label>
+        <label class="wp-field">
+          <span class="wp-field-label">Branded Terms (regex, case-insensitive)</span>
+          <input type="text" id="brand-domain-pattern" class="wp-input" placeholder="brand|brandname|bn|other" autocomplete="off" spellcheck="false" />
+        </label>
+        <div id="brand-domain-error" class="field-hint hint-red hidden"></div>
+        <div class="wp-form-actions">
+          <button id="btn-cancel-brand-domain" class="settings-back-btn">Cancel</button>
+          <button id="btn-save-brand-domain" class="save-key-btn">Save</button>
+        </div>
+      </div>
+      <div class="field-hint">Enter a regular expression matching your brand terms, e.g. <code>brand|brandname|bn</code>. In the Search Console queries table, the "Hide Branded" toggle filters out queries matching this pattern for the current domain.</div>
+    </section>
+
+    <section class="field-section">
+      <div class="field-header">
         <span class="field-label">TITLE TAG — CHARACTER TARGETS</span>
       </div>
       <div class="range-row">
@@ -196,6 +258,113 @@
     <div id="schema-detail-content"></div>
   </div>
 
+  <!-- Search Console detail panel -->
+  <div id="gsc-panel" class="hidden">
+    <div class="settings-header">
+      <button id="btn-gsc-back" class="settings-back-btn">
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="10 3 4 8 10 13"/>
+        </svg>
+        Back
+      </button>
+      <button id="btn-gsc-refresh" class="icon-btn hidden" title="Refresh Search Console data" style="margin-left:auto">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M13.5 8A5.5 5.5 0 1 1 8 2.5a5.5 5.5 0 0 1 3.9 1.6L13.5 5.6"/>
+          <polyline points="13.5 2 13.5 5.6 9.9 5.6"/>
+        </svg>
+      </button>
+    </div>
+
+    <div id="gsc-detail-content">
+
+      <!-- Not connected -->
+      <div id="gsc-not-connected" class="field-section hidden">
+        <div class="field-hint" id="gsc-not-connected-text">Connect Google Search Console in Settings to see performance data for this page.</div>
+        <button id="btn-gsc-goto-settings" class="save-key-btn" style="margin-top:8px">Open Settings</button>
+      </div>
+
+      <!-- No matching property -->
+      <div id="gsc-no-property" class="field-section hidden">
+        <div class="field-hint">No verified Search Console property matches <strong id="gsc-no-property-host"></strong>. Add this site as a property in Search Console, or check your account.</div>
+      </div>
+
+      <!-- Error -->
+      <div id="gsc-error" class="field-section hidden">
+        <div class="field-hint hint-red" id="gsc-error-text"></div>
+      </div>
+
+      <!-- Connected + data -->
+      <div id="gsc-data" class="hidden">
+
+        <section class="field-section">
+          <div class="mode-segmented" id="gsc-range-group">
+            <button class="mode-option" data-range="30">30 days</button>
+            <button class="mode-option" data-range="60">60 days</button>
+            <button class="mode-option" data-range="90">90 days</button>
+          </div>
+          <div class="field-hint" id="gsc-fetched-meta"></div>
+        </section>
+
+        <section class="field-section">
+          <div class="gsc-chart-block" data-metric="clicks">
+            <div class="gsc-chart-header">
+              <span class="field-label">CLICKS</span>
+              <span>
+                <span class="gsc-chart-total" id="gsc-total-clicks"></span><span class="gsc-chart-change" id="gsc-change-clicks"></span>
+              </span>
+            </div>
+            <div class="gsc-chart-svg" id="gsc-chart-clicks"></div>
+          </div>
+          <div class="gsc-chart-block" data-metric="impressions">
+            <div class="gsc-chart-header">
+              <span class="field-label">IMPRESSIONS</span>
+              <span>
+                <span class="gsc-chart-total" id="gsc-total-impressions"></span><span class="gsc-chart-change" id="gsc-change-impressions"></span>
+              </span>
+            </div>
+            <div class="gsc-chart-svg" id="gsc-chart-impressions"></div>
+          </div>
+          <div class="gsc-chart-block" data-metric="position">
+            <div class="gsc-chart-header">
+              <span class="field-label">AVG POSITION</span>
+              <span>
+                <span class="gsc-chart-total" id="gsc-total-position"></span><span class="gsc-chart-change" id="gsc-change-position"></span>
+              </span>
+            </div>
+            <div class="gsc-chart-svg" id="gsc-chart-position"></div>
+          </div>
+        </section>
+
+        <section class="field-section">
+          <div class="field-header">
+            <span class="field-label">QUERIES</span>
+            <div class="alt-header-control">
+              <span class="alt-header-label">HIDE BRANDED</span>
+              <button id="btn-gsc-branded-toggle" class="toggle-btn" aria-pressed="true">
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </button>
+            </div>
+          </div>
+          <div id="gsc-queries-table" class="gsc-queries-table"></div>
+          <div id="gsc-queries-empty" class="field-hint hidden">No query data for this page yet.</div>
+        </section>
+
+        <section class="field-section">
+          <div class="field-header">
+            <span class="field-label">INDEXING STATUS (GOOGLE)</span>
+          </div>
+          <div id="gsc-inspection-list"></div>
+        </section>
+
+        <section class="field-section">
+          <button id="btn-gsc-open-external" class="save-key-btn" style="width:100%">Open in Search Console ↗</button>
+        </section>
+
+      </div>
+
+    </div>
+  </div>
+
   <div id="error-state" class="error-banner hidden">
     Cannot read this page. Try a regular web page.
   </div>
@@ -206,37 +375,105 @@
     <section class="field-section">
       <div class="field-header">
         <span class="field-label">TITLE TAG</span>
-        <button class="copy-btn" data-copy-target="title" title="Copy title">
-          <svg class="icon-copy" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="5" y="4" width="9" height="11" rx="1.5"/>
-            <path d="M3 12H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1"/>
-          </svg>
-          <svg class="icon-check hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="2 8 6 12 14 4"/>
-          </svg>
-        </button>
+        <div class="field-header-actions">
+          <button class="gen-btn" id="btn-generate-title" data-field="title" title="Generate with Claude">
+            <svg class="icon-generate" viewBox="0 0 16 16" width="13" height="13" fill="currentColor">
+              <path d="M8 1l1.4 4.6L14 7l-4.6 1.4L8 13l-1.4-4.6L2 7l4.6-1.4z"/>
+            </svg>
+            <svg class="icon-spinner hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+              <path d="M14 8A6 6 0 1 1 8 2"/>
+            </svg>
+          </button>
+          <button class="copy-btn" data-copy-target="title" title="Copy title">
+            <svg class="icon-copy" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="5" y="4" width="9" height="11" rx="1.5"/>
+              <path d="M3 12H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1"/>
+            </svg>
+            <svg class="icon-check hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="2 8 6 12 14 4"/>
+            </svg>
+          </button>
+        </div>
       </div>
       <div class="field-value" id="title-text"></div>
       <div class="field-meta" id="title-meta"></div>
+      <div class="gen-result hidden" id="title-gen-result">
+        <div class="gen-result-label">SUGGESTED TITLE</div>
+        <div class="gen-result-text" id="title-gen-text"></div>
+        <div class="gen-result-footer">
+          <span class="gen-result-meta" id="title-gen-meta"></span>
+          <div class="gen-result-actions">
+            <button class="gen-result-btn" id="title-gen-copy" data-field="title" title="Copy suggestion">
+              <svg class="icon-copy" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="5" y="4" width="9" height="11" rx="1.5"/>
+                <path d="M3 12H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1"/>
+              </svg>
+              <svg class="icon-check hidden" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="2 8 6 12 14 4"/>
+              </svg>
+            </button>
+            <button class="gen-result-btn" id="title-gen-dismiss" data-field="title" title="Dismiss">
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                <line x1="3" y1="3" x2="13" y2="13"/>
+                <line x1="13" y1="3" x2="3" y2="13"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- Meta Description -->
     <section class="field-section">
       <div class="field-header">
         <span class="field-label">META DESCRIPTION</span>
-        <button class="copy-btn" data-copy-target="meta" title="Copy meta description">
-          <svg class="icon-copy" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="5" y="4" width="9" height="11" rx="1.5"/>
-            <path d="M3 12H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1"/>
-          </svg>
-          <svg class="icon-check hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="2 8 6 12 14 4"/>
-          </svg>
-        </button>
+        <div class="field-header-actions">
+          <button class="gen-btn" id="btn-generate-meta" data-field="meta" title="Generate with Claude">
+            <svg class="icon-generate" viewBox="0 0 16 16" width="13" height="13" fill="currentColor">
+              <path d="M8 1l1.4 4.6L14 7l-4.6 1.4L8 13l-1.4-4.6L2 7l4.6-1.4z"/>
+            </svg>
+            <svg class="icon-spinner hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+              <path d="M14 8A6 6 0 1 1 8 2"/>
+            </svg>
+          </button>
+          <button class="copy-btn" data-copy-target="meta" title="Copy meta description">
+            <svg class="icon-copy" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="5" y="4" width="9" height="11" rx="1.5"/>
+              <path d="M3 12H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1"/>
+            </svg>
+            <svg class="icon-check hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="2 8 6 12 14 4"/>
+            </svg>
+          </button>
+        </div>
       </div>
       <div class="field-value" id="meta-text"></div>
       <div class="field-meta" id="meta-meta"></div>
       <button class="show-more-btn hidden" id="meta-toggle">Show more</button>
+      <div class="gen-result hidden" id="meta-gen-result">
+        <div class="gen-result-label">SUGGESTED META DESCRIPTION</div>
+        <div class="gen-result-text" id="meta-gen-text"></div>
+        <div class="gen-result-footer">
+          <span class="gen-result-meta" id="meta-gen-meta"></span>
+          <div class="gen-result-actions">
+            <button class="gen-result-btn" id="meta-gen-copy" data-field="meta" title="Copy suggestion">
+              <svg class="icon-copy" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="5" y="4" width="9" height="11" rx="1.5"/>
+                <path d="M3 12H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1"/>
+              </svg>
+              <svg class="icon-check hidden" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="2 8 6 12 14 4"/>
+              </svg>
+            </button>
+            <button class="gen-result-btn" id="meta-gen-dismiss" data-field="meta" title="Dismiss">
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                <line x1="3" y1="3" x2="13" y2="13"/>
+                <line x1="13" y1="3" x2="3" y2="13"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- Word Count + Indexability -->
@@ -292,6 +529,19 @@
         <span class="field-label">STRUCTURED DATA</span>
         <div class="field-nav-right">
           <span id="schema-summary" class="field-nav-summary"></span>
+          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 3 11 8 6 13"/>
+          </svg>
+        </div>
+      </button>
+    </section>
+
+    <!-- Search Console -->
+    <section class="field-section">
+      <button class="field-nav-btn" id="btn-gsc">
+        <span class="field-label">SEARCH CONSOLE</span>
+        <div class="field-nav-right">
+          <span id="gsc-summary" class="field-nav-summary"></span>
           <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 3 11 8 6 13"/>
           </svg>

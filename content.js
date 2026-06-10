@@ -10,7 +10,7 @@ function wordCount(text) {
 
 // ─── Page data ───────────────────────────────────────────────────────────────
 
-function getBodyWordCount() {
+function getCleanBodyText() {
   const clone = document.body.cloneNode(true);
   ['script','style','noscript','nav','header','footer','aside'].forEach(tag =>
     clone.querySelectorAll(tag).forEach(el => el.remove())
@@ -18,8 +18,11 @@ function getBodyWordCount() {
   ['navigation','banner','contentinfo','complementary'].forEach(role =>
     clone.querySelectorAll(`[role="${role}"]`).forEach(el => el.remove())
   );
-  const text = clone.textContent.replace(/\s+/g, ' ').trim();
-  return text ? text.split(' ').filter(Boolean).length : 0;
+  return clone.textContent.replace(/\s+/g, ' ').trim();
+}
+
+function getBodyWordCount(bodyText) {
+  return bodyText ? bodyText.split(' ').filter(Boolean).length : 0;
 }
 
 function getIndexability() {
@@ -109,6 +112,8 @@ function getPageData() {
   const canonicalEl = document.querySelector('link[rel="canonical"]');
   const canonical   = canonicalEl ? canonicalEl.getAttribute('href') : null;
 
+  const bodyText = getCleanBodyText();
+
   return {
     title: { text: titleText, charCount: titleText.length, wordCount: wordCount(titleText) },
     metaDescription: metaContent !== null
@@ -116,11 +121,12 @@ function getPageData() {
       : null,
     headings,
     canonical,
-    bodyWordCount:  getBodyWordCount(),
-    indexability:   getIndexability(),
-    openGraph:      getOpenGraph(),
-    structuredData: getStructuredData(),
-    dates:          getDates()
+    bodyWordCount:    getBodyWordCount(bodyText),
+    bodyTextExcerpt:  bodyText.slice(0, 1000),
+    indexability:     getIndexability(),
+    openGraph:        getOpenGraph(),
+    structuredData:   getStructuredData(),
+    dates:            getDates()
   };
 }
 

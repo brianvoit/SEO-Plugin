@@ -29,6 +29,12 @@
           <polyline points="13.5 2 13.5 5.6 9.9 5.6"/>
         </svg>
       </button>
+      <button id="btn-close-sidebar" class="icon-btn hidden" title="Close sidebar">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="3" y1="3" x2="13" y2="13"/>
+          <line x1="13" y1="3" x2="3" y2="13"/>
+        </svg>
+      </button>
     </div>
   </header>
 
@@ -42,6 +48,17 @@
         Back
       </button>
     </div>
+
+    <section class="field-section">
+      <div class="field-header">
+        <span class="field-label">DISPLAY MODE</span>
+      </div>
+      <div class="mode-segmented" id="display-mode-group">
+        <button class="mode-option" data-mode="popup">Popup</button>
+        <button class="mode-option" data-mode="sidebar">Sidebar</button>
+      </div>
+      <div class="field-hint">Sidebar mode opens a native, resizable Firefox sidebar that pushes the page over — click the toolbar icon to open or close it. Left/right placement follows Firefox's own sidebar setting (View → Sidebar).</div>
+    </section>
 
     <section class="field-section">
       <div class="field-header">
@@ -84,6 +101,36 @@
         </svg>
         Key saved
       </p>
+    </section>
+
+    <section class="field-section">
+      <div class="field-header">
+        <span class="field-label">WORDPRESS SITES</span>
+        <button id="btn-add-wp-site" class="save-key-btn">+ Add Site</button>
+      </div>
+      <div id="wp-sites-empty" class="field-hint hidden">No sites added yet.</div>
+      <div id="wp-sites-list" class="wp-sites-list"></div>
+
+      <div id="wp-site-form" class="wp-site-form hidden">
+        <label class="wp-field">
+          <span class="wp-field-label">Site URL</span>
+          <input type="text" id="wp-site-url" class="wp-input" placeholder="https://example.com" autocomplete="off" spellcheck="false" />
+        </label>
+        <label class="wp-field">
+          <span class="wp-field-label">Username</span>
+          <input type="text" id="wp-site-username" class="wp-input" placeholder="admin" autocomplete="off" spellcheck="false" />
+        </label>
+        <label class="wp-field">
+          <span class="wp-field-label">Application Password</span>
+          <input type="password" id="wp-site-app-password" class="wp-input" placeholder="xxxx xxxx xxxx xxxx xxxx xxxx" autocomplete="off" spellcheck="false" />
+        </label>
+        <div class="wp-form-actions">
+          <button id="btn-cancel-wp-site" class="settings-back-btn">Cancel</button>
+          <button id="btn-save-wp-site" class="save-key-btn">Save Site</button>
+        </div>
+      </div>
+
+      <div class="field-hint">Use a WordPress <strong>Application Password</strong> (Users → Profile → Application Passwords) — never your account password. Lets the alt-text generator save directly to that site's Media Library.</div>
     </section>
 
     <section class="field-section">

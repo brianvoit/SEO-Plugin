@@ -482,7 +482,7 @@ function showSettings() {
   settingsPanel.classList.remove('hidden');
   document.getElementById('btn-refresh').classList.add('hidden');
 
-  browser.storage.local.get(['claudeApiKey', 'charRanges']).then(({ claudeApiKey, charRanges: stored }) => {
+  browser.storage.local.get(['claudeApiKey', 'charRanges', 'displayMode']).then(({ claudeApiKey, charRanges: stored, displayMode }) => {
     document.getElementById('api-key-input').value = claudeApiKey ?? '';
     document.getElementById('key-saved-msg').classList.add('hidden');
     document.getElementById('key-hint').classList.remove('hidden');
@@ -494,7 +494,11 @@ function showSettings() {
     document.getElementById('meta-min').value     = ranges.meta.min;
     document.getElementById('meta-target').value  = ranges.meta.target;
     document.getElementById('meta-max').value     = ranges.meta.max;
+
+    setDisplayModeUI(displayMode || 'popup');
   });
+
+  loadWpSites();
 }
 
 function hideSettings() {
@@ -508,6 +512,112 @@ document.getElementById('btn-settings').addEventListener('click', showSettings);
 document.getElementById('btn-settings-back').addEventListener('click', hideSettings);
 document.getElementById('btn-schema').addEventListener('click', showSchemaPanel);
 document.getElementById('btn-schema-back').addEventListener('click', hideSchemaPanel);
+
+// ─── Display mode (popup vs. sidebar) ────────────────────────────────────────
+
+function setDisplayModeUI(mode) {
+  document.querySelectorAll('#display-mode-group .mode-option').forEach(btn => {
+    btn.classList.toggle('is-active', btn.dataset.mode === mode);
+  });
+}
+
+document.querySelectorAll('#display-mode-group .mode-option').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const mode = btn.dataset.mode;
+    setDisplayModeUI(mode);
+    browser.storage.local.set({ displayMode: mode });
+  });
+});
+
+// ─── WordPress sites ──────────────────────────────────────────────────────────
+
+let wpSites = [];
+
+const wpSiteForm = document.getElementById('wp-site-form');
+
+function renderWpSites() {
+  const list  = document.getElementById('wp-sites-list');
+  const empty = document.getElementById('wp-sites-empty');
+  list.innerHTML = '';
+
+  if (!wpSites.length) {
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+
+  wpSites.forEach((site, i) => {
+    let host = site.url;
+    try { host = new URL(site.url).hostname; } catch { /* keep raw url */ }
+
+    const row = document.createElement('div');
+    row.className = 'wp-site-row';
+    row.innerHTML = `
+      <div class="wp-site-info">
+        <span class="wp-site-url">${escapeHtml(host)}</span>
+        <span class="wp-site-user">${escapeHtml(site.username)}</span>
+      </div>
+      <button class="wp-site-remove icon-btn" title="Remove site" data-index="${i}">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="3" y1="3" x2="13" y2="13"/>
+          <line x1="13" y1="3" x2="3" y2="13"/>
+        </svg>
+      </button>`;
+    list.appendChild(row);
+  });
+
+  list.querySelectorAll('.wp-site-remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      wpSites.splice(parseInt(btn.dataset.index, 10), 1);
+      browser.storage.local.set({ wpSites }).then(renderWpSites);
+    });
+  });
+}
+
+function loadWpSites() {
+  browser.storage.local.get('wpSites').then(({ wpSites: stored }) => {
+    wpSites = stored ?? [];
+    renderWpSites();
+  });
+}
+
+document.getElementById('btn-add-wp-site').addEventListener('click', () => {
+  document.getElementById('wp-site-url').value = '';
+  document.getElementById('wp-site-username').value = '';
+  document.getElementById('wp-site-app-password').value = '';
+  wpSiteForm.classList.remove('hidden');
+});
+
+document.getElementById('btn-cancel-wp-site').addEventListener('click', () => {
+  wpSiteForm.classList.add('hidden');
+});
+
+document.getElementById('btn-save-wp-site').addEventListener('click', () => {
+  const url         = document.getElementById('wp-site-url').value.trim().replace(/\/+$/, '');
+  const username    = document.getElementById('wp-site-username').value.trim();
+  const appPassword = document.getElementById('wp-site-app-password').value.trim();
+
+  if (!url || !username || !appPassword) return;
+
+  const normalizedUrl = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+
+  wpSites.push({ url: normalizedUrl, username, appPassword });
+  browser.storage.local.set({ wpSites }).then(() => {
+    renderWpSites();
+    wpSiteForm.classList.add('hidden');
+  });
+});
+
+// ─── Sidebar embed mode ───────────────────────────────────────────────────────
+
+if (browser.extension.getViews({ type: 'sidebar' }).includes(window)) {
+  document.body.classList.add('embed-sidebar');
+  const closeBtn = document.getElementById('btn-close-sidebar');
+  closeBtn.classList.remove('hidden');
+  closeBtn.addEventListener('click', () => {
+    browser.sidebarAction.close();
+  });
+}
 
 // Show/hide API key
 document.getElementById('btn-toggle-key-vis').addEventListener('click', () => {

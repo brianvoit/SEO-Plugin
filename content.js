@@ -365,7 +365,7 @@ function createGeneratorPanel(img) {
   return panel;
 }
 
-function showGeneratorResult(altText, usedVision) {
+function showGeneratorResult(altText, usedVision, img) {
   const panel = document.getElementById(GENERATOR_ID);
   const body  = document.getElementById('sag-body');
   if (!body || !panel) return;
@@ -375,8 +375,12 @@ function showGeneratorResult(altText, usedVision) {
     <textarea id="sag-text" rows="3" style="width:100%;box-sizing:border-box;border:1px solid ${c.inputBorder};border-radius:5px;padding:7px 9px;font:13px/1.5 -apple-system,system-ui,sans-serif;resize:vertical;color:${c.text};background:${c.inputBg};outline:none">${altText}</textarea>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
       <span style="font-size:10px;color:${c.muted}">${usedVision ? '✦ vision' : '✦ page context'}</span>
-      <button id="sag-copy" style="background:#2563eb;color:#fff;border:none;border-radius:4px;padding:4px 12px;font:600 12px/1.5 sans-serif;cursor:pointer">Copy</button>
-    </div>`;
+      <div style="display:flex;gap:6px">
+        <button id="sag-save-wp" style="background:#21759b;color:#fff;border:none;border-radius:4px;padding:4px 12px;font:600 12px/1.5 sans-serif;cursor:pointer">Save to WP</button>
+        <button id="sag-copy" style="background:#2563eb;color:#fff;border:none;border-radius:4px;padding:4px 12px;font:600 12px/1.5 sans-serif;cursor:pointer">Copy</button>
+      </div>
+    </div>
+    <div id="sag-wp-status" style="margin-top:7px;font-size:11px;line-height:1.4"></div>`;
 
   document.getElementById('sag-copy').addEventListener('click', () => {
     const val = document.getElementById('sag-text').value;
@@ -387,12 +391,98 @@ function showGeneratorResult(altText, usedVision) {
       setTimeout(() => { btn.textContent = 'Copy'; btn.style.background = '#2563eb'; }, 1500);
     });
   });
+
+  document.getElementById('sag-save-wp').addEventListener('click', () => saveAltToWordPress(img, c));
 }
 
 function showGeneratorError(msg) {
   const body = document.getElementById('sag-body');
   if (!body) return;
   body.innerHTML = `<span style="color:#dc2626;font-size:12px">${msg}</span>`;
+}
+
+// ─── Save to WordPress ────────────────────────────────────────────────────────
+
+function getAttachmentIdFromImg(img) {
+  const cls = Array.from(img.classList).find(c => /^wp-image-\d+$/.test(c));
+  return cls ? parseInt(cls.split('-').pop(), 10) : null;
+}
+
+function getBaseFilename(src) {
+  const filename = src.split('/').pop().split('?')[0];
+  return filename.replace(/-\d+x\d+(?=\.\w+$)/, '');
+}
+
+async function findAttachmentIdByFilename(origin, src, authHeader) {
+  const filename   = getBaseFilename(src);
+  const searchTerm = filename.replace(/\.[^.]+$/, '');
+
+  const res = await fetch(`${origin}/wp-json/wp/v2/media?search=${encodeURIComponent(searchTerm)}&per_page=20`, {
+    headers: { 'Authorization': authHeader }
+  });
+  if (!res.ok) return null;
+
+  const items = await res.json();
+  const match = items.find(item => item.source_url && getBaseFilename(item.source_url) === filename);
+  return match ? match.id : null;
+}
+
+async function saveAltToWordPress(img, c) {
+  const statusEl = document.getElementById('sag-wp-status');
+  const btn      = document.getElementById('sag-save-wp');
+  const altText  = document.getElementById('sag-text').value;
+
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  statusEl.style.color = c.muted;
+  statusEl.textContent = '';
+
+  try {
+    const { wpSites } = await browser.storage.local.get('wpSites');
+    const site = (wpSites ?? []).find(s => {
+      try { return new URL(s.url).hostname === window.location.hostname; }
+      catch { return false; }
+    });
+
+    if (!site) {
+      throw new Error('No WordPress credentials for this site — add one in Settings (⚙).');
+    }
+
+    const authHeader = 'Basic ' + btoa(`${site.username}:${site.appPassword}`);
+    const origin = window.location.origin;
+
+    let attachmentId = getAttachmentIdFromImg(img);
+    if (!attachmentId) {
+      attachmentId = await findAttachmentIdByFilename(origin, img.currentSrc || img.src, authHeader);
+    }
+    if (!attachmentId) {
+      throw new Error('Could not find this image in the Media Library.');
+    }
+
+    const res = await fetch(`${origin}/wp-json/wp/v2/media/${attachmentId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': authHeader
+      },
+      body: JSON.stringify({ alt_text: altText })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `HTTP ${res.status}`);
+    }
+
+    img.setAttribute('alt', altText);
+    statusEl.style.color = '#16a34a';
+    statusEl.textContent = '✓ Saved to WordPress';
+    btn.textContent = 'Saved';
+  } catch (err) {
+    statusEl.style.color = '#dc2626';
+    statusEl.textContent = err.message;
+    btn.disabled = false;
+    btn.textContent = 'Save to WP';
+  }
 }
 
 async function tryGetImageBase64(img) {
@@ -506,7 +596,7 @@ async function generateAltText(srcUrl) {
     const altText = data.content?.[0]?.text?.trim();
     if (!altText) throw new Error('Empty response from Claude');
 
-    showGeneratorResult(altText, !!imageData);
+    showGeneratorResult(altText, !!imageData, img);
   } catch (err) {
     showGeneratorError(`Error: ${err.message}`);
   }

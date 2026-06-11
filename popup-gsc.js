@@ -495,35 +495,39 @@ function selectGscQuery(query) {
 
 // ─── Google Search Console: indexing status ──────────────────────────────────
 
-function renderGscInspection(inspection, error) {
-  const list = document.getElementById('gsc-inspection-list');
-  list.innerHTML = '';
+const GSC_CRAWL_FRESH_MS = 30 * 24 * 60 * 60 * 1000;
 
+function renderGscInspection(inspection) {
   if (!inspection) {
-    appendIndexRow(list, 'warning', error ? `Could not check indexing status (${error})` : 'Indexing status unavailable');
+    _idxGsc = null;
+    renderIndexabilitySection();
     return;
   }
 
-  const { verdict, coverageState, indexingState, lastCrawlTime, googleCanonical, userCanonical } = inspection;
+  const { verdict, coverageState, indexingState, lastCrawlTime } = inspection;
 
-  let level = 'ok';
-  if (verdict === 'FAIL') level = 'error';
-  else if (verdict !== 'PASS') level = 'warning';
-  appendIndexRow(list, level, coverageState || 'Unknown coverage status');
+  // Coverage segment for row 1: short "Indexed" when Google passes, otherwise
+  // the more descriptive coverage state (or a blocked-indexing message).
+  const blocked = indexingState && indexingState !== 'INDEXING_ALLOWED';
+  let coverageLevel = 'ok';
+  if (verdict === 'FAIL' || blocked) coverageLevel = 'error';
+  else if (verdict !== 'PASS') coverageLevel = 'warning';
 
+  const coverageText = blocked
+    ? `Indexing blocked: ${indexingState.replace(/_/g, ' ').toLowerCase()}`
+    : (verdict === 'PASS' ? 'Indexed' : (coverageState || 'Not indexed'));
+
+  // Crawl segment for row 2: green within 30 days, amber otherwise
+  let crawl;
   if (lastCrawlTime) {
-    appendIndexRow(list, 'ok', `Last crawled ${formatDate(lastCrawlTime)}`);
+    const fresh = (Date.now() - new Date(lastCrawlTime).getTime()) <= GSC_CRAWL_FRESH_MS;
+    crawl = { level: fresh ? 'ok' : 'warning', text: `Last crawled ${formatDate(lastCrawlTime)}` };
   } else {
-    appendIndexRow(list, 'warning', 'Not yet crawled by Google');
+    crawl = { level: 'warning', text: 'Not yet crawled by Google' };
   }
 
-  if (googleCanonical && userCanonical && googleCanonical !== userCanonical) {
-    appendIndexRow(list, 'warning', `Google's canonical: ${googleCanonical}`);
-  }
-
-  if (indexingState && indexingState !== 'INDEXING_ALLOWED') {
-    appendIndexRow(list, 'error', `Indexing blocked: ${indexingState.replace(/_/g, ' ').toLowerCase()}`);
-  }
+  _idxGsc = { coverage: { level: coverageLevel, text: coverageText }, crawl };
+  renderIndexabilitySection();
 }
 
 // ─── Google Search Console: detail panel ─────────────────────────────────────
@@ -550,7 +554,7 @@ function renderGscPanel(response, pageUrl) {
       ? 'Your Google connection expired — reconnect Search Console in Settings.'
       : 'Connect Google Search Console in Settings to see performance data for this page.';
     notConnected.classList.remove('hidden');
-    document.getElementById('gsc-inspection-list').innerHTML = '';
+    renderGscInspection(null);
     return;
   }
 
@@ -560,14 +564,14 @@ function renderGscPanel(response, pageUrl) {
     document.getElementById('gsc-no-property-host').textContent = host;
     document.getElementById('gsc-no-property-detail').textContent = response.detail || '';
     noProperty.classList.remove('hidden');
-    document.getElementById('gsc-inspection-list').innerHTML = '';
+    renderGscInspection(null);
     return;
   }
 
   if (response.error) {
     document.getElementById('gsc-error-text').textContent = gscErrorMessage(response.error, response.detail);
     errorBox.classList.remove('hidden');
-    document.getElementById('gsc-inspection-list').innerHTML = '';
+    renderGscInspection(null);
     return;
   }
 
@@ -583,7 +587,7 @@ function renderGscPanel(response, pageUrl) {
   setGscRangeUI(gscSelectedRange);
   renderGscCharts(_gscOverviewData.timeseries, _gscOverviewData.totals, _gscOverviewData.previousTotals, gscSelectedRange);
   renderGscQueries(_gscQueries, pageUrl);
-  renderGscInspection(response.inspection, response.inspectionError);
+  renderGscInspection(response.inspection);
 
   if (_gscSelectedQuery) {
     applyGscQueryFilter(_gscSelectedQuery);
@@ -659,20 +663,25 @@ async function refreshGscSettingsStatus() {
   const badge         = document.getElementById('gsc-status-badge');
   const setupForm     = document.getElementById('gsc-setup-form');
   const connectedInfo = document.getElementById('gsc-connected-info');
+  const connectedTip  = document.getElementById('gsc-connected-tip');
 
   if (status.connected) {
     badge.textContent = 'Connected';
     badge.className = 'gsc-status-badge gsc-status-badge--connected';
     setupForm.classList.add('hidden');
     connectedInfo.classList.remove('hidden');
-    document.getElementById('gsc-connected-since').textContent = status.connectedAt
-      ? `Connected since ${formatDate(new Date(status.connectedAt))}`
-      : '';
+    if (status.connectedAt) {
+      connectedTip.title = `Connected since ${formatDate(new Date(status.connectedAt))}`;
+      connectedTip.classList.remove('hidden');
+    } else {
+      connectedTip.classList.add('hidden');
+    }
   } else {
     badge.textContent = 'Not connected';
     badge.className = 'gsc-status-badge gsc-status-badge--disconnected';
     setupForm.classList.remove('hidden');
     connectedInfo.classList.add('hidden');
+    connectedTip.classList.add('hidden');
   }
 
   return status;

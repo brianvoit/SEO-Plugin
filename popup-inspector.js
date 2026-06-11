@@ -192,49 +192,133 @@ function renderWordCount(data) {
 // ─── Render: indexability ────────────────────────────────────────────────────
 
 function renderIndexability(data) {
-  const list = document.getElementById('indexability-list');
-  list.innerHTML = '';
-  const { noindex, nofollow, canonicalMismatch, canonicalUrl } = data.indexability;
-
-  const issues = [];
-  if (noindex)          issues.push({ level: 'error',   text: 'noindex — excluded from search results' });
-  if (canonicalMismatch) issues.push({ level: 'warning', text: `Canonical → ${canonicalUrl}` });
-  if (nofollow)         issues.push({ level: 'warning', text: 'nofollow — outbound links not followed' });
-
-  (issues.length ? issues : [{ level: 'ok', text: 'Indexable' }]).forEach(({ level, text }) => appendIndexRow(list, level, text));
+  const { noindex } = data.indexability;
+  _idxOnPage = noindex
+    ? { level: 'error', text: 'Noindex' }
+    : { level: 'ok', text: 'Indexable' };
+  // Drop any prior page's GSC coverage until this page's inspection resolves
+  // (loadGscData runs right after and repaints it)
+  _idxGsc = undefined;
+  renderIndexabilitySection();
 }
 
 // ─── Render: open graph ──────────────────────────────────────────────────────
 
-const OG_KEYS = ['og:title','og:description','og:image','og:type','og:url'];
-const TW_KEYS = ['twitter:card','twitter:title','twitter:image'];
+const OG_KEYS = ['og:title','og:description','og:image','og:url','og:site_name','og:type'];
+const TW_KEYS = ['twitter:card','twitter:title','twitter:description','twitter:image'];
+
+// Conditional-formatting thresholds for social cards
+const OG_TITLE_MAX   = 60;    // X/LinkedIn truncate beyond ~60 chars
+const OG_DESC_MAX    = 125;   // social previews often show ~125 chars
+const OG_IMG_RATIO   = 1.91;  // 1200×630 — the format most platforms expect
+const OG_IMG_RATIO_TOL = 0.30;
+const OG_IMG_MIN_W   = 600;
+const OG_IMG_MIN_H   = 315;
 
 function renderOpenGraph(data) {
   const list = document.getElementById('og-list');
   list.innerHTML = '';
   const { og, twitter } = data.openGraph;
-  const hasTwitter = TW_KEYS.some(k => twitter[k] !== undefined);
+  const hasTwitter = TW_KEYS.some(k => twitter[k] !== undefined && twitter[k] !== '');
 
   OG_KEYS.forEach(key => appendOGRow(list, key, og[key]));
   if (hasTwitter) TW_KEYS.forEach(key => appendOGRow(list, key, twitter[key]));
 }
 
+// Returns { level, detail } for a field. Image dimensions are resolved
+// asynchronously afterwards (see checkOgImage), so present images start neutral.
+function ogFieldCheck(key, value, present) {
+  const len = present ? value.length : 0;
+  switch (key) {
+    case 'og:title':
+      if (!present) return { level: 'error', detail: 'Missing — set og:title for social cards' };
+      return len > OG_TITLE_MAX
+        ? { level: 'warning', detail: `${len} chars — over ~${OG_TITLE_MAX}, X/LinkedIn may truncate` }
+        : { level: 'ok', detail: `${len} chars` };
+    case 'og:description':
+      if (!present) return { level: 'error', detail: 'Missing — set og:description' };
+      return len > OG_DESC_MAX
+        ? { level: 'warning', detail: `${len} chars — over ~${OG_DESC_MAX}, may truncate on mobile` }
+        : { level: 'ok', detail: `${len} chars` };
+    case 'og:image':
+      return present
+        ? { level: 'neutral', detail: 'Checking dimensions…' }
+        : { level: 'error', detail: 'Missing — pages with an image get far more engagement' };
+    case 'og:url':
+      return present ? { level: 'ok', detail: 'Set' } : { level: 'warning', detail: 'Missing — set the canonical share URL' };
+    case 'og:site_name':
+      return present ? { level: 'ok', detail: `"${value}"` } : { level: 'warning', detail: 'Missing — shown as the eyebrow on Discord and others' };
+    case 'og:type':
+      return present ? { level: 'ok', detail: value } : { level: 'neutral', detail: 'Not set — defaults to website' };
+    case 'twitter:card':
+      if (!present) return { level: 'warning', detail: 'Missing — add summary_large_image for a full-width image' };
+      if (value === 'summary_large_image') return { level: 'ok', detail: 'Large image card' };
+      if (value === 'summary') return { level: 'ok', detail: 'Summary card (small image)' };
+      return { level: 'neutral', detail: value };
+    case 'twitter:title':
+      if (!present) return { level: 'neutral', detail: 'Not set — falls back to og:title' };
+      return len > OG_TITLE_MAX ? { level: 'warning', detail: `${len} chars — may truncate` } : { level: 'ok', detail: `${len} chars` };
+    case 'twitter:description':
+      if (!present) return { level: 'neutral', detail: 'Not set — falls back to og:description' };
+      return len > OG_DESC_MAX ? { level: 'warning', detail: `${len} chars — may truncate` } : { level: 'ok', detail: `${len} chars` };
+    case 'twitter:image':
+      return present ? { level: 'ok', detail: 'Set' } : { level: 'neutral', detail: 'Not set — falls back to og:image' };
+    default:
+      return present ? { level: 'ok', detail: '' } : { level: 'neutral', detail: '' };
+  }
+}
+
+function setOgRowLevel(row, level) {
+  row.classList.remove('og-row--ok', 'og-row--warning', 'og-row--error', 'og-row--neutral');
+  row.classList.add(`og-row--${level}`);
+}
+
+// Load an og:image/twitter:image off-screen to check its aspect ratio & size,
+// then update the row's level and detail text in place.
+function checkOgImage(url, row) {
+  const detailEl = row.querySelector('.og-detail');
+  const img = new Image();
+  img.onload = () => {
+    const w = img.naturalWidth, h = img.naturalHeight;
+    if (!w || !h) { setOgRowLevel(row, 'neutral'); detailEl.textContent = 'Image set (couldn’t read dimensions)'; return; }
+    const ratio = w / h;
+    if (w < OG_IMG_MIN_W || h < OG_IMG_MIN_H) {
+      setOgRowLevel(row, 'warning');
+      detailEl.textContent = `${w}×${h} — small, use ≥${OG_IMG_MIN_W}×${OG_IMG_MIN_H} (ideally 1200×630)`;
+    } else if (Math.abs(ratio - OG_IMG_RATIO) > OG_IMG_RATIO_TOL) {
+      setOgRowLevel(row, 'warning');
+      detailEl.textContent = `${w}×${h} — expected ~1.91:1 (1200×630), card may crop or letterbox`;
+    } else {
+      setOgRowLevel(row, 'ok');
+      detailEl.textContent = `${w}×${h}`;
+    }
+  };
+  img.onerror = () => { setOgRowLevel(row, 'neutral'); detailEl.textContent = 'Image set (couldn’t load to verify)'; };
+  img.src = url;
+}
+
 function appendOGRow(container, key, value) {
-  const row   = document.createElement('div');
-  row.className = 'og-row';
-  const label = key.replace('og:','').replace('twitter:','tw:');
   const present = value !== undefined && value !== null && value !== '';
+  const label   = key.replace('og:', '').replace('twitter:', 'tw:');
   const isImage = present && (key === 'og:image' || key === 'twitter:image');
   const isUrl   = present && /^https?:\/\//i.test(value);
+  const { level, detail } = ogFieldCheck(key, value, present);
 
   let valueMarkup;
   if (!present) {
     valueMarkup = '<span class="og-missing">missing</span>';
   } else {
-    const display = value.length > 45 ? value.slice(0, 45) + '…' : value;
+    const display = value.length > 42 ? value.slice(0, 42) + '…' : value;
     valueMarkup = `<span class="og-value${isUrl ? ' og-value--link' : ''}" title="${escapeHtml(value)}">${escapeHtml(display)}</span>`;
   }
-  row.innerHTML = `<span class="og-key">${escapeHtml(label)}</span>${valueMarkup}`;
+
+  const row = document.createElement('div');
+  row.className = `og-row og-row--${level}`;
+  row.innerHTML = `<span class="og-dot"></span>`
+    + `<div class="og-body">`
+    +   `<div class="og-line"><span class="og-key">${escapeHtml(label)}</span>${valueMarkup}</div>`
+    +   `<div class="og-detail">${escapeHtml(detail)}</div>`
+    + `</div>`;
   container.appendChild(row);
 
   if (!present) return;
@@ -246,6 +330,7 @@ function appendOGRow(container, key, value) {
   if (isImage && isUrl) {
     valueEl.addEventListener('mouseenter', () => showImagePreview(value, valueEl));
     valueEl.addEventListener('mouseleave', hideImagePreview);
+    checkOgImage(value, row);
   }
 }
 

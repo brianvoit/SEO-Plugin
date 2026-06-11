@@ -37,14 +37,6 @@
 
   <!-- Settings panel -->
   <div id="settings-panel" class="hidden">
-    <div class="settings-header">
-      <button id="btn-settings-back" class="settings-back-btn">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="10 3 4 8 10 13"/>
-        </svg>
-        Back
-      </button>
-    </div>
 
     <section class="field-section">
       <div class="field-header">
@@ -54,7 +46,6 @@
         <button class="mode-option" data-mode="popup">Popup</button>
         <button class="mode-option" data-mode="sidebar">Sidebar</button>
       </div>
-      <div class="field-hint">Sidebar mode opens a native, resizable Firefox sidebar that pushes the page over — click the toolbar icon to open or close it. Left/right placement follows Firefox's own sidebar setting (View → Sidebar).</div>
     </section>
 
     <section class="field-section">
@@ -67,7 +58,14 @@
     <section class="field-section">
       <div class="field-header">
         <span class="field-label">CLAUDE API KEY</span>
-        <button id="btn-save-key" class="save-key-btn">Save</button>
+        <div class="field-header-actions">
+          <button class="info-tip" type="button" title="Stored locally on this device only — never synced.">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7.5" x2="8" y2="11"/><circle cx="8" cy="5" r="0.55" fill="currentColor" stroke="none"/>
+            </svg>
+          </button>
+          <button id="btn-save-key" class="save-key-btn">Save</button>
+        </div>
       </div>
       <div class="api-key-row">
         <input
@@ -91,7 +89,6 @@
           </svg>
         </button>
       </div>
-      <p class="key-hint" id="key-hint">Stored locally on this device only — never synced.</p>
       <p class="key-saved-msg hidden" id="key-saved-msg">
         <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px">
           <polyline points="2 8 6 12 14 4"/>
@@ -103,7 +100,14 @@
     <section class="field-section">
       <div class="field-header">
         <span class="field-label">WORDPRESS SITES</span>
-        <button id="btn-add-wp-site" class="save-key-btn">+ Add Site</button>
+        <div class="field-header-actions">
+          <button class="info-tip" type="button" title="Use a WordPress Application Password (Users → Profile → Application Passwords) — never your account password. Lets the alt-text generator save directly to that site's Media Library.">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7.5" x2="8" y2="11"/><circle cx="8" cy="5" r="0.55" fill="currentColor" stroke="none"/>
+            </svg>
+          </button>
+          <button id="btn-add-wp-site" class="save-key-btn">+ Domain</button>
+        </div>
       </div>
       <div id="wp-sites-empty" class="field-hint hidden">No sites added yet.</div>
       <div id="wp-sites-list" class="wp-sites-list"></div>
@@ -127,13 +131,19 @@
         </div>
       </div>
 
-      <div class="field-hint">Use a WordPress <strong>Application Password</strong> (Users → Profile → Application Passwords) — never your account password. Lets the alt-text generator save directly to that site's Media Library.</div>
     </section>
 
     <section class="field-section">
       <div class="field-header">
         <span class="field-label">GOOGLE SEARCH CONSOLE</span>
-        <span id="gsc-status-badge" class="gsc-status-badge"></span>
+        <div class="field-header-actions">
+          <button class="info-tip hidden" id="gsc-connected-tip" type="button" title="">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7.5" x2="8" y2="11"/><circle cx="8" cy="5" r="0.55" fill="currentColor" stroke="none"/>
+            </svg>
+          </button>
+          <span id="gsc-status-badge" class="gsc-status-badge"></span>
+        </div>
       </div>
 
       <div id="gsc-setup-form">
@@ -168,7 +178,6 @@
       </div>
 
       <div id="gsc-connected-info" class="hidden">
-        <div class="field-hint" id="gsc-connected-since"></div>
         <button id="btn-gsc-disconnect" class="settings-back-btn">Disconnect</button>
       </div>
     </section>
@@ -196,7 +205,6 @@
           <button id="btn-save-brand-domain" class="save-key-btn">Save</button>
         </div>
       </div>
-      <div class="field-hint">Enter a regular expression matching your brand terms, e.g. <code>brand|brandname|bn</code>. In the Search Console queries table, the "Hide Branded" toggle filters out queries matching this pattern for the current domain.</div>
     </section>
 
     <section class="field-section">

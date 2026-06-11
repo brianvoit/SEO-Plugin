@@ -186,6 +186,26 @@ main, #search-tab { padding: 4px 0 8px; }
   text-transform: uppercase;
 }
 
+/* Right-side cluster in a field header (info "i" + action button) */
+.field-header-actions { display: flex; align-items: center; gap: 6px; }
+
+/* Circle-"i" info button — helper text lives in its native title tooltip */
+.info-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: help;
+  flex-shrink: 0;
+}
+.info-tip:hover { color: var(--accent); }
+.info-tip svg { display: block; }
+
 .field-value {
   color: var(--text);
   font-size: 13px;
@@ -842,28 +862,46 @@ main, #search-tab { padding: 4px 0 8px; }
 .index-row--warning .index-text { color: var(--hint-amber); }
 .index-row--error   .index-text { color: var(--hint-red); font-weight: 600; }
 
+/* Per-segment colouring for the combined "Indexable / Indexed" row */
+.index-seg--ok      { color: var(--hint-green); }
+.index-seg--warning { color: var(--hint-amber); }
+.index-seg--error   { color: var(--hint-red); font-weight: 600; }
+.index-sep          { color: var(--text-muted); }
+
 /* ── Open Graph ───────────────────────────────────────────────────────────── */
 
 .og-row {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 5px;
+  align-items: flex-start;
+  gap: 7px;
+  margin-bottom: 8px;
   font-size: 12px;
   line-height: 1.4;
 }
+.og-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+.og-row--ok      .og-dot { background: var(--hint-green); }
+.og-row--warning .og-dot { background: var(--hint-amber); }
+.og-row--error   .og-dot { background: var(--hint-red); }
+.og-row--neutral .og-dot { background: var(--text-muted); }
+
+.og-body { flex: 1; min-width: 0; }
+.og-line { display: flex; align-items: baseline; gap: 6px; }
 .og-key {
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--label);
-  min-width: 72px;
   flex-shrink: 0;
 }
 .og-value {
-  color: var(--text-muted);
-  flex: 1;
+  color: var(--text);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -876,6 +914,12 @@ main, #search-tab { padding: 4px 0 8px; }
 }
 .og-value--link { color: var(--accent); cursor: pointer; }
 .og-value--link:hover { text-decoration: underline; }
+
+.og-detail { font-size: 11px; margin-top: 1px; }
+.og-row--ok      .og-detail { color: var(--text-muted); }
+.og-row--warning .og-detail { color: var(--hint-amber); }
+.og-row--error   .og-detail { color: var(--hint-red); }
+.og-row--neutral .og-detail { color: var(--text-muted); }
 
 /* OG/Twitter image hover preview */
 .og-img-preview {
@@ -1052,7 +1096,7 @@ main, #search-tab { padding: 4px 0 8px; }
 .gsc-query-main { display: grid; grid-template-columns: 18px 1fr 58px 54px 50px 50px; gap: 6px; align-items: center; }
 .gsc-query-row--header { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); border-bottom: 1px solid var(--border); }
 .gsc-query-text-wrap { display: flex; align-items: center; gap: 4px; overflow: hidden; min-width: 0; }
-.gsc-query-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; color: var(--text); cursor: pointer; }
+.gsc-query-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; color: var(--text); cursor: pointer; }
 .gsc-query-text:hover { text-decoration: underline; }
 
 /* Add-to-branded button (left of each query) */
@@ -1071,7 +1115,7 @@ main, #search-tab { padding: 4px 0 8px; }
 .gsc-query-row--selected { background: var(--bg-section); }
 .gsc-query-row--selected .gsc-query-text { color: var(--accent); font-weight: 600; }
 
-.gsc-query-chips { display: flex; flex-shrink: 0; gap: 3px; }
+.gsc-query-chips { display: flex; flex-shrink: 0; gap: 3px; margin-left: auto; }
 .gsc-chip {
   font-size: 9px;
   font-weight: 700;

@@ -48,7 +48,6 @@ function showSettings() {
   browser.storage.local.get(['claudeApiKey', 'charRanges', 'displayMode', 'gscClientId', 'gscClientSecret']).then(({ claudeApiKey, charRanges: stored, displayMode, gscClientId, gscClientSecret }) => {
     document.getElementById('api-key-input').value = claudeApiKey ?? '';
     document.getElementById('key-saved-msg').classList.add('hidden');
-    document.getElementById('key-hint').classList.remove('hidden');
 
     const ranges = stored ?? DEFAULT_RANGES;
     document.getElementById('title-min').value    = ranges.title.min;
@@ -77,7 +76,6 @@ function hideSettings() {
 }
 
 document.getElementById('btn-settings').addEventListener('click', showSettings);
-document.getElementById('btn-settings-back').addEventListener('click', hideSettings);
 document.getElementById('btn-schema').addEventListener('click', showSchemaPanel);
 document.getElementById('btn-schema-back').addEventListener('click', hideSchemaPanel);
 

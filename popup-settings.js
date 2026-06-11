@@ -203,13 +203,9 @@ document.getElementById('btn-toggle-key-vis').addEventListener('click', () => {
 document.getElementById('btn-save-key').addEventListener('click', () => {
   const key = document.getElementById('api-key-input').value.trim();
   browser.storage.local.set({ claudeApiKey: key }).then(() => {
-    document.getElementById('key-hint').classList.add('hidden');
     const saved = document.getElementById('key-saved-msg');
     saved.classList.remove('hidden');
-    setTimeout(() => {
-      saved.classList.add('hidden');
-      document.getElementById('key-hint').classList.remove('hidden');
-    }, 2500);
+    setTimeout(() => saved.classList.add('hidden'), 2500);
   });
 });
 

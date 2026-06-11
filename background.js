@@ -142,7 +142,7 @@ async function gscDisconnect() {
       await fetch(`${GSC_REVOKE_URL}?token=${encodeURIComponent(gscAuth.refreshToken)}`, { method: 'POST' });
     } catch { /* best-effort revoke */ }
   }
-  await browser.storage.local.remove(['gscAuth', 'gscSites', 'gscCache', 'gscInspectionCache']);
+  await browser.storage.local.remove(['gscAuth', 'gscSites', 'gscCache', 'gscInspectionCache', 'gscQueryCache']);
   return { connected: false };
 }
 
@@ -206,13 +206,19 @@ async function gscFetchSites(accessToken) {
   if (gscSites && (Date.now() - gscSites.fetchedAt < GSC_SITES_STALE_MS)) return gscSites.sites;
   try {
     const res = await fetch(`${GSC_API_BASE}/sites`, { headers: { Authorization: `Bearer ${accessToken}` } });
-    if (!res.ok) return gscSites?.sites ?? [];
+    if (!res.ok) {
+      if (gscSites?.sites) return gscSites.sites;
+      const body = await res.json().catch(() => null);
+      const msg = body?.error?.message;
+      throw { code: 'API_ERROR', detail: msg ? `sites.list: ${msg}` : `sites.list: HTTP ${res.status}` };
+    }
     const data = await res.json();
     const sites = (data.siteEntry || []).map(s => ({ siteUrl: s.siteUrl, permissionLevel: s.permissionLevel }));
     await browser.storage.local.set({ gscSites: { fetchedAt: Date.now(), sites } });
     return sites;
-  } catch {
-    return gscSites?.sites ?? [];
+  } catch (err) {
+    if (gscSites?.sites) return gscSites.sites;
+    throw (err && err.code) ? err : { code: 'API_ERROR', detail: 'sites.list: network error' };
   }
 }
 
@@ -341,9 +347,20 @@ async function gscGetPageData({ pageUrl, range, forceRefresh }) {
     return await gscAttachInspection(cached, accessToken, pageUrl, true, forceRefresh && !withinDebounce);
   }
 
-  const sites = await gscFetchSites(accessToken);
+  let sites;
+  try {
+    sites = await gscFetchSites(accessToken);
+  } catch (err) {
+    return { connected: true, error: err.code || 'API_ERROR', detail: err.detail };
+  }
+
   const siteUrl = gscResolveSiteUrl(sites, pageUrl);
-  if (!siteUrl) return { connected: true, error: 'NO_PROPERTY' };
+  if (!siteUrl) {
+    const detail = sites.length
+      ? `Connected account has access to: ${sites.map(s => s.siteUrl).join(', ')}`
+      : 'Connected account has no Search Console properties.';
+    return { connected: true, error: 'NO_PROPERTY', detail };
+  }
 
   const { startDate, endDate, prevStartDate, prevEndDate } = gscDateRanges(range);
   const pageFilter = { dimensionFilterGroups: [{ filters: [{ dimension: 'page', operator: 'equals', expression: pageUrl }] }] };
@@ -383,14 +400,81 @@ async function gscGetPageData({ pageUrl, range, forceRefresh }) {
   return await gscAttachInspection(entry, accessToken, pageUrl, false, forceRefresh);
 }
 
+async function gscGetQueryData({ pageUrl, range, query, forceRefresh }) {
+  const tokenResult = await gscGetAccessToken();
+  if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
+  if (tokenResult.error === 'REAUTH_REQUIRED') return { connected: false, reauthRequired: true };
+  if (tokenResult.error) return { connected: true, error: tokenResult.error };
+  const accessToken = tokenResult.accessToken;
+
+  const cacheKey = `${pageUrl}::${range}::q:${query}`;
+  const { gscQueryCache } = await browser.storage.local.get('gscQueryCache');
+  const cache = gscQueryCache || {};
+  const cached = cache[cacheKey];
+
+  const isStale = !cached || (Date.now() - cached.fetchedAt > GSC_STALE_MS);
+  const withinDebounce = cached && (Date.now() - cached.fetchedAt < GSC_DEBOUNCE_MS);
+  const useCache = cached && ((!forceRefresh && !isStale) || (forceRefresh && withinDebounce));
+
+  if (useCache) {
+    return { connected: true, timeseries: cached.timeseries, totals: cached.totals, previousTotals: cached.previousTotals, fetchedAt: cached.fetchedAt };
+  }
+
+  let sites;
+  try {
+    sites = await gscFetchSites(accessToken);
+  } catch (err) {
+    return { connected: true, error: err.code || 'API_ERROR', detail: err.detail };
+  }
+
+  const siteUrl = gscResolveSiteUrl(sites, pageUrl);
+  if (!siteUrl) return { connected: true, error: 'NO_PROPERTY' };
+
+  const { startDate, endDate, prevStartDate, prevEndDate } = gscDateRanges(range);
+  const filter = {
+    dimensionFilterGroups: [{ filters: [
+      { dimension: 'page', operator: 'equals', expression: pageUrl },
+      { dimension: 'query', operator: 'equals', expression: query }
+    ] }]
+  };
+
+  let timeseriesData, prevData;
+  try {
+    [timeseriesData, prevData] = await Promise.all([
+      gscQuery(accessToken, siteUrl, { startDate, endDate, dimensions: ['date'], dataState: 'all', ...filter }),
+      gscQuery(accessToken, siteUrl, { startDate: prevStartDate, endDate: prevEndDate, dataState: 'all', ...filter })
+    ]);
+  } catch (err) {
+    if (err.code === 'RATE_LIMITED') return { connected: true, error: 'RATE_LIMITED' };
+    return { connected: true, error: 'API_ERROR', detail: err.detail };
+  }
+
+  const timeseries = (timeseriesData.rows || []).map(r => ({
+    date: r.keys[0], clicks: r.clicks, impressions: r.impressions, ctr: r.ctr, position: r.position
+  }));
+
+  const entry = {
+    fetchedAt: Date.now(),
+    timeseries,
+    totals: gscAggregateTotals(timeseriesData.rows),
+    previousTotals: gscAggregateTotals(prevData.rows)
+  };
+  cache[cacheKey] = entry;
+  await gscPruneCache(cache);
+  await browser.storage.local.set({ gscQueryCache: cache });
+
+  return { connected: true, ...entry };
+}
+
 // ─── Google Search Console: message handlers ────────────────────────────────
 
 browser.runtime.onMessage.addListener((message) => {
   switch (message?.action) {
-    case 'gscGetStatus':   return gscGetStatus();
-    case 'gscConnect':     return gscConnect();
-    case 'gscDisconnect':  return gscDisconnect();
-    case 'gscGetPageData': return gscGetPageData(message);
+    case 'gscGetStatus':     return gscGetStatus();
+    case 'gscConnect':       return gscConnect();
+    case 'gscDisconnect':    return gscDisconnect();
+    case 'gscGetPageData':   return gscGetPageData(message);
+    case 'gscGetQueryData':  return gscGetQueryData(message);
     default: return undefined;
   }
 });

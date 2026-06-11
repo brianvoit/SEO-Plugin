@@ -8,6 +8,10 @@
 </head>
 <body>
   <header>
+    <div class="tab-group" id="main-tabs">
+      <button class="tab-btn is-active" data-tab="overview">Overview</button>
+      <button class="tab-btn" data-tab="search">Search</button>
+    </div>
     <div class="header-actions">
       <div class="alt-header-control">
         <span class="alt-header-label">ALT TEXT</span>
@@ -258,111 +262,98 @@
     <div id="schema-detail-content"></div>
   </div>
 
-  <!-- Search Console detail panel -->
-  <div id="gsc-panel" class="hidden">
-    <div class="settings-header">
-      <button id="btn-gsc-back" class="settings-back-btn">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="10 3 4 8 10 13"/>
-        </svg>
-        Back
-      </button>
-      <button id="btn-gsc-refresh" class="icon-btn hidden" title="Refresh Search Console data" style="margin-left:auto">
-        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M13.5 8A5.5 5.5 0 1 1 8 2.5a5.5 5.5 0 0 1 3.9 1.6L13.5 5.6"/>
-          <polyline points="13.5 2 13.5 5.6 9.9 5.6"/>
-        </svg>
-      </button>
+  <!-- Search tab -->
+  <div id="search-tab" class="hidden">
+
+    <!-- Not connected -->
+    <div id="gsc-not-connected" class="field-section hidden">
+      <div class="field-hint" id="gsc-not-connected-text">Connect Google Search Console in Settings to see performance data for this page.</div>
+      <button id="btn-gsc-goto-settings" class="save-key-btn" style="margin-top:8px">Open Settings</button>
     </div>
 
-    <div id="gsc-detail-content">
+    <!-- No matching property -->
+    <div id="gsc-no-property" class="field-section hidden">
+      <div class="field-hint">No verified Search Console property matches <strong id="gsc-no-property-host"></strong>. Add this site as a property in Search Console, or check your account.</div>
+      <div class="field-hint hint-muted" id="gsc-no-property-detail"></div>
+    </div>
 
-      <!-- Not connected -->
-      <div id="gsc-not-connected" class="field-section hidden">
-        <div class="field-hint" id="gsc-not-connected-text">Connect Google Search Console in Settings to see performance data for this page.</div>
-        <button id="btn-gsc-goto-settings" class="save-key-btn" style="margin-top:8px">Open Settings</button>
-      </div>
+    <!-- Error -->
+    <div id="gsc-error" class="field-section hidden">
+      <div class="field-hint hint-red" id="gsc-error-text"></div>
+    </div>
 
-      <!-- No matching property -->
-      <div id="gsc-no-property" class="field-section hidden">
-        <div class="field-hint">No verified Search Console property matches <strong id="gsc-no-property-host"></strong>. Add this site as a property in Search Console, or check your account.</div>
-      </div>
+    <!-- Connected + data -->
+    <div id="gsc-data" class="hidden">
 
-      <!-- Error -->
-      <div id="gsc-error" class="field-section hidden">
-        <div class="field-hint hint-red" id="gsc-error-text"></div>
-      </div>
+      <section class="field-section">
+        <div class="mode-segmented" id="gsc-range-group">
+          <button class="mode-option" data-range="30">30D</button>
+          <button class="mode-option" data-range="60">60D</button>
+          <button class="mode-option" data-range="90">90D</button>
+          <button class="mode-option" data-range="365">12M</button>
+          <button class="mode-option" data-range="480">16M</button>
+        </div>
+        <div class="field-hint" id="gsc-fetched-meta"></div>
+      </section>
 
-      <!-- Connected + data -->
-      <div id="gsc-data" class="hidden">
-
-        <section class="field-section">
-          <div class="mode-segmented" id="gsc-range-group">
-            <button class="mode-option" data-range="30">30 days</button>
-            <button class="mode-option" data-range="60">60 days</button>
-            <button class="mode-option" data-range="90">90 days</button>
-          </div>
-          <div class="field-hint" id="gsc-fetched-meta"></div>
-        </section>
-
-        <section class="field-section">
-          <div class="gsc-chart-block" data-metric="clicks">
-            <div class="gsc-chart-header">
-              <span class="field-label">CLICKS</span>
-              <span>
+      <section class="field-section">
+        <div class="gsc-query-filter-bar hidden" id="gsc-query-filter-bar">
+          <span class="gsc-query-filter-label">Filtered to query:</span>
+          <span class="gsc-query-filter-text" id="gsc-query-filter-text"></span>
+          <button class="gsc-query-filter-clear" id="btn-gsc-clear-query-filter" title="Clear filter">✕</button>
+        </div>
+        <div class="gsc-metric-toggles" id="gsc-metric-toggles">
+          <button class="gsc-metric-toggle" data-metric="clicks" aria-pressed="true">
+            <span class="gsc-metric-dot" data-metric="clicks"></span>
+            <span class="gsc-metric-info">
+              <span class="gsc-metric-name">Clicks</span>
+              <span class="gsc-metric-stats">
                 <span class="gsc-chart-total" id="gsc-total-clicks"></span><span class="gsc-chart-change" id="gsc-change-clicks"></span>
               </span>
-            </div>
-            <div class="gsc-chart-svg" id="gsc-chart-clicks"></div>
-          </div>
-          <div class="gsc-chart-block" data-metric="impressions">
-            <div class="gsc-chart-header">
-              <span class="field-label">IMPRESSIONS</span>
-              <span>
+            </span>
+          </button>
+          <button class="gsc-metric-toggle" data-metric="impressions" aria-pressed="true">
+            <span class="gsc-metric-dot" data-metric="impressions"></span>
+            <span class="gsc-metric-info">
+              <span class="gsc-metric-name">Impressions</span>
+              <span class="gsc-metric-stats">
                 <span class="gsc-chart-total" id="gsc-total-impressions"></span><span class="gsc-chart-change" id="gsc-change-impressions"></span>
               </span>
-            </div>
-            <div class="gsc-chart-svg" id="gsc-chart-impressions"></div>
-          </div>
-          <div class="gsc-chart-block" data-metric="position">
-            <div class="gsc-chart-header">
-              <span class="field-label">AVG POSITION</span>
-              <span>
+            </span>
+          </button>
+          <button class="gsc-metric-toggle" data-metric="position" aria-pressed="true">
+            <span class="gsc-metric-dot" data-metric="position"></span>
+            <span class="gsc-metric-info">
+              <span class="gsc-metric-name">Avg Position</span>
+              <span class="gsc-metric-stats">
                 <span class="gsc-chart-total" id="gsc-total-position"></span><span class="gsc-chart-change" id="gsc-change-position"></span>
               </span>
-            </div>
-            <div class="gsc-chart-svg" id="gsc-chart-position"></div>
+            </span>
+          </button>
+        </div>
+        <div class="gsc-chart-svg" id="gsc-chart-combined"></div>
+      </section>
+
+      <section class="field-section">
+        <div class="field-header">
+          <span class="field-label">QUERIES</span>
+          <div class="alt-header-control">
+            <span class="alt-header-label">HIDE BRANDED</span>
+            <button id="btn-gsc-branded-toggle" class="toggle-btn" aria-pressed="true">
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </button>
           </div>
-        </section>
+        </div>
+        <div id="gsc-queries-table" class="gsc-queries-table"></div>
+        <div id="gsc-queries-empty" class="field-hint hidden">No query data for this page yet.</div>
+      </section>
 
-        <section class="field-section">
-          <div class="field-header">
-            <span class="field-label">QUERIES</span>
-            <div class="alt-header-control">
-              <span class="alt-header-label">HIDE BRANDED</span>
-              <button id="btn-gsc-branded-toggle" class="toggle-btn" aria-pressed="true">
-                <span class="toggle-track"><span class="toggle-thumb"></span></span>
-              </button>
-            </div>
-          </div>
-          <div id="gsc-queries-table" class="gsc-queries-table"></div>
-          <div id="gsc-queries-empty" class="field-hint hidden">No query data for this page yet.</div>
-        </section>
-
-        <section class="field-section">
-          <div class="field-header">
-            <span class="field-label">INDEXING STATUS (GOOGLE)</span>
-          </div>
-          <div id="gsc-inspection-list"></div>
-        </section>
-
-        <section class="field-section">
-          <button id="btn-gsc-open-external" class="save-key-btn" style="width:100%">Open in Search Console ↗</button>
-        </section>
-
-      </div>
+      <section class="field-section">
+        <button id="btn-gsc-open-external" class="save-key-btn" style="width:100%">Open in Search Console ↗</button>
+      </section>
 
     </div>
+
   </div>
 
   <div id="error-state" class="error-banner hidden">
@@ -476,15 +467,16 @@
       </div>
     </section>
 
-    <!-- Word Count + Indexability -->
+    <!-- Indexability + Word Count -->
     <section class="field-section field-section--split">
-      <div class="split-half">
-        <span class="field-label">WORD COUNT</span>
-        <div class="field-meta" id="wordcount-text"></div>
-      </div>
       <div class="split-half">
         <span class="field-label">INDEXABILITY</span>
         <div id="indexability-list"></div>
+        <div id="gsc-inspection-list"></div>
+      </div>
+      <div class="split-half">
+        <span class="field-label">WORD COUNT</span>
+        <div class="field-meta" id="wordcount-text"></div>
       </div>
     </section>
 
@@ -536,19 +528,6 @@
       </button>
     </section>
 
-    <!-- Search Console -->
-    <section class="field-section">
-      <button class="field-nav-btn" id="btn-gsc">
-        <span class="field-label">SEARCH CONSOLE</span>
-        <div class="field-nav-right">
-          <span id="gsc-summary" class="field-nav-summary"></span>
-          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="6 3 11 8 6 13"/>
-          </svg>
-        </div>
-      </button>
-    </section>
-
     <!-- Dates -->
     <section class="field-section dates-section">
       <div class="dates-row">
@@ -570,6 +549,12 @@
     <span id="update-status" class="update-status hidden"></span>
   </footer>
 
+  <script src="popup-shared.js"></script>
+  <script src="popup-nav.js"></script>
+  <script src="popup-inspector.js"></script>
+  <script src="popup-generate.js"></script>
+  <script src="popup-settings.js"></script>
+  <script src="popup-gsc.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

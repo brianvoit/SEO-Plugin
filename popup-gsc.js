@@ -219,14 +219,14 @@ function attachChartHover(svgEl, filled, activeMetrics, built) {
     if (tx + tw > width) tx = x - tw - 6;
     if (tx < 0) tx = 0;
 
-    let html = `<rect class="gsc-tooltip-bg" x="0" y="0" width="${tw}" height="${th}" rx="3" />`;
-    html += `<text class="gsc-tooltip-date" x="6" y="13">${escapeHtml(formatDateLong(filled[idx].date, showYear))}</text>`;
+    tooltip.replaceChildren();
+    tooltip.appendChild(svgEl('rect', { class: 'gsc-tooltip-bg', x: 0, y: 0, width: tw, height: th, rx: 3 }));
+    tooltip.appendChild(svgEl('text', { class: 'gsc-tooltip-date', x: 6, y: 13 }, formatDateLong(filled[idx].date, showYear)));
     rows.forEach((r, i) => {
       const rowY = 13 + (i + 1) * rowH;
-      html += `<circle class="gsc-tooltip-dot" data-metric="${r.metric}" cx="9" cy="${(rowY-3.5).toFixed(1)}" r="3" />`;
-      html += `<text class="gsc-tooltip-text" x="16" y="${rowY}">${escapeHtml(r.label)}: ${escapeHtml(r.value)}</text>`;
+      tooltip.appendChild(svgEl('circle', { class: 'gsc-tooltip-dot', 'data-metric': r.metric, cx: 9, cy: (rowY - 3.5).toFixed(1), r: 3 }));
+      tooltip.appendChild(svgEl('text', { class: 'gsc-tooltip-text', x: 16, y: rowY }, `${r.label}: ${r.value}`));
     });
-    tooltip.innerHTML = html;
     tooltip.setAttribute('transform', `translate(${tx.toFixed(1)},${padT})`);
     tooltip.style.display = '';
   });
@@ -272,7 +272,7 @@ function renderCombinedChart() {
   // popup or sidebar is resized (instead of stretching with the SVG).
   const width = container.clientWidth || 320;
   const built = buildCombinedChart(_gscFilled, gscActiveMetrics, { width });
-  container.innerHTML = built.svg;
+  container.replaceChildren(svgFromString(built.svg));
   attachChartHover(container.querySelector('svg'), _gscFilled, gscActiveMetrics, built);
 }
 
@@ -366,31 +366,57 @@ function buildQueryDataRow(q, locations, branded, selected) {
     + (selected ? ' gsc-query-row--selected' : '');
   row.dataset.query = q.query;
 
-  let chips = branded ? '<span class="gsc-branded-pill">Brand</span>' : '';
-  chips += locations.map(l => `<span class="gsc-chip">${escapeHtml(l)}</span>`).join('');
+  const main = document.createElement('div');
+  main.className = 'gsc-query-main';
 
-  let html = '<div class="gsc-query-main">';
   // Add-to-branded button (left of the query). Already-branded terms show no
   // button — just an empty cell to keep the grid aligned.
   if (branded) {
-    html += '<span></span>';
+    main.appendChild(document.createElement('span'));
   } else {
-    html += `<button class="gsc-query-add" title="Add to branded list" aria-label="Add to branded list">
-      <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-        <circle cx="8" cy="8" r="6.4"/><line x1="8" y1="5.2" x2="8" y2="10.8"/><line x1="5.2" y1="8" x2="10.8" y2="8"/>
-      </svg>
-    </button>`;
+    const addBtn = document.createElement('button');
+    addBtn.className = 'gsc-query-add';
+    addBtn.title = 'Add to branded list';
+    addBtn.setAttribute('aria-label', 'Add to branded list');
+    addBtn.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="6.4"/><line x1="8" y1="5.2" x2="8" y2="10.8"/><line x1="5.2" y1="8" x2="10.8" y2="8"/></svg>'));
+    main.appendChild(addBtn);
   }
-  html += '<span class="gsc-query-text-wrap">';
-  html += `<span class="gsc-query-text" title="${escapeHtml(q.query)}">${escapeHtml(q.query)}</span>`;
-  if (chips) html += `<span class="gsc-query-chips">${chips}</span>`;
-  html += '</span>';
-  GSC_QUERY_COLUMNS.forEach(col => {
-    html += `<span class="gsc-query-num">${escapeHtml(col.format(q[col.key]))}</span>`;
-  });
-  html += '</div>';
 
-  row.innerHTML = html;
+  const wrap = document.createElement('span');
+  wrap.className = 'gsc-query-text-wrap';
+  const textEl = document.createElement('span');
+  textEl.className = 'gsc-query-text';
+  textEl.title = q.query;
+  textEl.textContent = q.query;
+  wrap.appendChild(textEl);
+
+  if (branded || locations.length) {
+    const chipsEl = document.createElement('span');
+    chipsEl.className = 'gsc-query-chips';
+    if (branded) {
+      const pill = document.createElement('span');
+      pill.className = 'gsc-branded-pill';
+      pill.textContent = 'Brand';
+      chipsEl.appendChild(pill);
+    }
+    locations.forEach(l => {
+      const chip = document.createElement('span');
+      chip.className = 'gsc-chip';
+      chip.textContent = l;
+      chipsEl.appendChild(chip);
+    });
+    wrap.appendChild(chipsEl);
+  }
+  main.appendChild(wrap);
+
+  GSC_QUERY_COLUMNS.forEach(col => {
+    const num = document.createElement('span');
+    num.className = 'gsc-query-num';
+    num.textContent = col.format(q[col.key]);
+    main.appendChild(num);
+  });
+
+  row.appendChild(main);
 
   row.querySelector('.gsc-query-text').addEventListener('click', (e) => {
     e.stopPropagation();

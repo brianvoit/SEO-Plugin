@@ -23,6 +23,32 @@ let wpSites = [];
 
 const wpSiteForm = document.getElementById('wp-site-form');
 
+// Build a settings list row: two info lines + a remove button (X icon)
+function buildSettingsRow(line1, line2, removeTitle) {
+  const row = document.createElement('div');
+  row.className = 'wp-site-row';
+
+  const info = document.createElement('div');
+  info.className = 'wp-site-info';
+  const a = document.createElement('span');
+  a.className = 'wp-site-url';
+  a.textContent = line1;
+  const b = document.createElement('span');
+  b.className = 'wp-site-user';
+  b.textContent = line2;
+  info.appendChild(a);
+  info.appendChild(b);
+
+  const removeBtn = document.createElement('button');
+  removeBtn.className = 'wp-site-remove icon-btn';
+  removeBtn.title = removeTitle;
+  removeBtn.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>'));
+
+  row.appendChild(info);
+  row.appendChild(removeBtn);
+  return { row, removeBtn };
+}
+
 function renderWpSites() {
   const list  = document.getElementById('wp-sites-list');
   const empty = document.getElementById('wp-sites-empty');
@@ -38,19 +64,8 @@ function renderWpSites() {
     let host = site.url;
     try { host = new URL(site.url).hostname; } catch { /* keep raw url */ }
 
-    const row = document.createElement('div');
-    row.className = 'wp-site-row';
-    row.innerHTML = `
-      <div class="wp-site-info">
-        <span class="wp-site-url">${escapeHtml(host)}</span>
-        <span class="wp-site-user">${escapeHtml(site.username)}</span>
-      </div>
-      <button class="wp-site-remove icon-btn" title="Remove site" data-index="${i}">
-        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="3" y1="3" x2="13" y2="13"/>
-          <line x1="13" y1="3" x2="3" y2="13"/>
-        </svg>
-      </button>`;
+    const { row, removeBtn } = buildSettingsRow(host, site.username, 'Remove site');
+    removeBtn.dataset.index = i;
     list.appendChild(row);
   });
 
@@ -113,19 +128,8 @@ function renderBrandDomains() {
   empty.classList.add('hidden');
 
   hosts.forEach(host => {
-    const row = document.createElement('div');
-    row.className = 'wp-site-row';
-    row.innerHTML = `
-      <div class="wp-site-info">
-        <span class="wp-site-url">${escapeHtml(host)}</span>
-        <span class="wp-site-user">/${escapeHtml(allBrandedTerms[host])}/i</span>
-      </div>
-      <button class="wp-site-remove icon-btn" title="Remove" data-host="${escapeHtml(host)}">
-        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="3" y1="3" x2="13" y2="13"/>
-          <line x1="13" y1="3" x2="3" y2="13"/>
-        </svg>
-      </button>`;
+    const { row, removeBtn } = buildSettingsRow(host, `/${allBrandedTerms[host]}/i`, 'Remove');
+    removeBtn.dataset.host = host;
     list.appendChild(row);
   });
 

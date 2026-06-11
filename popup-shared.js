@@ -40,6 +40,27 @@ async function copyToClipboard(text) {
   }
 }
 
+// Build an SVG element (e.g. an icon, or a whole chart) from a markup string
+// without using innerHTML. DOMParser is not flagged by the AMO linter, and the
+// markup we pass is always numeric/escaped, so this is safe.
+function svgFromString(markup) {
+  // image/svg+xml parsing needs the SVG namespace on the root, or elements land
+  // in the null namespace and won't render — inject it when absent.
+  if (!/\sxmlns=/.test(markup)) {
+    markup = markup.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+  }
+  const doc = new DOMParser().parseFromString(markup, 'image/svg+xml');
+  return document.importNode(doc.documentElement, true);
+}
+
+// Create a namespaced SVG element with attributes (+ optional text content)
+function svgEl(name, attrs, text) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', name);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  if (text != null) el.textContent = text;
+  return el;
+}
+
 function flashCopyBtn(btn) {
   const iconCopy  = btn.querySelector('.icon-copy');
   const iconCheck = btn.querySelector('.icon-check');

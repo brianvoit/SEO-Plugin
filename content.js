@@ -320,6 +320,15 @@ function removeGenerator() {
   document.getElementById(GENERATOR_ID)?.remove();
 }
 
+// Create an element with inline style + optional properties (id, textContent,
+// value, rows). Used to build the alt-text generator UI without innerHTML.
+function sagEl(tag, style, props) {
+  const el = document.createElement(tag);
+  if (style) el.style.cssText = style;
+  if (props) Object.assign(el, props);
+  return el;
+}
+
 function createGeneratorPanel(img) {
   removeGenerator();
 
@@ -347,14 +356,15 @@ function createGeneratorPanel(img) {
     `color:${c.text}`, 'z-index:2147483647', 'overflow:hidden',
   ].join(';');
 
-  panel.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:${c.headerBg};border-bottom:1px solid ${c.border}">
-      <span style="font-size:9px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:${c.muted}">Suggested Alt Text</span>
-      <button id="sag-close" style="background:none;border:none;cursor:pointer;color:${c.muted};font-size:18px;line-height:1;padding:0">&times;</button>
-    </div>
-    <div id="sag-body" style="padding:10px">
-      <span style="color:${c.muted};font-size:12px">Generating…</span>
-    </div>`;
+  const header = sagEl('div', `display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:${c.headerBg};border-bottom:1px solid ${c.border}`);
+  header.appendChild(sagEl('span', `font-size:9px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:${c.muted}`, { textContent: 'Suggested Alt Text' }));
+  header.appendChild(sagEl('button', `background:none;border:none;cursor:pointer;color:${c.muted};font-size:18px;line-height:1;padding:0`, { id: 'sag-close', textContent: '×' }));
+
+  const body = sagEl('div', 'padding:10px', { id: 'sag-body' });
+  body.appendChild(sagEl('span', `color:${c.muted};font-size:12px`, { textContent: 'Generating…' }));
+
+  panel.appendChild(header);
+  panel.appendChild(body);
 
   document.body.appendChild(panel);
   panel.querySelector('#sag-close').addEventListener('click', removeGenerator);
@@ -377,16 +387,20 @@ function showGeneratorResult(altText, usedVision, img) {
   if (!body || !panel) return;
   const c = panel._colors;
 
-  body.innerHTML = `
-    <textarea id="sag-text" rows="3" style="width:100%;box-sizing:border-box;border:1px solid ${c.inputBorder};border-radius:5px;padding:7px 9px;font:13px/1.5 -apple-system,system-ui,sans-serif;resize:vertical;color:${c.text};background:${c.inputBg};outline:none">${altText}</textarea>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
-      <span style="font-size:10px;color:${c.muted}">${usedVision ? '✦ vision' : '✦ page context'}</span>
-      <div style="display:flex;gap:6px">
-        <button id="sag-save-wp" style="background:#21759b;color:#fff;border:none;border-radius:4px;padding:4px 12px;font:600 12px/1.5 sans-serif;cursor:pointer">Save to WP</button>
-        <button id="sag-copy" style="background:#2563eb;color:#fff;border:none;border-radius:4px;padding:4px 12px;font:600 12px/1.5 sans-serif;cursor:pointer">Copy</button>
-      </div>
-    </div>
-    <div id="sag-wp-status" style="margin-top:7px;font-size:11px;line-height:1.4"></div>`;
+  body.textContent = '';
+  body.appendChild(sagEl('textarea',
+    `width:100%;box-sizing:border-box;border:1px solid ${c.inputBorder};border-radius:5px;padding:7px 9px;font:13px/1.5 -apple-system,system-ui,sans-serif;resize:vertical;color:${c.text};background:${c.inputBg};outline:none`,
+    { id: 'sag-text', rows: 3, value: altText }));
+
+  const actions = sagEl('div', 'display:flex;align-items:center;justify-content:space-between;margin-top:8px');
+  actions.appendChild(sagEl('span', `font-size:10px;color:${c.muted}`, { textContent: usedVision ? '✦ vision' : '✦ page context' }));
+  const btnWrap = sagEl('div', 'display:flex;gap:6px');
+  btnWrap.appendChild(sagEl('button', 'background:#21759b;color:#fff;border:none;border-radius:4px;padding:4px 12px;font:600 12px/1.5 sans-serif;cursor:pointer', { id: 'sag-save-wp', textContent: 'Save to WP' }));
+  btnWrap.appendChild(sagEl('button', 'background:#2563eb;color:#fff;border:none;border-radius:4px;padding:4px 12px;font:600 12px/1.5 sans-serif;cursor:pointer', { id: 'sag-copy', textContent: 'Copy' }));
+  actions.appendChild(btnWrap);
+  body.appendChild(actions);
+
+  body.appendChild(sagEl('div', 'margin-top:7px;font-size:11px;line-height:1.4', { id: 'sag-wp-status' }));
 
   document.getElementById('sag-copy').addEventListener('click', () => {
     const val = document.getElementById('sag-text').value;

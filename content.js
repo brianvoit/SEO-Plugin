@@ -404,7 +404,11 @@ function showGeneratorResult(altText, usedVision, img) {
 function showGeneratorError(msg) {
   const body = document.getElementById('sag-body');
   if (!body) return;
-  body.innerHTML = `<span style="color:#dc2626;font-size:12px">${msg}</span>`;
+  body.textContent = '';
+  const span = document.createElement('span');
+  span.style.cssText = 'color:#dc2626;font-size:12px';
+  span.textContent = msg;
+  body.appendChild(span);
 }
 
 // ─── Save to WordPress ────────────────────────────────────────────────────────

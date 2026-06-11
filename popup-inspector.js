@@ -321,26 +321,47 @@ function appendOGRow(container, key, value) {
   const isUrl   = present && /^https?:\/\//i.test(value);
   const { level, detail } = ogFieldCheck(key, value, present);
 
-  let valueMarkup;
-  if (!present) {
-    valueMarkup = '<span class="og-missing">missing</span>';
-  } else {
-    const display = value.length > 42 ? value.slice(0, 42) + '…' : value;
-    valueMarkup = `<span class="og-value${isUrl ? ' og-value--link' : ''}" title="${escapeHtml(value)}">${escapeHtml(display)}</span>`;
-  }
-
   const row = document.createElement('div');
   row.className = `og-row og-row--${level}`;
-  row.innerHTML = `<span class="og-dot"></span>`
-    + `<div class="og-body">`
-    +   `<div class="og-line"><span class="og-key">${escapeHtml(label)}</span>${valueMarkup}</div>`
-    +   `<div class="og-detail">${escapeHtml(detail)}</div>`
-    + `</div>`;
+
+  const dot = document.createElement('span');
+  dot.className = 'og-dot';
+
+  const body = document.createElement('div');
+  body.className = 'og-body';
+
+  const line = document.createElement('div');
+  line.className = 'og-line';
+  const keyEl = document.createElement('span');
+  keyEl.className = 'og-key';
+  keyEl.textContent = label;
+  line.appendChild(keyEl);
+
+  let valueEl = null;
+  if (!present) {
+    const missing = document.createElement('span');
+    missing.className = 'og-missing';
+    missing.textContent = 'missing';
+    line.appendChild(missing);
+  } else {
+    valueEl = document.createElement('span');
+    valueEl.className = isUrl ? 'og-value og-value--link' : 'og-value';
+    valueEl.title = value;
+    valueEl.textContent = value.length > 42 ? value.slice(0, 42) + '…' : value;
+    line.appendChild(valueEl);
+  }
+
+  const detailEl = document.createElement('div');
+  detailEl.className = 'og-detail';
+  detailEl.textContent = detail;
+
+  body.appendChild(line);
+  body.appendChild(detailEl);
+  row.appendChild(dot);
+  row.appendChild(body);
   container.appendChild(row);
 
   if (!present) return;
-
-  const valueEl = row.querySelector('.og-value');
   if (isUrl) {
     valueEl.addEventListener('click', () => browser.tabs.create({ url: value }));
   }
@@ -423,7 +444,14 @@ function renderSchemaDetail() {
 
       const row = document.createElement('div');
       row.className = 'schema-prop';
-      row.innerHTML = `<span class="schema-key">${escapeHtml(key)}</span><span class="schema-val">${escapeHtml(display)}</span>`;
+      const keyEl = document.createElement('span');
+      keyEl.className = 'schema-key';
+      keyEl.textContent = key;
+      const valEl = document.createElement('span');
+      valEl.className = 'schema-val';
+      valEl.textContent = display;
+      row.appendChild(keyEl);
+      row.appendChild(valEl);
       card.appendChild(row);
     });
 

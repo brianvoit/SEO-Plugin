@@ -338,14 +338,24 @@ function buildQueryHeaderRow(sort) {
   const row = document.createElement('div');
   row.className = 'gsc-query-row gsc-query-row--header';
 
-  let html = '<div class="gsc-query-main"><span></span><span>Query</span>';
+  const main = document.createElement('div');
+  main.className = 'gsc-query-main';
+  main.appendChild(document.createElement('span'));   // empty cell over the + button column
+  const qh = document.createElement('span');
+  qh.textContent = 'Query';
+  main.appendChild(qh);
+
   GSC_QUERY_COLUMNS.forEach(col => {
     const active = sort.column === col.key;
     const arrow = active ? (sort.direction === 'asc' ? ' ▲' : ' ▼') : '';
-    html += `<span class="gsc-query-sort${active ? ' gsc-query-sort--active' : ''}" data-sort="${col.key}">${escapeHtml(col.label)}${arrow}</span>`;
+    const span = document.createElement('span');
+    span.className = `gsc-query-sort${active ? ' gsc-query-sort--active' : ''}`;
+    span.dataset.sort = col.key;
+    span.textContent = `${col.label}${arrow}`;
+    main.appendChild(span);
   });
-  html += '</div>';
-  row.innerHTML = html;
+
+  row.appendChild(main);
   return row;
 }
 

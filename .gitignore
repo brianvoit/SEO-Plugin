@@ -12,3 +12,5 @@ __pycache__/
 
 # web-ext build output
 web-ext-artifacts/
+.amo-upload-uuid
+*.zip

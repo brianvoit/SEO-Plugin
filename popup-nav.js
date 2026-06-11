@@ -66,13 +66,14 @@ function showRedirectPanel() {
 }
 
 function hideDetailPanelToTab() {
-  updateFooter.classList.remove('hidden');
   showActiveTab();
 }
 
 function showSettings() {
   enterDetailPanel();
   settingsPanel.classList.remove('hidden');
+  // The update checker lives only on the settings page now
+  updateFooter.classList.remove('hidden');
 
   browser.storage.local.get(['claudeApiKey', 'charRanges', 'displayMode', 'gscClientId', 'gscClientSecret']).then(({ claudeApiKey, charRanges: stored, displayMode, gscClientId, gscClientSecret }) => {
     document.getElementById('api-key-input').value = claudeApiKey ?? '';

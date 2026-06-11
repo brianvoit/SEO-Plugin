@@ -886,12 +886,12 @@ main, #search-tab { padding: 4px 0 8px; }
   transition: filter 0.12s;
 }
 .status-badge:hover { filter: brightness(1.06); }
-.status-badge--ok       { background: var(--hint-green); border-color: var(--hint-green); }
-.status-badge--redirect { background: var(--hint-amber); border-color: var(--hint-amber); }
-.status-badge--error    { background: var(--hint-red);   border-color: var(--hint-red); }
-.status-badge--server   { background: var(--text-muted); border-color: var(--text-muted); }
-.status-code  { color: #fff; font-size: 11px; }
-.status-count { color: rgba(255, 255, 255, 0.88); font-size: 10px; }
+.status-badge--ok       { color: var(--hint-green); border-color: var(--hint-green); }
+.status-badge--redirect { color: var(--hint-amber); border-color: var(--hint-amber); }
+.status-badge--error    { color: var(--hint-red);   border-color: var(--hint-red); }
+.status-badge--server   { color: var(--text-muted); border-color: var(--text-muted); }
+.status-code  { color: inherit; font-size: 11px; }
+.status-count { color: inherit; opacity: 0.8; font-size: 10px; }
 
 .redirect-row {
   display: flex;

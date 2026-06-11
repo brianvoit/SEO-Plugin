@@ -13,6 +13,10 @@
       <button class="tab-btn" data-tab="search">Search</button>
     </div>
     <div class="header-actions">
+      <button id="btn-status" class="status-badge hidden" title="Page status / redirects">
+        <span class="status-code" id="status-code"></span>
+        <span class="status-count hidden" id="status-count"></span>
+      </button>
       <div class="alt-header-control">
         <span class="alt-header-label">ALT TEXT</span>
         <button id="btn-overlay" class="toggle-btn" aria-pressed="false">
@@ -299,6 +303,23 @@
     <section class="field-section">
       <div class="field-header"><span class="field-label">X / TWITTER</span></div>
       <div id="tw-list"></div>
+    </section>
+  </div>
+
+  <!-- Redirect chain detail panel -->
+  <div id="redirect-panel" class="hidden">
+    <div class="settings-header">
+      <button id="btn-redirect-back" class="settings-back-btn">
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="10 3 4 8 10 13"/>
+        </svg>
+        Back
+      </button>
+    </div>
+    <section class="field-section">
+      <div class="field-header"><span class="field-label">REDIRECT CHAIN</span></div>
+      <div id="redirect-chain"></div>
+      <div id="redirect-insights"></div>
     </section>
   </div>
 
@@ -613,6 +634,7 @@
   <script src="popup-generate.js"></script>
   <script src="popup-settings.js"></script>
   <script src="popup-gsc.js"></script>
+  <script src="popup-redirects.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

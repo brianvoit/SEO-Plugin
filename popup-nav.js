@@ -8,6 +8,7 @@ const settingsPanel = document.getElementById('settings-panel');
 const schemaPanel   = document.getElementById('schema-panel');
 const ogPanel       = document.getElementById('og-panel');
 const twPanel       = document.getElementById('tw-panel');
+const redirectPanel = document.getElementById('redirect-panel');
 const searchTab     = document.getElementById('search-tab');
 const mainContent   = document.getElementById('content');
 const tabGroup      = document.getElementById('main-tabs');
@@ -22,6 +23,7 @@ function hideDetailPanels() {
   schemaPanel.classList.add('hidden');
   ogPanel.classList.add('hidden');
   twPanel.classList.add('hidden');
+  redirectPanel.classList.add('hidden');
 }
 
 function showActiveTab() {
@@ -55,6 +57,12 @@ function showOgPanel() {
 function showTwPanel() {
   enterDetailPanel();
   twPanel.classList.remove('hidden');
+}
+
+function showRedirectPanel() {
+  enterDetailPanel();
+  redirectPanel.classList.remove('hidden');
+  renderRedirectPanel();
 }
 
 function hideDetailPanelToTab() {
@@ -101,6 +109,8 @@ document.getElementById('btn-og').addEventListener('click', showOgPanel);
 document.getElementById('btn-og-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-tw').addEventListener('click', showTwPanel);
 document.getElementById('btn-tw-back').addEventListener('click', hideDetailPanelToTab);
+document.getElementById('btn-status').addEventListener('click', showRedirectPanel);
+document.getElementById('btn-redirect-back').addEventListener('click', hideDetailPanelToTab);
 
 // ─── Main tabs (Overview / Search) ──────────────────────────────────────────
 
@@ -111,7 +121,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     const inPanel = inSettings
       || !schemaPanel.classList.contains('hidden')
       || !ogPanel.classList.contains('hidden')
-      || !twPanel.classList.contains('hidden');
+      || !twPanel.classList.contains('hidden')
+      || !redirectPanel.classList.contains('hidden');
     if (tab === activeTab && !inPanel) return;
     activeTab = tab;
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('is-active', b.dataset.tab === tab));

@@ -37,6 +37,58 @@ browser.action.onClicked.addListener(() => {
   browser.sidebarAction.toggle();
 });
 
+// ─── Redirect trace: status code + redirect chain per tab ───────────────────
+// Observe-only webRequest on top-level navigations, so the popup can show how
+// you arrived at the current page (direct vs. via redirects) and the full chain.
+
+const redirectByTab = new Map();   // tabId -> { requestId, chain:[{url,status}], finalUrl, finalStatus, error, done }
+
+const REDIRECT_FILTER = { urls: ['*://*/*'], types: ['main_frame'] };
+
+browser.webRequest.onBeforeRequest.addListener(details => {
+  if (details.frameId !== 0) return;
+  redirectByTab.set(details.tabId, {
+    requestId: details.requestId,
+    chain: [],
+    finalUrl: null,
+    finalStatus: null,
+    error: null,
+    done: false
+  });
+}, REDIRECT_FILTER);
+
+browser.webRequest.onBeforeRedirect.addListener(details => {
+  if (details.frameId !== 0) return;
+  const entry = redirectByTab.get(details.tabId);
+  if (!entry || entry.requestId !== details.requestId) return;
+  entry.chain.push({ url: details.url, status: details.statusCode });
+}, REDIRECT_FILTER);
+
+browser.webRequest.onCompleted.addListener(details => {
+  if (details.frameId !== 0) return;
+  const entry = redirectByTab.get(details.tabId);
+  if (!entry || entry.requestId !== details.requestId) return;
+  entry.chain.push({ url: details.url, status: details.statusCode });
+  entry.finalUrl = details.url;
+  entry.finalStatus = details.statusCode;
+  entry.done = true;
+  browser.runtime.sendMessage({ action: 'redirectUpdated', tabId: details.tabId }).catch(() => {});
+}, REDIRECT_FILTER);
+
+browser.webRequest.onErrorOccurred.addListener(details => {
+  if (details.frameId !== 0) return;
+  const entry = redirectByTab.get(details.tabId);
+  if (!entry || entry.requestId !== details.requestId) return;
+  entry.error = details.error;
+  entry.done = true;
+}, REDIRECT_FILTER);
+
+browser.tabs.onRemoved.addListener(tabId => redirectByTab.delete(tabId));
+
+function getRedirectInfo({ tabId }) {
+  return Promise.resolve(redirectByTab.get(tabId) || null);
+}
+
 // ─── Google Search Console: OAuth + API ─────────────────────────────────────
 
 const GSC_SCOPE = 'https://www.googleapis.com/auth/webmasters.readonly';
@@ -475,6 +527,7 @@ browser.runtime.onMessage.addListener((message) => {
     case 'gscDisconnect':    return gscDisconnect();
     case 'gscGetPageData':   return gscGetPageData(message);
     case 'gscGetQueryData':  return gscGetQueryData(message);
+    case 'getRedirectInfo':  return getRedirectInfo(message);
     default: return undefined;
   }
 });

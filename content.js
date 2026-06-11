@@ -96,6 +96,17 @@ function getDates() {
   return { published, modified };
 }
 
+// A <meta http-equiv="refresh" content="0; url=..."> is a client-side redirect
+// that webRequest can't see, so the popup flags it from the page itself.
+function getMetaRefresh() {
+  const el = document.querySelector('meta[http-equiv="refresh" i]');
+  const content = el && el.getAttribute('content');
+  if (!content) return null;
+  const m = /^\s*(\d+)\s*;\s*url\s*=\s*(.+?)\s*$/i.exec(content);
+  if (!m) return null;
+  return { delay: parseInt(m[1], 10), url: m[2].replace(/^['"]|['"]$/g, '') };
+}
+
 function getPageData() {
   const titleEl     = document.querySelector('title');
   const titleText   = titleEl ? titleEl.textContent.trim() : '';
@@ -115,6 +126,7 @@ function getPageData() {
   const bodyText = getCleanBodyText();
 
   return {
+    metaRefresh: getMetaRefresh(),
     title: { text: titleText, charCount: titleText.length, wordCount: wordCount(titleText) },
     metaDescription: metaContent !== null
       ? { text: metaContent, charCount: metaContent.length, wordCount: wordCount(metaContent) }

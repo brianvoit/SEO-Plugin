@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SEO Inspector",
-  "version": "1.23",
+  "version": "1.24",
   "description": "Quick SEO metadata inspector — title, meta description, headings, canonical, and alt text overlay.",
   "browser_specific_settings": {
     "gecko": {
@@ -13,8 +13,9 @@
       }
     }
   },
-  "permissions": ["storage", "activeTab", "scripting", "tabs", "menus", "identity"],
+  "permissions": ["storage", "activeTab", "scripting", "tabs", "menus", "identity", "webRequest"],
   "host_permissions": [
+    "*://*/*",
     "https://api.github.com/*",
     "https://api.anthropic.com/*",
     "https://oauth2.googleapis.com/*",

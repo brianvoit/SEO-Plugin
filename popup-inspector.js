@@ -509,11 +509,13 @@ async function loadData(expandMeta = false, forceRefreshGsc = false) {
     showActiveTab();
     render(data, expandMeta);
     loadGscData(forceRefreshGsc);
+    renderRedirectStatus(tab.id, data);
   } catch {
     document.getElementById('error-state').classList.remove('hidden');
     tabGroup.classList.add('hidden');
     mainContent.classList.add('hidden');
     searchTab.classList.add('hidden');
+    renderRedirectStatus(tab.id, null);
   }
 }
 

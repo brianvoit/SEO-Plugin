@@ -6,6 +6,8 @@
 
 const settingsPanel = document.getElementById('settings-panel');
 const schemaPanel   = document.getElementById('schema-panel');
+const ogPanel       = document.getElementById('og-panel');
+const twPanel       = document.getElementById('tw-panel');
 const searchTab     = document.getElementById('search-tab');
 const mainContent   = document.getElementById('content');
 const tabGroup      = document.getElementById('main-tabs');
@@ -14,35 +16,54 @@ const errorBanner   = document.getElementById('error-state');
 
 let activeTab = 'overview';
 
+// Every full-screen detail panel reachable from the Overview tab
+function hideDetailPanels() {
+  settingsPanel.classList.add('hidden');
+  schemaPanel.classList.add('hidden');
+  ogPanel.classList.add('hidden');
+  twPanel.classList.add('hidden');
+}
+
 function showActiveTab() {
+  hideDetailPanels();
   tabGroup.classList.remove('hidden');
   mainContent.classList.toggle('hidden', activeTab !== 'overview');
   searchTab.classList.toggle('hidden', activeTab !== 'search');
 }
 
-function showSchemaPanel() {
-  if (!_schemas.length) return;
+// Shared setup for opening a detail panel: hide the tabs' content + other panels
+function enterDetailPanel() {
   mainContent.classList.add('hidden');
   searchTab.classList.add('hidden');
   updateFooter.classList.add('hidden');
   errorBanner.classList.add('hidden');
-  settingsPanel.classList.add('hidden');
+  hideDetailPanels();
+}
+
+function showSchemaPanel() {
+  if (!_schemas.length) return;
+  enterDetailPanel();
   schemaPanel.classList.remove('hidden');
   renderSchemaDetail();
 }
 
-function hideSchemaPanel() {
-  schemaPanel.classList.add('hidden');
+function showOgPanel() {
+  enterDetailPanel();
+  ogPanel.classList.remove('hidden');
+}
+
+function showTwPanel() {
+  enterDetailPanel();
+  twPanel.classList.remove('hidden');
+}
+
+function hideDetailPanelToTab() {
   updateFooter.classList.remove('hidden');
   showActiveTab();
 }
 
 function showSettings() {
-  mainContent.classList.add('hidden');
-  searchTab.classList.add('hidden');
-  schemaPanel.classList.add('hidden');
-  updateFooter.classList.add('hidden');
-  errorBanner.classList.add('hidden');
+  enterDetailPanel();
   settingsPanel.classList.remove('hidden');
 
   browser.storage.local.get(['claudeApiKey', 'charRanges', 'displayMode', 'gscClientId', 'gscClientSecret']).then(({ claudeApiKey, charRanges: stored, displayMode, gscClientId, gscClientSecret }) => {
@@ -69,15 +90,17 @@ function showSettings() {
 }
 
 function hideSettings() {
-  settingsPanel.classList.add('hidden');
-  updateFooter.classList.remove('hidden');
-  showActiveTab();
+  hideDetailPanelToTab();
   loadData(metaExpanded);
 }
 
 document.getElementById('btn-settings').addEventListener('click', showSettings);
 document.getElementById('btn-schema').addEventListener('click', showSchemaPanel);
-document.getElementById('btn-schema-back').addEventListener('click', hideSchemaPanel);
+document.getElementById('btn-schema-back').addEventListener('click', hideDetailPanelToTab);
+document.getElementById('btn-og').addEventListener('click', showOgPanel);
+document.getElementById('btn-og-back').addEventListener('click', hideDetailPanelToTab);
+document.getElementById('btn-tw').addEventListener('click', showTwPanel);
+document.getElementById('btn-tw-back').addEventListener('click', hideDetailPanelToTab);
 
 // ─── Main tabs (Overview / Search) ──────────────────────────────────────────
 
@@ -85,12 +108,15 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const tab = btn.dataset.tab;
     const inSettings = !settingsPanel.classList.contains('hidden');
-    const inSchema   = !schemaPanel.classList.contains('hidden');
-    if (tab === activeTab && !inSettings && !inSchema) return;
+    const inPanel = inSettings
+      || !schemaPanel.classList.contains('hidden')
+      || !ogPanel.classList.contains('hidden')
+      || !twPanel.classList.contains('hidden');
+    if (tab === activeTab && !inPanel) return;
     activeTab = tab;
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('is-active', b.dataset.tab === tab));
+    // Settings reloads page data on exit; other panels just return to the tab
     if (inSettings) hideSettings();
-    else if (inSchema) hideSchemaPanel();
     else showActiveTab();
   });
 });

@@ -216,13 +216,30 @@ const OG_IMG_MIN_W   = 600;
 const OG_IMG_MIN_H   = 315;
 
 function renderOpenGraph(data) {
-  const list = document.getElementById('og-list');
-  list.innerHTML = '';
+  const ogList = document.getElementById('og-list');
+  const twList = document.getElementById('tw-list');
+  ogList.innerHTML = '';
+  twList.innerHTML = '';
   const { og, twitter } = data.openGraph;
-  const hasTwitter = TW_KEYS.some(k => twitter[k] !== undefined && twitter[k] !== '');
 
-  OG_KEYS.forEach(key => appendOGRow(list, key, og[key]));
-  if (hasTwitter) TW_KEYS.forEach(key => appendOGRow(list, key, twitter[key]));
+  OG_KEYS.forEach(key => appendOGRow(ogList, key, og[key]));
+  TW_KEYS.forEach(key => appendOGRow(twList, key, twitter[key]));
+
+  setOgNavSummary('btn-og', 'og-summary', OG_KEYS.filter(k => og[k]).length, OG_KEYS.length);
+  setOgNavSummary('btn-tw', 'tw-summary', TW_KEYS.filter(k => twitter[k]).length, TW_KEYS.length);
+}
+
+// Set a nav button's summary + enabled state (disabled when nothing is set)
+function setOgNavSummary(btnId, summaryId, present, total) {
+  const btn = document.getElementById(btnId);
+  const summary = document.getElementById(summaryId);
+  if (!present) {
+    summary.textContent = 'None';
+    btn.disabled = true;
+  } else {
+    summary.textContent = `${present}/${total} set`;
+    btn.disabled = false;
+  }
 }
 
 // Returns { level, detail } for a field. Image dimensions are resolved

@@ -45,6 +45,28 @@ const redirectByTab = new Map();   // tabId -> { requestId, chain:[{url,status}]
 
 const REDIRECT_FILTER = { urls: ['*://*/*'], types: ['main_frame'] };
 
+// Toolbar/sidebar icon badge: the page's final status code, colour-coded the
+// same way the popup's status badge is (a 2xx reached via redirects reads amber).
+const BADGE_COLORS = { ok: '#16a34a', redirect: '#d97706', error: '#dc2626', server: '#6b7280' };
+
+function badgeLevelFor(status, redirectCount) {
+  let base;
+  if (status >= 200 && status < 300) base = 'ok';
+  else if (status >= 300 && status < 400) base = 'redirect';
+  else if (status >= 400 && status < 500) base = 'error';
+  else base = 'server';
+  return (base === 'ok' && redirectCount > 0) ? 'redirect' : base;
+}
+
+function setActionBadge(tabId, text, level) {
+  browser.action.setBadgeText({ text, tabId });
+  if (!level) return;
+  browser.action.setBadgeBackgroundColor({ color: BADGE_COLORS[level], tabId });
+  if (browser.action.setBadgeTextColor) {
+    browser.action.setBadgeTextColor({ color: '#ffffff', tabId });
+  }
+}
+
 browser.webRequest.onBeforeRequest.addListener(details => {
   if (details.frameId !== 0) return;
   redirectByTab.set(details.tabId, {
@@ -55,6 +77,7 @@ browser.webRequest.onBeforeRequest.addListener(details => {
     error: null,
     done: false
   });
+  setActionBadge(details.tabId, '');   // clear while the new navigation loads
 }, REDIRECT_FILTER);
 
 browser.webRequest.onBeforeRedirect.addListener(details => {
@@ -72,6 +95,8 @@ browser.webRequest.onCompleted.addListener(details => {
   entry.finalUrl = details.url;
   entry.finalStatus = details.statusCode;
   entry.done = true;
+  const redirectCount = entry.chain.filter(h => h.status >= 300 && h.status < 400).length;
+  setActionBadge(details.tabId, String(details.statusCode), badgeLevelFor(details.statusCode, redirectCount));
   browser.runtime.sendMessage({ action: 'redirectUpdated', tabId: details.tabId }).catch(() => {});
 }, REDIRECT_FILTER);
 
@@ -81,6 +106,10 @@ browser.webRequest.onErrorOccurred.addListener(details => {
   if (!entry || entry.requestId !== details.requestId) return;
   entry.error = details.error;
   entry.done = true;
+  // Skip user-initiated cancellations (clicking away mid-load)
+  if (!/aborted/i.test(details.error || '')) {
+    setActionBadge(details.tabId, 'ERR', 'server');
+  }
 }, REDIRECT_FILTER);
 
 browser.tabs.onRemoved.addListener(tabId => redirectByTab.delete(tabId));

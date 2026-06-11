@@ -60,14 +60,17 @@ function getOpenGraph() {
 
 function getStructuredData() {
   const schemas = [];
+  let invalid = 0;
   document.querySelectorAll('script[type="application/ld+json"]').forEach(script => {
+    const raw = script.textContent.trim();
+    if (!raw) return;
     try {
-      const parsed = JSON.parse(script.textContent);
+      const parsed = JSON.parse(raw);
       const items  = Array.isArray(parsed) ? parsed : parsed['@graph'] ? parsed['@graph'] : [parsed];
       schemas.push(...items.filter(item => item && item['@type']));
-    } catch { /* invalid JSON-LD */ }
+    } catch { invalid++; }
   });
-  return schemas;
+  return { schemas, invalid };
 }
 
 function getDates() {
@@ -124,6 +127,7 @@ function getPageData() {
   const canonical   = canonicalEl ? canonicalEl.getAttribute('href') : null;
 
   const bodyText = getCleanBodyText();
+  const sd = getStructuredData();
 
   return {
     metaRefresh: getMetaRefresh(),
@@ -137,7 +141,8 @@ function getPageData() {
     bodyTextExcerpt:  bodyText.slice(0, 1000),
     indexability:     getIndexability(),
     openGraph:        getOpenGraph(),
-    structuredData:   getStructuredData(),
+    structuredData:        sd.schemas,
+    structuredDataInvalid: sd.invalid,
     dates:            getDates()
   };
 }

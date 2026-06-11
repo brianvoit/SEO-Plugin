@@ -225,8 +225,47 @@ function renderOpenGraph(data) {
   OG_KEYS.forEach(key => appendOGRow(ogList, key, og[key]));
   TW_KEYS.forEach(key => appendOGRow(twList, key, twitter[key]));
 
-  setOgNavSummary('btn-og', 'og-summary', OG_KEYS.filter(k => og[k]).length, OG_KEYS.length);
-  setOgNavSummary('btn-tw', 'tw-summary', TW_KEYS.filter(k => twitter[k]).length, TW_KEYS.length);
+  const ogPresent = OG_KEYS.filter(k => og[k]).length;
+  const twPresent = TW_KEYS.filter(k => twitter[k]).length;
+  setOgNavSummary('btn-og', 'og-summary', ogPresent, OG_KEYS.length);
+  setOgNavSummary('btn-tw', 'tw-summary', twPresent, TW_KEYS.length);
+
+  // Status symbol on the nav row: worst of the field checks (only when some
+  // tags are present — a section with nothing set just reads "None")
+  setNavStatus('og-status', ogPresent ? worstOgLevel(OG_KEYS, og) : 'ok');
+  setNavStatus('tw-status', twPresent ? worstOgLevel(TW_KEYS, twitter) : 'ok');
+}
+
+// Worst level (error > warning > ok) across a set of OG/Twitter fields
+function worstOgLevel(keys, source) {
+  let worst = 'ok';
+  for (const key of keys) {
+    const present = source[key] !== undefined && source[key] !== null && source[key] !== '';
+    const { level } = ogFieldCheck(key, source[key], present);
+    if (level === 'error') return 'error';
+    if (level === 'warning') worst = 'warning';
+  }
+  return worst;
+}
+
+// Show a red/amber warning triangle on a nav row, or hide it for ok/neutral
+function setNavStatus(elId, level) {
+  const el = document.getElementById(elId);
+  el.replaceChildren();
+  el.classList.remove('field-nav-status--error', 'field-nav-status--warning');
+  if (level !== 'error' && level !== 'warning') {
+    el.classList.add('hidden');
+    return;
+  }
+  el.classList.remove('hidden');
+  el.classList.add(level === 'error' ? 'field-nav-status--error' : 'field-nav-status--warning');
+  el.appendChild(svgFromString(
+    '<svg viewBox="0 0 16 16" width="13" height="13">' +
+      '<path d="M8 1.8 15 14H1z" fill="currentColor"/>' +
+      '<rect x="7.3" y="6" width="1.4" height="4" rx=".7" fill="#fff"/>' +
+      '<circle cx="8" cy="11.6" r=".8" fill="#fff"/>' +
+    '</svg>'
+  ));
 }
 
 // Set a nav button's summary + enabled state (disabled when nothing is set)
@@ -401,19 +440,57 @@ function hideImagePreview() {
 
 // ─── Render: structured data ─────────────────────────────────────────────────
 
+// Recommended properties per common Schema.org type — a missing one is a
+// yellow flag (rich-result eligibility usually needs these).
+const SCHEMA_RECOMMENDED = {
+  Article:       ['headline', 'image', 'datePublished', 'author'],
+  BlogPosting:   ['headline', 'image', 'datePublished', 'author'],
+  NewsArticle:   ['headline', 'image', 'datePublished', 'author'],
+  Product:       ['name', 'image'],
+  Recipe:        ['name', 'image', 'recipeIngredient', 'recipeInstructions'],
+  Organization:  ['name', 'logo', 'url'],
+  LocalBusiness: ['name', 'address', 'telephone'],
+  Event:         ['name', 'startDate', 'location'],
+  VideoObject:   ['name', 'thumbnailUrl', 'uploadDate'],
+  BreadcrumbList:['itemListElement'],
+  FAQPage:       ['mainEntity'],
+  Person:        ['name']
+};
+
+function schemaIsMissing(schema, prop) {
+  const v = schema[prop];
+  return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
+}
+
+// Worst status across all schemas: red for invalid JSON-LD, amber for a
+// recognized type missing a recommended property
+function schemaWorstLevel(schemas, invalidCount) {
+  if (invalidCount > 0) return 'error';
+  for (const schema of schemas) {
+    for (const type of [].concat(schema['@type'])) {
+      const rec = SCHEMA_RECOMMENDED[type];
+      if (rec && rec.some(p => schemaIsMissing(schema, p))) return 'warning';
+    }
+  }
+  return 'ok';
+}
+
 function renderStructuredData(data) {
   _schemas = data.structuredData ?? [];
+  const invalid = data.structuredDataInvalid ?? 0;
   const btn     = document.getElementById('btn-schema');
   const summary = document.getElementById('schema-summary');
 
   if (!_schemas.length) {
-    summary.textContent = 'None';
+    summary.textContent = invalid ? 'Invalid' : 'None';
     btn.disabled = true;
   } else {
     const types = _schemas.map(s => [].concat(s['@type'])[0]).filter(Boolean);
     summary.textContent = types.length === 1 ? types[0] : `${types.length} types`;
     btn.disabled = false;
   }
+
+  setNavStatus('schema-status', schemaWorstLevel(_schemas, invalid));
 }
 
 function renderSchemaDetail() {

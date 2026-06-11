@@ -80,8 +80,17 @@ function gscConnectErrorMessage(error) {
 
 // ─── Google Search Console: chart helper ─────────────────────────────────────
 
+// Compact axis labels: 12,345 → 12.3k, 1,200,000 → 1.2M, position → 3.4
+function gscAxisNum(v, metric) {
+  if (metric === 'position') return v.toFixed(1);
+  const abs = Math.abs(v);
+  if (abs >= 1e6) return (v / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (abs >= 1e3) return (v / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
+  return Math.round(v).toString();
+}
+
 function buildCombinedChart(filled, activeMetrics, { width = 320, height = 130 } = {}) {
-  const padL = 6, padR = 6, padT = 10, padB = 16;
+  const padL = 34, padR = 6, padT = 10, padB = 16;
   const innerW = width - padL - padR, innerH = height - padT - padB;
   const n = filled.length;
   const xFor = i => padL + (n > 1 ? (i / (n - 1)) * innerW : innerW / 2);
@@ -104,7 +113,7 @@ function buildCombinedChart(filled, activeMetrics, { width = 320, height = 130 }
     const axisMax = cfg.invertY ? max : max + headroom;
     const span = (axisMax - axisMin) || 1;
     scales[metric] = {
-      points,
+      points, min, max, invertY: cfg.invertY,
       yFor: v => padT + (cfg.invertY ? (v - axisMin) / span : 1 - (v - axisMin) / span) * innerH
     };
   });
@@ -134,6 +143,21 @@ function buildCombinedChart(filled, activeMetrics, { width = 320, height = 130 }
     svg += `<line class="gsc-chart-gridline gsc-chart-gridline--v" x1="${x.toFixed(1)}" y1="${padT}" x2="${x.toFixed(1)}" y2="${(padT+innerH).toFixed(1)}" />`;
     const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
     svg += `<text class="gsc-chart-axis-label" x="${x.toFixed(1)}" y="${height-3}" text-anchor="${anchor}">${escapeHtml(formatDateShort(filled[i].date, showYear))}</text>`;
+  });
+
+  // Y-axis value labels: each active metric is normalized to its own scale, so
+  // label its range at the left edge in the metric's colour. Top label = the
+  // value mapped to the top of the plot (max, or min for inverted position).
+  // Stagger multiple metrics vertically so the labels never overlap.
+  const activeScaled = Object.keys(GSC_METRICS).filter(m => activeMetrics[m] && scales[m]);
+  activeScaled.forEach((metric, idx) => {
+    const s = scales[metric];
+    const topVal = s.invertY ? s.min : s.max;
+    const botVal = s.invertY ? s.max : s.min;
+    const yTop = padT + 7 + idx * 9;
+    const yBot = padT + innerH - idx * 9;
+    svg += `<text class="gsc-chart-yaxis" data-metric="${metric}" x="${(padL-4).toFixed(1)}" y="${yTop.toFixed(1)}" text-anchor="end">${escapeHtml(gscAxisNum(topVal, metric))}</text>`;
+    svg += `<text class="gsc-chart-yaxis" data-metric="${metric}" x="${(padL-4).toFixed(1)}" y="${yBot.toFixed(1)}" text-anchor="end">${escapeHtml(gscAxisNum(botVal, metric))}</text>`;
   });
 
   // Metric lines (position is split into segments to skip no-impression days)
@@ -172,19 +196,19 @@ function buildCombinedChart(filled, activeMetrics, { width = 320, height = 130 }
   return { svg, scales, xFor, dims: { padL, padT, innerW, innerH, width, height, n } };
 }
 
-function attachChartHover(svgEl, filled, activeMetrics, built) {
+function attachChartHover(svg, filled, activeMetrics, built) {
   const { scales, xFor, dims } = built;
   const { padL, padT, innerW, innerH, width, n } = dims;
-  const overlay   = svgEl.querySelector('#gsc-chart-overlay');
-  const hoverLine = svgEl.querySelector('#gsc-chart-hoverline');
-  const tooltip   = svgEl.querySelector('#gsc-chart-tooltip');
+  const overlay   = svg.querySelector('#gsc-chart-overlay');
+  const hoverLine = svg.querySelector('#gsc-chart-hoverline');
+  const tooltip   = svg.querySelector('#gsc-chart-tooltip');
   const stepX = innerW / (n - 1 || 1);
   const showYear = n > 90;
 
   overlay.addEventListener('pointermove', e => {
-    const ctm = svgEl.getScreenCTM();
+    const ctm = svg.getScreenCTM();
     if (!ctm) return;
-    const pt = svgEl.createSVGPoint();
+    const pt = svg.createSVGPoint();
     pt.x = e.clientX;
     pt.y = e.clientY;
     const svgPt = pt.matrixTransform(ctm.inverse());
@@ -197,7 +221,7 @@ function attachChartHover(svgEl, filled, activeMetrics, built) {
 
     const rows = [];
     Object.keys(GSC_METRICS).forEach(metric => {
-      const dot = svgEl.querySelector(`#gsc-chart-hoverdot-${metric}`);
+      const dot = svg.querySelector(`#gsc-chart-hoverdot-${metric}`);
       if (!activeMetrics[metric] || !scales[metric]) { dot.style.display = 'none'; return; }
       const cfg = GSC_METRICS[metric];
       const point = scales[metric].points.find(p => p.i === idx);
@@ -234,7 +258,7 @@ function attachChartHover(svgEl, filled, activeMetrics, built) {
   overlay.addEventListener('pointerleave', () => {
     hoverLine.style.display = 'none';
     Object.keys(GSC_METRICS).forEach(metric => {
-      svgEl.querySelector(`#gsc-chart-hoverdot-${metric}`).style.display = 'none';
+      svg.querySelector(`#gsc-chart-hoverdot-${metric}`).style.display = 'none';
     });
     tooltip.style.display = 'none';
   });

@@ -24,31 +24,26 @@ function showSchemaPanel() {
   if (!_schemas.length) return;
   mainContent.classList.add('hidden');
   searchTab.classList.add('hidden');
-  tabGroup.classList.add('hidden');
   updateFooter.classList.add('hidden');
   errorBanner.classList.add('hidden');
   settingsPanel.classList.add('hidden');
   schemaPanel.classList.remove('hidden');
-  document.getElementById('btn-refresh').classList.add('hidden');
   renderSchemaDetail();
 }
 
 function hideSchemaPanel() {
   schemaPanel.classList.add('hidden');
   updateFooter.classList.remove('hidden');
-  document.getElementById('btn-refresh').classList.remove('hidden');
   showActiveTab();
 }
 
 function showSettings() {
   mainContent.classList.add('hidden');
   searchTab.classList.add('hidden');
-  tabGroup.classList.add('hidden');
   schemaPanel.classList.add('hidden');
   updateFooter.classList.add('hidden');
   errorBanner.classList.add('hidden');
   settingsPanel.classList.remove('hidden');
-  document.getElementById('btn-refresh').classList.add('hidden');
 
   browser.storage.local.get(['claudeApiKey', 'charRanges', 'displayMode', 'gscClientId', 'gscClientSecret']).then(({ claudeApiKey, charRanges: stored, displayMode, gscClientId, gscClientSecret }) => {
     document.getElementById('api-key-input').value = claudeApiKey ?? '';
@@ -66,7 +61,7 @@ function showSettings() {
     document.getElementById('gsc-client-id').value     = gscClientId ?? '';
     document.getElementById('gsc-client-secret').value = gscClientSecret ?? '';
 
-    setDisplayModeUI(displayMode || 'popup');
+    setDisplayModeUI(displayMode || 'sidebar');
   });
 
   loadWpSites();
@@ -77,7 +72,6 @@ function showSettings() {
 function hideSettings() {
   settingsPanel.classList.add('hidden');
   updateFooter.classList.remove('hidden');
-  document.getElementById('btn-refresh').classList.remove('hidden');
   showActiveTab();
   loadData(metaExpanded);
 }
@@ -92,9 +86,13 @@ document.getElementById('btn-schema-back').addEventListener('click', hideSchemaP
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const tab = btn.dataset.tab;
-    if (tab === activeTab) return;
+    const inSettings = !settingsPanel.classList.contains('hidden');
+    const inSchema   = !schemaPanel.classList.contains('hidden');
+    if (tab === activeTab && !inSettings && !inSchema) return;
     activeTab = tab;
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('is-active', b.dataset.tab === tab));
-    showActiveTab();
+    if (inSettings) hideSettings();
+    else if (inSchema) hideSchemaPanel();
+    else showActiveTab();
   });
 });

@@ -224,12 +224,56 @@ function appendOGRow(container, key, value) {
   row.className = 'og-row';
   const label = key.replace('og:','').replace('twitter:','tw:');
   const present = value !== undefined && value !== null && value !== '';
+  const isImage = present && (key === 'og:image' || key === 'twitter:image');
+  const isUrl   = present && /^https?:\/\//i.test(value);
 
-  row.innerHTML = present
-    ? `<span class="og-key">${escapeHtml(label)}</span><span class="og-value" title="${escapeHtml(value)}">${escapeHtml(value.length > 45 ? value.slice(0,45)+'…' : value)}</span>`
-    : `<span class="og-key">${escapeHtml(label)}</span><span class="og-missing">missing</span>`;
-
+  let valueMarkup;
+  if (!present) {
+    valueMarkup = '<span class="og-missing">missing</span>';
+  } else {
+    const display = value.length > 45 ? value.slice(0, 45) + '…' : value;
+    valueMarkup = `<span class="og-value${isUrl ? ' og-value--link' : ''}" title="${escapeHtml(value)}">${escapeHtml(display)}</span>`;
+  }
+  row.innerHTML = `<span class="og-key">${escapeHtml(label)}</span>${valueMarkup}`;
   container.appendChild(row);
+
+  if (!present) return;
+
+  const valueEl = row.querySelector('.og-value');
+  if (isUrl) {
+    valueEl.addEventListener('click', () => browser.tabs.create({ url: value }));
+  }
+  if (isImage && isUrl) {
+    valueEl.addEventListener('mouseenter', () => showImagePreview(value, valueEl));
+    valueEl.addEventListener('mouseleave', hideImagePreview);
+  }
+}
+
+// ─── OG/Twitter image hover preview ──────────────────────────────────────────
+
+let _ogPreviewEl = null;
+
+function showImagePreview(url, anchorEl) {
+  if (!_ogPreviewEl) {
+    _ogPreviewEl = document.createElement('div');
+    _ogPreviewEl.className = 'og-img-preview';
+    const img = document.createElement('img');
+    img.alt = '';
+    _ogPreviewEl.appendChild(img);
+    document.body.appendChild(_ogPreviewEl);
+  }
+  _ogPreviewEl.querySelector('img').src = url;
+  _ogPreviewEl.classList.add('visible');
+
+  // Position just below the URL, clamped to the viewport
+  const r = anchorEl.getBoundingClientRect();
+  const maxW = 210;
+  _ogPreviewEl.style.top  = `${r.bottom + 6}px`;
+  _ogPreviewEl.style.left = `${Math.max(6, Math.min(r.left, window.innerWidth - maxW - 6))}px`;
+}
+
+function hideImagePreview() {
+  if (_ogPreviewEl) _ogPreviewEl.classList.remove('visible');
 }
 
 // ─── Render: structured data ─────────────────────────────────────────────────

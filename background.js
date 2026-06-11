@@ -23,7 +23,7 @@ browser.menus.onClicked.addListener((info, tab) => {
 
 async function applyDisplayMode() {
   const { displayMode } = await browser.storage.local.get('displayMode');
-  const useSidebar = displayMode === 'sidebar';
+  const useSidebar = displayMode !== 'popup';   // default to sidebar when unset
   await browser.action.setPopup({ popup: useSidebar ? '' : 'popup.html' });
 }
 

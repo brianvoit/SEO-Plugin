@@ -13,9 +13,9 @@ jobs:
       contents: write   # needed to create releases
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '20'
 
@@ -36,6 +36,7 @@ jobs:
             --api-key="${{ secrets.AMO_JWT_ISSUER }}" \
             --api-secret="${{ secrets.AMO_JWT_SECRET }}" \
             --channel=unlisted \
+            --approval-timeout=1800000 \
             --ignore-files=".github/**" ".gitignore" ".git/**"
 
       - name: Upload XPI as artifact

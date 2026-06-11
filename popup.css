@@ -762,6 +762,11 @@ main, #search-tab { padding: 4px 0 8px; }
 
 .range-input:focus { border-color: var(--accent); }
 
+/* Hide the number-input spinner arrows */
+.range-input::-webkit-outer-spin-button,
+.range-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.range-input { -moz-appearance: textfield; appearance: textfield; }
+
 .range-unit {
   font-size: 11px;
   color: var(--text-muted);
@@ -869,6 +874,23 @@ main, #search-tab { padding: 4px 0 8px; }
   font-size: 11px;
   font-weight: 600;
 }
+.og-value--link { color: var(--accent); cursor: pointer; }
+.og-value--link:hover { text-decoration: underline; }
+
+/* OG/Twitter image hover preview */
+.og-img-preview {
+  position: fixed;
+  z-index: 100;
+  display: none;
+  padding: 4px;
+  background: var(--bg-section);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
+.og-img-preview.visible { display: block; }
+.og-img-preview img { display: block; max-width: 200px; max-height: 200px; border-radius: 3px; }
 
 /* ── Structured Data nav row ──────────────────────────────────────────────── */
 
@@ -1027,11 +1049,15 @@ main, #search-tab { padding: 4px 0 8px; }
 
 .gsc-query-row { padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 11.5px; }
 .gsc-query-row:last-child { border-bottom: none; }
-.gsc-query-main { display: grid; grid-template-columns: 1fr 58px 54px 50px 50px; gap: 6px; align-items: center; }
+.gsc-query-main { display: grid; grid-template-columns: 18px 1fr 58px 54px 50px 50px; gap: 6px; align-items: center; }
 .gsc-query-row--header { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); border-bottom: 1px solid var(--border); }
 .gsc-query-text-wrap { display: flex; align-items: center; gap: 4px; overflow: hidden; min-width: 0; }
-.gsc-query-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex-shrink: 1; color: var(--text); cursor: pointer; }
+.gsc-query-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; color: var(--text); cursor: pointer; }
 .gsc-query-text:hover { text-decoration: underline; }
+
+/* Add-to-branded button (left of each query) */
+.gsc-query-add { background: none; border: none; padding: 0; margin: 0; display: flex; align-items: center; justify-content: center; color: var(--text-muted); cursor: pointer; flex-shrink: 0; }
+.gsc-query-add:hover { color: var(--hint-green); }
 .gsc-query-row--branded .gsc-query-text { color: var(--accent); font-weight: 600; }
 .gsc-query-num { text-align: right; font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--text-muted); }
 .gsc-branded-pill { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 8px; background: var(--accent); color: #fff; flex-shrink: 0; }

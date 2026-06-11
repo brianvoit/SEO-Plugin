@@ -15,8 +15,8 @@ let _gscOverviewData = null;
 let _gscSelectedQuery = null;
 
 const GSC_METRICS = {
-  clicks:      { label: 'Clicks',       format: n => Math.round(n).toLocaleString(), invertY: false },
   impressions: { label: 'Impressions',  format: n => Math.round(n).toLocaleString(), invertY: false },
+  clicks:      { label: 'Clicks',       format: n => Math.round(n).toLocaleString(), invertY: false },
   position:    { label: 'Avg Position', format: n => n.toFixed(1),                    invertY: true  }
 };
 
@@ -121,8 +121,9 @@ function buildCombinedChart(filled, activeMetrics, { width = 320, height = 130 }
 
   let svg = `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">`;
 
-  // Horizontal gridlines (visual rhythm only — not tied to a single metric's scale)
-  [0, 0.5, 1].forEach(t => {
+  // Horizontal gridlines every 20% of the plot height (visual rhythm only —
+  // not tied to a single metric's scale)
+  [0, 0.2, 0.4, 0.6, 0.8, 1].forEach(t => {
     const y = padT + t * innerH;
     svg += `<line class="gsc-chart-gridline" x1="${padL}" y1="${y.toFixed(1)}" x2="${(width-padR).toFixed(1)}" y2="${y.toFixed(1)}" />`;
   });
@@ -337,7 +338,7 @@ function buildQueryHeaderRow(sort) {
   const row = document.createElement('div');
   row.className = 'gsc-query-row gsc-query-row--header';
 
-  let html = '<div class="gsc-query-main"><span>Query</span>';
+  let html = '<div class="gsc-query-main"><span></span><span>Query</span>';
   GSC_QUERY_COLUMNS.forEach(col => {
     const active = sort.column === col.key;
     const arrow = active ? (sort.direction === 'asc' ? ' ▲' : ' ▼') : '';
@@ -359,6 +360,17 @@ function buildQueryDataRow(q, locations, branded, selected) {
   chips += locations.map(l => `<span class="gsc-chip">${escapeHtml(l)}</span>`).join('');
 
   let html = '<div class="gsc-query-main">';
+  // Add-to-branded button (left of the query). Already-branded terms show no
+  // button — just an empty cell to keep the grid aligned.
+  if (branded) {
+    html += '<span></span>';
+  } else {
+    html += `<button class="gsc-query-add" title="Add to branded list" aria-label="Add to branded list">
+      <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+        <circle cx="8" cy="8" r="6.4"/><line x1="8" y1="5.2" x2="8" y2="10.8"/><line x1="5.2" y1="8" x2="10.8" y2="8"/>
+      </svg>
+    </button>`;
+  }
   html += '<span class="gsc-query-text-wrap">';
   html += `<span class="gsc-query-text" title="${escapeHtml(q.query)}">${escapeHtml(q.query)}</span>`;
   if (chips) html += `<span class="gsc-query-chips">${chips}</span>`;
@@ -375,7 +387,39 @@ function buildQueryDataRow(q, locations, branded, selected) {
     browser.tabs.create({ url: 'https://www.google.com/search?q=' + encodeURIComponent(q.query) });
   });
 
+  const addBtn = row.querySelector('.gsc-query-add');
+  if (addBtn) {
+    addBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      addQueryToBranded(q.query);
+    });
+  }
+
   return row;
+}
+
+// Escape regex metacharacters so a literal query can be added to a branded pattern
+function gscEscapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Append a query term to the current domain's branded-terms regex
+function addQueryToBranded(query) {
+  let host = '';
+  try { host = new URL(_gscPageUrl).hostname.replace(/^www\./, '').toLowerCase(); } catch { return; }
+  if (!host) return;
+
+  const term = query.trim();
+  if (!term) return;
+
+  const existing = allBrandedTerms[host] || '';
+  if (existing && isQueryBranded(term, existing)) return;   // already covered
+
+  allBrandedTerms[host] = existing ? `${existing}|${gscEscapeRegex(term)}` : gscEscapeRegex(term);
+  browser.storage.local.set({ brandedTerms: allBrandedTerms }).then(() => {
+    renderGscQueries(_gscQueries, _gscPageUrl);
+    if (typeof renderBrandDomains === 'function') renderBrandDomains();
+  });
 }
 
 function renderGscQueries(queries, pageUrl) {

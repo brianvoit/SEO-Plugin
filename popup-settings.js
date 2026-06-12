@@ -17,6 +17,15 @@ document.querySelectorAll('#display-mode-group .mode-option').forEach(btn => {
   });
 });
 
+// ─── Follow active tab (sidebar / pop-out auto-refresh) ──────────────────────
+
+document.getElementById('btn-follow-tab').addEventListener('click', () => {
+  const btn = document.getElementById('btn-follow-tab');
+  const next = btn.getAttribute('aria-pressed') !== 'true';
+  btn.setAttribute('aria-pressed', String(next));
+  browser.storage.local.set({ followActiveTab: next });
+});
+
 // ─── WordPress sites ──────────────────────────────────────────────────────────
 
 let wpSites = [];

@@ -14,10 +14,23 @@ let _gscFilled = [];
 let _gscOverviewData = null;
 let _gscSelectedQuery = null;
 
+// Chart metrics config. The chart helpers below are generic — popup-ga.js
+// passes its own config of the same shape. Optional per-metric fields:
+//   invertY    zero-at-top axis (lower is better, e.g. SERP position)
+//   axisRight  prefer the right-hand Y axis when shown with other metrics
+//   axisFormat tick label formatter (defaults to compact k/M)
+//   getValue   accessor for a day's value (defaults to d[key]; null = skip day)
 const GSC_METRICS = {
-  impressions: { label: 'Impressions',  format: n => Math.round(n).toLocaleString(), invertY: false },
-  clicks:      { label: 'Clicks',       format: n => Math.round(n).toLocaleString(), invertY: false },
-  position:    { label: 'Avg Position', format: n => n.toFixed(1),                    invertY: true  }
+  impressions: { label: 'Impressions',  format: n => Math.round(n).toLocaleString() },
+  clicks:      { label: 'Clicks',       format: n => Math.round(n).toLocaleString() },
+  position:    {
+    label: 'Avg Position',
+    format: n => n.toFixed(1),
+    invertY: true,
+    axisRight: true,
+    axisFormat: v => v.toFixed(1),
+    getValue: d => (d.impressions > 0 ? d.position : null)
+  }
 };
 
 // Query table columns, in display order (Query column is fixed/first)
@@ -80,9 +93,9 @@ function gscConnectErrorMessage(error) {
 
 // ─── Google Search Console: chart helper ─────────────────────────────────────
 
-// Compact axis labels: 12,345 → 12.3k, 1,200,000 → 1.2M, position → 3.4
-function gscAxisNum(v, metric) {
-  if (metric === 'position') return v.toFixed(1);
+// Compact axis labels: 12,345 → 12.3k, 1,200,000 → 1.2M (or cfg.axisFormat)
+function chartAxisNum(v, cfg) {
+  if (cfg && cfg.axisFormat) return cfg.axisFormat(v);
   const abs = Math.abs(v);
   if (abs >= 1e6) return (v / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
   if (abs >= 1e3) return (v / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
@@ -98,27 +111,25 @@ function niceCeil(v) {
   return nice * mag;
 }
 
-function buildCombinedChart(filled, activeMetrics, { width = 320, height = 130 } = {}) {
+function buildCombinedChart(filled, activeMetrics, { width = 320, height = 130, metrics = GSC_METRICS } = {}) {
   const padT = 10, padB = 16;
   const n = filled.length;
 
-  // Active metrics in a fixed order (impressions, clicks, position)
-  const order = ['impressions', 'clicks', 'position'];
+  // Active metrics in the config's declared order
+  const order = Object.keys(metrics);
   const active = order.filter(m => activeMetrics[m]);
 
   // ── Axis placement ────────────────────────────────────────────────────────
-  // Each metric is on its own scale, so each gets its own Y axis. Position goes
-  // on the right when shown with others; counts fill the left.
+  // Each metric is on its own scale, so each gets its own Y axis. Metrics
+  // flagged axisRight go right; otherwise the last active one does, so:
   //   1 metric  → left · 2 metrics → 1 left, 1 right · 3 metrics → 2 left, 1 right
   let leftMetrics = [], rightMetrics = [];
   if (active.length <= 1) {
     leftMetrics = active.slice();
-  } else if (active.includes('position')) {
-    rightMetrics = ['position'];
-    leftMetrics = active.filter(m => m !== 'position');
   } else {
-    leftMetrics = [active[0]];
-    rightMetrics = [active[1]];
+    rightMetrics = active.filter(m => metrics[m].axisRight);
+    if (!rightMetrics.length) rightMetrics = [active[active.length - 1]];
+    leftMetrics = active.filter(m => !rightMetrics.includes(m));
   }
 
   const AXIS_W = 26;
@@ -128,21 +139,22 @@ function buildCombinedChart(filled, activeMetrics, { width = 320, height = 130 }
   const xFor = i => padL + (n > 1 ? (i / (n - 1)) * innerW : innerW / 2);
 
   // ── Per-metric scales ───────────────────────────────────────────────────────
-  // Position: 0 at the top (best), niceCeil(worst) at the bottom — lower
-  // positions sit higher on the chart, since lower is better. Counts: zoomed to
-  // their own data range with a little top headroom.
+  // invertY metrics (e.g. position): 0 at the top (best), niceCeil(worst) at
+  // the bottom — lower values sit higher, since lower is better. Counts:
+  // zoomed to their own data range with a little top headroom.
   const scales = {};
   order.forEach(metric => {
     if (!activeMetrics[metric]) { scales[metric] = null; return; }
+    const cfg = metrics[metric];
     const points = filled
-      .map((d, i) => ({ i, value: metric === 'position' ? (d.impressions > 0 ? d.position : null) : d[metric] }))
+      .map((d, i) => ({ i, value: cfg.getValue ? cfg.getValue(d) : d[metric] }))
       .filter(p => p.value !== null && p.value !== undefined);
     if (!points.length) { scales[metric] = null; return; }
     const values = points.map(p => p.value);
     const dataMin = Math.min(...values), dataMax = Math.max(...values);
 
     let yFor, ticks;
-    if (metric === 'position') {
+    if (cfg.invertY) {
       const axisMax = niceCeil(dataMax);
       const span = axisMax || 1;
       yFor = v => padT + (v / span) * innerH;                  // 0 → top
@@ -189,15 +201,15 @@ function buildCombinedChart(filled, activeMetrics, { width = 320, height = 130 }
     if (!s) return;
     s.ticks.forEach(value => {
       const y = Math.max(padT + 6, Math.min(padT + innerH, s.yFor(value)));
-      svg += `<text class="gsc-chart-yaxis" data-metric="${metric}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${anchor}" dominant-baseline="middle">${escapeHtml(gscAxisNum(value, metric))}</text>`;
+      svg += `<text class="gsc-chart-yaxis" data-metric="${metric}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${anchor}" dominant-baseline="middle">${escapeHtml(chartAxisNum(value, metrics[metric]))}</text>`;
     });
   }
   // Left axes: inner one nearest the plot, extra one further out
   leftMetrics.forEach((metric, slot) => drawYAxis(metric, padL - 4 - slot * AXIS_W, 'end'));
   rightMetrics.forEach((metric, slot) => drawYAxis(metric, width - padR + 4 + slot * AXIS_W, 'start'));
 
-  // Metric lines (position is split into segments to skip no-impression days)
-  Object.keys(GSC_METRICS).forEach(metric => {
+  // Metric lines (a metric whose getValue returns null skips those days)
+  order.forEach(metric => {
     if (!activeMetrics[metric] || !scales[metric]) return;
     const { points, yFor } = scales[metric];
     const segments = [];
@@ -217,7 +229,7 @@ function buildCombinedChart(filled, activeMetrics, { width = 320, height = 130 }
 
   // Hover line + per-metric dots, hidden until pointermove
   svg += `<line class="gsc-chart-hoverline" id="gsc-chart-hoverline" x1="${padL}" y1="${padT}" x2="${padL}" y2="${(padT+innerH).toFixed(1)}" style="display:none" />`;
-  Object.keys(GSC_METRICS).forEach(metric => {
+  order.forEach(metric => {
     svg += `<circle class="gsc-chart-hoverdot" id="gsc-chart-hoverdot-${metric}" data-metric="${metric}" r="2.5" style="display:none" />`;
   });
 
@@ -229,11 +241,12 @@ function buildCombinedChart(filled, activeMetrics, { width = 320, height = 130 }
 
   svg += `</svg>`;
 
-  return { svg, scales, xFor, dims: { padL, padT, innerW, innerH, width, height, n } };
+  return { svg, scales, xFor, metrics, dims: { padL, padT, innerW, innerH, width, height, n } };
 }
 
 function attachChartHover(svg, filled, activeMetrics, built) {
   const { scales, xFor, dims } = built;
+  const metricsCfg = built.metrics || GSC_METRICS;
   const { padL, padT, innerW, innerH, width, n } = dims;
   const overlay   = svg.querySelector('#gsc-chart-overlay');
   const hoverLine = svg.querySelector('#gsc-chart-hoverline');
@@ -256,10 +269,10 @@ function attachChartHover(svg, filled, activeMetrics, built) {
     hoverLine.style.display = '';
 
     const rows = [];
-    Object.keys(GSC_METRICS).forEach(metric => {
+    Object.keys(metricsCfg).forEach(metric => {
       const dot = svg.querySelector(`#gsc-chart-hoverdot-${metric}`);
       if (!activeMetrics[metric] || !scales[metric]) { dot.style.display = 'none'; return; }
-      const cfg = GSC_METRICS[metric];
+      const cfg = metricsCfg[metric];
       const point = scales[metric].points.find(p => p.i === idx);
       if (point) {
         dot.setAttribute('cx', x.toFixed(1));
@@ -293,7 +306,7 @@ function attachChartHover(svg, filled, activeMetrics, built) {
 
   overlay.addEventListener('pointerleave', () => {
     hoverLine.style.display = 'none';
-    Object.keys(GSC_METRICS).forEach(metric => {
+    Object.keys(metricsCfg).forEach(metric => {
       svg.querySelector(`#gsc-chart-hoverdot-${metric}`).style.display = 'none';
     });
     tooltip.style.display = 'none';
@@ -310,16 +323,20 @@ function renderGscChange(elId, current, previous, { lowerIsBetter = false } = {}
   el.className = `gsc-chart-change ${pct === 0 ? '' : improved ? 'gsc-chart-change--up' : 'gsc-chart-change--down'}`;
 }
 
-function gscFillTimeseries(timeseries, range) {
+// lagDays: how far behind "today" the data source runs (GSC ~3 days, GA ~1).
+// emptyDay: factory for a zero-filled day (defaults to the GSC shape).
+function gscFillTimeseries(timeseries, range, lagDays = 3, emptyDay = null) {
   const map = new Map(timeseries.map(d => [d.date, d]));
   const end = new Date();
-  end.setUTCDate(end.getUTCDate() - 3);
+  end.setUTCDate(end.getUTCDate() - lagDays);
   const result = [];
   for (let i = range - 1; i >= 0; i--) {
     const d = new Date(end);
     d.setUTCDate(d.getUTCDate() - i);
     const dateStr = d.toISOString().slice(0, 10);
-    result.push(map.get(dateStr) || { date: dateStr, clicks: 0, impressions: 0, ctr: 0, position: 0 });
+    result.push(map.get(dateStr) || (emptyDay
+      ? { date: dateStr, ...emptyDay() }
+      : { date: dateStr, clicks: 0, impressions: 0, ctr: 0, position: 0 }));
   }
   return result;
 }
@@ -738,7 +755,7 @@ document.getElementById('btn-gsc-clear-query-filter').addEventListener('click', 
   if (_gscSelectedQuery) selectGscQuery(_gscSelectedQuery);
 });
 
-document.querySelectorAll('.gsc-metric-toggle').forEach(btn => {
+document.querySelectorAll('#gsc-metric-toggles .gsc-metric-toggle').forEach(btn => {
   btn.addEventListener('click', () => {
     const metric = btn.dataset.metric;
     const next = !gscActiveMetrics[metric];
@@ -907,7 +924,7 @@ function loadGscPrefs() {
     gscQuerySort = storedSort || { column: 'clicks', direction: 'desc' };
     setGscRangeUI(gscSelectedRange);
     document.getElementById('btn-gsc-branded-toggle').setAttribute('aria-pressed', String(gscHideBranded));
-    document.querySelectorAll('.gsc-metric-toggle').forEach(btn => {
+    document.querySelectorAll('#gsc-metric-toggles .gsc-metric-toggle').forEach(btn => {
       btn.setAttribute('aria-pressed', String(gscActiveMetrics[btn.dataset.metric] !== false));
     });
   });

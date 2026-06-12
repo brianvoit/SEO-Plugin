@@ -1194,6 +1194,40 @@ body.settings-open #update-footer { margin-top: auto; }
   background: var(--accent);
 }
 
+/* Long property lists (GA accounts can have dozens) scroll instead of growing */
+.gsc-property-all--scroll { max-height: 190px; overflow-y: auto; }
+
+/* GA channel breakdown table */
+.ga-channel-row {
+  display: grid;
+  grid-template-columns: 1fr 62px 56px 44px;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 11.5px;
+}
+.ga-channel-row:last-child { border-bottom: none; }
+.ga-channel-row--header {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-muted);
+}
+.ga-channel-row--header .ga-channel-num { font-family: inherit; }
+.ga-channel-name {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ga-channel-num {
+  text-align: right;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--text-muted);
+}
+
 .gsc-status-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: .05em; }
 .gsc-status-badge--connected    { background: var(--hint-green); color: #fff; }
 .gsc-status-badge--disconnected { background: var(--bg-section); color: var(--text-muted); border: 1px solid var(--border); }
@@ -1245,6 +1279,23 @@ body.settings-open #update-footer { margin-top: auto; }
 .gsc-chart-yaxis[data-metric="clicks"]      { fill: var(--chart-clicks); }
 .gsc-chart-yaxis[data-metric="impressions"] { fill: var(--chart-impressions); }
 .gsc-chart-yaxis[data-metric="position"]    { fill: var(--chart-position); }
+
+/* GA metrics reuse the three chart colours: sessions=blue, users=purple, pageviews=orange */
+.gsc-chart-line[data-metric="sessions"],  .gsc-chart-hoverdot[data-metric="sessions"]  { stroke: var(--chart-clicks); }
+.gsc-chart-line[data-metric="users"],     .gsc-chart-hoverdot[data-metric="users"]     { stroke: var(--chart-impressions); }
+.gsc-chart-line[data-metric="pageviews"], .gsc-chart-hoverdot[data-metric="pageviews"] { stroke: var(--chart-position); }
+.gsc-chart-hoverdot[data-metric="sessions"]  { fill: var(--chart-clicks); stroke: var(--bg); }
+.gsc-chart-hoverdot[data-metric="users"]     { fill: var(--chart-impressions); stroke: var(--bg); }
+.gsc-chart-hoverdot[data-metric="pageviews"] { fill: var(--chart-position); stroke: var(--bg); }
+.gsc-chart-yaxis[data-metric="sessions"]     { fill: var(--chart-clicks); }
+.gsc-chart-yaxis[data-metric="users"]        { fill: var(--chart-impressions); }
+.gsc-chart-yaxis[data-metric="pageviews"]    { fill: var(--chart-position); }
+.gsc-tooltip-dot[data-metric="sessions"]     { fill: var(--chart-clicks); }
+.gsc-tooltip-dot[data-metric="users"]        { fill: var(--chart-impressions); }
+.gsc-tooltip-dot[data-metric="pageviews"]    { fill: var(--chart-position); }
+.gsc-metric-dot[data-metric="sessions"]      { background: var(--chart-clicks); }
+.gsc-metric-dot[data-metric="users"]         { background: var(--chart-impressions); }
+.gsc-metric-dot[data-metric="pageviews"]     { background: var(--chart-position); }
 
 /* Hover/tooltip */
 .gsc-chart-overlay { fill: transparent; pointer-events: all; cursor: crosshair; }

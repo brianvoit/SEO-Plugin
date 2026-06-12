@@ -13,7 +13,7 @@
       }
     }
   },
-  "permissions": ["storage", "activeTab", "scripting", "tabs", "menus", "identity", "webRequest"],
+  "permissions": ["storage", "activeTab", "scripting", "tabs", "menus", "identity", "webRequest", "webNavigation"],
   "host_permissions": [
     "*://*/*",
     "https://api.github.com/*",
@@ -21,6 +21,8 @@
     "https://oauth2.googleapis.com/*",
     "https://www.googleapis.com/*",
     "https://searchconsole.googleapis.com/*",
+    "https://analyticsadmin.googleapis.com/*",
+    "https://analyticsdata.googleapis.com/*",
     "https://accounts.google.com/*"
   ],
   "background": {

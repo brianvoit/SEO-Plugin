@@ -1,10 +1,52 @@
-// Entry point: sidebar embed mode, the update checker, and the initial load.
+// Entry point: view detection (sidebar / pop-out window), follow-active-tab
+// auto refresh, the update checker, and the initial load.
 // Loaded last — every other popup-*.js file must be loaded before this one.
 
-// ─── Sidebar embed mode ───────────────────────────────────────────────────────
+// ─── View detection: sidebar / pop-out window ────────────────────────────────
 
-if (browser.extension.getViews({ type: 'sidebar' }).includes(window)) {
-  document.body.classList.add('embed-sidebar');
+const IS_SIDEBAR = browser.extension.getViews({ type: 'sidebar' }).includes(window);
+const IS_WINDOW  = new URLSearchParams(location.search).get('view') === 'window';
+
+if (IS_SIDEBAR) document.body.classList.add('embed-sidebar');
+// The pop-out window reuses the sidebar's fluid sizing, plus its own marker
+// class (getActiveTab targets the browser's last normal window instead of
+// this window's own extension page).
+if (IS_WINDOW) document.body.classList.add('embed-sidebar', 'embed-window');
+
+// ─── Follow active tab (sidebar / pop-out only) ──────────────────────────────
+// The anchored popup closes on any outside click, so it never needs this.
+
+if (IS_SIDEBAR || IS_WINDOW) {
+  let followEnabled = true;
+  let followTimer = null;
+
+  browser.storage.local.get('followActiveTab').then(({ followActiveTab }) => {
+    followEnabled = followActiveTab !== false;
+  });
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.followActiveTab) {
+      followEnabled = changes.followActiveTab.newValue !== false;
+    }
+  });
+
+  const scheduleFollowRefresh = () => {
+    if (!followEnabled) return;
+    clearTimeout(followTimer);
+    followTimer = setTimeout(() => {
+      metaExpanded = false;
+      if (typeof clearGenResults === 'function') clearGenResults();
+      loadData(false);
+    }, 400);
+  };
+
+  browser.tabs.onActivated.addListener(scheduleFollowRefresh);
+  browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (tab.active && changeInfo.status === 'complete') scheduleFollowRefresh();
+  });
+  // Pop-out: switching focus between browser windows changes the target tab
+  browser.windows.onFocusChanged.addListener(windowId => {
+    if (IS_WINDOW && windowId !== browser.windows.WINDOW_ID_NONE) scheduleFollowRefresh();
+  });
 }
 
 // ─── Update checker ──────────────────────────────────────────────────────────
@@ -59,4 +101,4 @@ document.getElementById('btn-check-update').addEventListener('click', checkForUp
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
-loadGscPrefs().then(() => loadData());
+Promise.all([loadGscPrefs(), loadGaPrefs()]).then(() => loadData());

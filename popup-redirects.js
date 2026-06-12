@@ -18,8 +18,9 @@ function redirectTypeLabel(status) {
   return '';
 }
 
+// Server 3xx hops plus stitched client-side (JS/meta) redirect hops
 function countRedirects(chain) {
-  return chain.filter(h => h.status >= 300 && h.status < 400).length;
+  return chain.filter(h => (h.status >= 300 && h.status < 400) || h.kind === 'client').length;
 }
 
 // ─── Header badge ────────────────────────────────────────────────────────────
@@ -79,7 +80,7 @@ function buildHopRow(hop, isFinal) {
   status.textContent = hop.status;
   row.appendChild(status);
 
-  const typeText = isFinal ? '' : redirectTypeLabel(hop.status);
+  const typeText = hop.kind === 'client' ? 'JS / Meta' : (isFinal ? '' : redirectTypeLabel(hop.status));
   const type = document.createElement('span');
   type.className = 'redirect-type';
   type.textContent = typeText;

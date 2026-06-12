@@ -152,6 +152,14 @@ function renderIndexabilitySection() {
 }
 
 async function getActiveTab() {
+  // In the pop-out window, "current window" is the pop-out itself — ask the
+  // background for the active tab of the last focused normal browser window.
+  if (document.body.classList.contains('embed-window')) {
+    try {
+      const tab = await browser.runtime.sendMessage({ action: 'getTargetTab' });
+      if (tab) return tab;
+    } catch { /* fall back to the regular query */ }
+  }
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   return tab;
 }

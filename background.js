@@ -17,14 +17,15 @@ browser.menus.onClicked.addListener((info, tab) => {
   }
 });
 
-// ─── Display mode: popup vs. sidebar ────────────────────────────────────────
-// In sidebar mode the toolbar button has no popup, so a click falls through to
-// onClicked, which toggles Firefox's native sidebar (a real viewport resize).
+// ─── Display mode: popup / sidebar / pop-out window ──────────────────────────
+// In sidebar and window modes the toolbar button has no popup, so a click
+// falls through to onClicked, which either toggles Firefox's native sidebar or
+// opens (or focuses) the dedicated pop-out window.
 
 async function applyDisplayMode() {
   const { displayMode } = await browser.storage.local.get('displayMode');
-  const useSidebar = displayMode !== 'popup';   // default to sidebar when unset
-  await browser.action.setPopup({ popup: useSidebar ? '' : 'popup.html' });
+  const mode = displayMode || 'sidebar';   // default to sidebar when unset
+  await browser.action.setPopup({ popup: mode === 'popup' ? 'popup.html' : '' });
 }
 
 applyDisplayMode();
@@ -33,17 +34,112 @@ browser.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.displayMode) applyDisplayMode();
 });
 
-browser.action.onClicked.addListener(() => {
-  browser.sidebarAction.toggle();
+// Firefox keeps the user-input context across WebExtension promise chains, so
+// sidebarAction.toggle() still works after the storage read.
+browser.action.onClicked.addListener(async () => {
+  const { displayMode } = await browser.storage.local.get('displayMode');
+  if ((displayMode || 'sidebar') === 'window') openPopoutWindow();
+  else browser.sidebarAction.toggle();
 });
+
+// ─── Pop-out window ───────────────────────────────────────────────────────────
+
+const POPOUT_KEY = 'popoutWindowId';
+
+async function openPopoutWindow() {
+  try {
+    const stored = await browser.storage.session.get(POPOUT_KEY);
+    const existingId = stored[POPOUT_KEY];
+    if (existingId != null) {
+      const win = await browser.windows.get(existingId).catch(() => null);
+      if (win) { await browser.windows.update(existingId, { focused: true }); return; }
+    }
+  } catch { /* fall through to create */ }
+
+  const win = await browser.windows.create({
+    url: browser.runtime.getURL('popup.html?view=window'),
+    type: 'popup',
+    width: 460,
+    height: 720
+  });
+  browser.storage.session.set({ [POPOUT_KEY]: win.id }).catch(() => {});
+}
+
+browser.windows.onRemoved.addListener(async windowId => {
+  try {
+    const stored = await browser.storage.session.get(POPOUT_KEY);
+    if (stored[POPOUT_KEY] === windowId) await browser.storage.session.remove(POPOUT_KEY);
+  } catch { /* ignore */ }
+});
+
+// ─── Target tab for the pop-out window ───────────────────────────────────────
+// Inside a pop-out, tabs.query({currentWindow:true}) returns the pop-out's own
+// extension page, so the background tracks the active tab of the last focused
+// *normal* window and hands it to the popup via getTargetTab.
+
+browser.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
+  const win = await browser.windows.get(windowId).catch(() => null);
+  if (win && win.type === 'normal') {
+    browser.storage.session.set({ lastNormalTab: tabId }).catch(() => {});
+  }
+});
+
+browser.windows.onFocusChanged.addListener(async windowId => {
+  if (windowId === browser.windows.WINDOW_ID_NONE) return;
+  const win = await browser.windows.get(windowId, { populate: true }).catch(() => null);
+  if (win && win.type === 'normal') {
+    const active = (win.tabs || []).find(t => t.active);
+    if (active) browser.storage.session.set({ lastNormalTab: active.id }).catch(() => {});
+  }
+});
+
+async function getTargetTab() {
+  try {
+    const { lastNormalTab } = await browser.storage.session.get('lastNormalTab');
+    if (lastNormalTab != null) {
+      const tab = await browser.tabs.get(lastNormalTab).catch(() => null);
+      if (tab) return tab;
+    }
+  } catch { /* storage.session unavailable */ }
+  // Fallback: the focused (or first) normal window's active tab
+  const wins = await browser.windows.getAll({ populate: true });
+  const normals = wins.filter(w => w.type === 'normal');
+  const target = normals.find(w => w.focused) || normals[0];
+  return target ? (target.tabs || []).find(t => t.active) || null : null;
+}
 
 // ─── Redirect trace: status code + redirect chain per tab ───────────────────
 // Observe-only webRequest on top-level navigations, so the popup can show how
 // you arrived at the current page (direct vs. via redirects) and the full chain.
+//
+// The background is an MV3 event page, so the in-memory Map is only a
+// write-through cache: every update is mirrored to storage.session (which
+// survives event-page suspension and clears on browser exit), and reads fall
+// back to it after a restart of the event page.
 
-const redirectByTab = new Map();   // tabId -> { requestId, chain:[{url,status}], finalUrl, finalStatus, error, done }
+const redirectByTab = new Map();   // tabId -> { requestId, chain:[{url,status,kind?}], finalUrl, finalStatus, error, done, prevChain }
 
 const REDIRECT_FILTER = { urls: ['*://*/*'], types: ['main_frame'] };
+const REDIRECT_MAX_HOPS = 12;      // cap stitched chains (JS redirect loops)
+
+function redirectKey(tabId) { return `redirect:${tabId}`; }
+
+function saveRedirect(tabId, entry) {
+  redirectByTab.set(tabId, entry);
+  browser.storage.session.set({ [redirectKey(tabId)]: entry }).catch(() => {});
+}
+
+async function loadRedirect(tabId) {
+  if (redirectByTab.has(tabId)) return redirectByTab.get(tabId);
+  try {
+    const stored = await browser.storage.session.get(redirectKey(tabId));
+    const entry = stored[redirectKey(tabId)] || null;
+    if (entry) redirectByTab.set(tabId, entry);
+    return entry;
+  } catch {
+    return null;
+  }
+}
 
 // Toolbar/sidebar icon badge: the page's final status code, colour-coded the
 // same way the popup's status badge is (a 2xx reached via redirects reads amber).
@@ -69,13 +165,17 @@ function setActionBadge(tabId, text, level) {
 
 browser.webRequest.onBeforeRequest.addListener(details => {
   if (details.frameId !== 0) return;
-  redirectByTab.set(details.tabId, {
+  // Keep the finished previous chain around until onCommitted tells us whether
+  // this navigation is a client (JS/meta) redirect — if so it gets stitched on.
+  const prev = redirectByTab.get(details.tabId);
+  saveRedirect(details.tabId, {
     requestId: details.requestId,
     chain: [],
     finalUrl: null,
     finalStatus: null,
     error: null,
-    done: false
+    done: false,
+    prevChain: (prev && prev.done && prev.chain && prev.chain.length) ? prev.chain : null
   });
   setActionBadge(details.tabId, '');   // clear while the new navigation loads
 }, REDIRECT_FILTER);
@@ -85,6 +185,7 @@ browser.webRequest.onBeforeRedirect.addListener(details => {
   const entry = redirectByTab.get(details.tabId);
   if (!entry || entry.requestId !== details.requestId) return;
   entry.chain.push({ url: details.url, status: details.statusCode });
+  saveRedirect(details.tabId, entry);
 }, REDIRECT_FILTER);
 
 browser.webRequest.onCompleted.addListener(details => {
@@ -95,6 +196,7 @@ browser.webRequest.onCompleted.addListener(details => {
   entry.finalUrl = details.url;
   entry.finalStatus = details.statusCode;
   entry.done = true;
+  saveRedirect(details.tabId, entry);
   const redirectCount = entry.chain.filter(h => h.status >= 300 && h.status < 400).length;
   setActionBadge(details.tabId, String(details.statusCode), badgeLevelFor(details.statusCode, redirectCount));
   browser.runtime.sendMessage({ action: 'redirectUpdated', tabId: details.tabId }).catch(() => {});
@@ -106,69 +208,75 @@ browser.webRequest.onErrorOccurred.addListener(details => {
   if (!entry || entry.requestId !== details.requestId) return;
   entry.error = details.error;
   entry.done = true;
+  saveRedirect(details.tabId, entry);
   // Skip user-initiated cancellations (clicking away mid-load)
   if (!/aborted/i.test(details.error || '')) {
     setActionBadge(details.tabId, 'ERR', 'server');
   }
 }, REDIRECT_FILTER);
 
-browser.tabs.onRemoved.addListener(tabId => redirectByTab.delete(tabId));
+// JS/meta redirects start a brand-new request, which webRequest sees as an
+// unrelated navigation. onCommitted's transitionQualifiers identifies them, so
+// the previous page's chain gets stitched onto this one instead of dropped.
+browser.webNavigation.onCommitted.addListener(details => {
+  if (details.frameId !== 0) return;
+  const entry = redirectByTab.get(details.tabId);
+  if (!entry || !entry.prevChain) return;
+  if ((details.transitionQualifiers || []).includes('client_redirect')) {
+    const prev = entry.prevChain.map(h => ({ ...h }));
+    prev[prev.length - 1].kind = 'client';   // junction hop: page issued a JS/meta redirect
+    entry.chain = prev.concat(entry.chain).slice(-REDIRECT_MAX_HOPS);
+    browser.runtime.sendMessage({ action: 'redirectUpdated', tabId: details.tabId }).catch(() => {});
+  }
+  entry.prevChain = null;
+  saveRedirect(details.tabId, entry);
+});
+
+browser.tabs.onRemoved.addListener(tabId => {
+  redirectByTab.delete(tabId);
+  browser.storage.session.remove(redirectKey(tabId)).catch(() => {});
+});
 
 function getRedirectInfo({ tabId }) {
-  return Promise.resolve(redirectByTab.get(tabId) || null);
+  return loadRedirect(tabId);
 }
 
-// ─── Google Search Console: OAuth + API ─────────────────────────────────────
+// ─── Google OAuth: PKCE flow shared by Search Console + Analytics ────────────
+// Both products use the same Google Cloud OAuth client (stored gscClientId /
+// gscClientSecret) but hold independent grants under their own storage key.
 
-const GSC_SCOPE = 'https://www.googleapis.com/auth/webmasters.readonly';
-const GSC_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
-const GSC_TOKEN_URL = 'https://oauth2.googleapis.com/token';
-const GSC_REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
-const GSC_API_BASE = 'https://www.googleapis.com/webmasters/v3';
-const GSC_INSPECTION_URL = 'https://searchconsole.googleapis.com/v1/urlInspection/index:inspect';
+const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 
-const GSC_SITES_STALE_MS = 7 * 24 * 60 * 60 * 1000;
-const GSC_STALE_MS = 6 * 60 * 60 * 1000;
-const GSC_DEBOUNCE_MS = 60 * 1000;
-const GSC_CACHE_LIMIT = 20;
-
-function gscBase64UrlEncode(bytes) {
+function googleBase64UrlEncode(bytes) {
   let str = '';
   for (const b of bytes) str += String.fromCharCode(b);
   return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-function getGscRedirectUri() {
+function getGoogleRedirectUri() {
   const redirectBase = browser.identity.getRedirectURL();
   const subdomain = new URL(redirectBase).hostname.split('.')[0];
   return `http://127.0.0.1/mozoauth2/${subdomain}`;
 }
 
-async function gscGetStatus() {
-  const { gscAuth } = await browser.storage.local.get('gscAuth');
-  return {
-    connected: !!gscAuth,
-    redirectUri: getGscRedirectUri(),
-    connectedAt: gscAuth?.connectedAt ?? null
-  };
-}
-
-async function gscConnect() {
+async function googleOAuthConnect(scope, authKey) {
   const { gscClientId, gscClientSecret } = await browser.storage.local.get(['gscClientId', 'gscClientSecret']);
   if (!gscClientId) return { error: 'NO_CLIENT_ID' };
 
-  const redirectUri = getGscRedirectUri();
+  const redirectUri = getGoogleRedirectUri();
 
-  const codeVerifier = gscBase64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
+  const codeVerifier = googleBase64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
   const challengeBytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codeVerifier)));
-  const codeChallenge = gscBase64UrlEncode(challengeBytes);
-  const state = gscBase64UrlEncode(crypto.getRandomValues(new Uint8Array(16)));
+  const codeChallenge = googleBase64UrlEncode(challengeBytes);
+  const state = googleBase64UrlEncode(crypto.getRandomValues(new Uint8Array(16)));
 
-  const authUrl = new URL(GSC_AUTH_URL);
+  const authUrl = new URL(GOOGLE_AUTH_URL);
   authUrl.searchParams.set('client_id', gscClientId);
   authUrl.searchParams.set('redirect_uri', redirectUri);
   authUrl.searchParams.set('response_type', 'code');
-  authUrl.searchParams.set('scope', GSC_SCOPE);
+  authUrl.searchParams.set('scope', scope);
   authUrl.searchParams.set('code_challenge', codeChallenge);
   authUrl.searchParams.set('code_challenge_method', 'S256');
   authUrl.searchParams.set('access_type', 'offline');
@@ -196,7 +304,7 @@ async function gscConnect() {
   });
   if (gscClientSecret) tokenBody.set('client_secret', gscClientSecret);
 
-  const tokenRes = await fetch(GSC_TOKEN_URL, {
+  const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: tokenBody.toString()
@@ -205,7 +313,7 @@ async function gscConnect() {
   const tokenData = await tokenRes.json();
 
   await browser.storage.local.set({
-    gscAuth: {
+    [authKey]: {
       accessToken: tokenData.access_token,
       refreshToken: tokenData.refresh_token,
       expiresAt: Date.now() + tokenData.expires_in * 1000,
@@ -216,45 +324,80 @@ async function gscConnect() {
   return { connected: true };
 }
 
-async function gscDisconnect() {
-  const { gscAuth } = await browser.storage.local.get('gscAuth');
-  if (gscAuth?.refreshToken) {
+async function googleDisconnect(authKey, extraKeys) {
+  const stored = await browser.storage.local.get(authKey);
+  const auth = stored[authKey];
+  if (auth?.refreshToken) {
     try {
-      await fetch(`${GSC_REVOKE_URL}?token=${encodeURIComponent(gscAuth.refreshToken)}`, { method: 'POST' });
+      await fetch(`${GOOGLE_REVOKE_URL}?token=${encodeURIComponent(auth.refreshToken)}`, { method: 'POST' });
     } catch { /* best-effort revoke */ }
   }
-  await browser.storage.local.remove(['gscAuth', 'gscSites', 'gscCache', 'gscInspectionCache', 'gscQueryCache']);
+  await browser.storage.local.remove([authKey, ...extraKeys]);
   return { connected: false };
 }
 
-async function gscGetAccessToken() {
-  const { gscAuth, gscClientId, gscClientSecret } = await browser.storage.local.get(['gscAuth', 'gscClientId', 'gscClientSecret']);
-  if (!gscAuth) return { error: 'NOT_CONNECTED' };
-  if (gscAuth.expiresAt > Date.now() + 60000) return { accessToken: gscAuth.accessToken };
+async function googleGetAccessToken(authKey) {
+  const stored = await browser.storage.local.get([authKey, 'gscClientId', 'gscClientSecret']);
+  const auth = stored[authKey];
+  const { gscClientId, gscClientSecret } = stored;
+  if (!auth) return { error: 'NOT_CONNECTED' };
+  if (auth.expiresAt > Date.now() + 60000) return { accessToken: auth.accessToken };
 
   const body = new URLSearchParams({
     client_id: gscClientId,
-    refresh_token: gscAuth.refreshToken,
+    refresh_token: auth.refreshToken,
     grant_type: 'refresh_token'
   });
   if (gscClientSecret) body.set('client_secret', gscClientSecret);
 
-  const res = await fetch(GSC_TOKEN_URL, {
+  const res = await fetch(GOOGLE_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString()
   });
   if (!res.ok) {
     if (res.status === 400) {
-      await browser.storage.local.remove('gscAuth');
+      await browser.storage.local.remove(authKey);
       return { error: 'REAUTH_REQUIRED' };
     }
     return { error: 'TOKEN_REFRESH_FAILED' };
   }
   const data = await res.json();
-  const updated = { ...gscAuth, accessToken: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
-  await browser.storage.local.set({ gscAuth: updated });
+  const updated = { ...auth, accessToken: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
+  await browser.storage.local.set({ [authKey]: updated });
   return { accessToken: updated.accessToken };
+}
+
+// ─── Google Search Console: OAuth + API ─────────────────────────────────────
+
+const GSC_SCOPE = 'https://www.googleapis.com/auth/webmasters.readonly';
+const GSC_API_BASE = 'https://www.googleapis.com/webmasters/v3';
+const GSC_INSPECTION_URL = 'https://searchconsole.googleapis.com/v1/urlInspection/index:inspect';
+
+const GSC_SITES_STALE_MS = 7 * 24 * 60 * 60 * 1000;
+const GSC_STALE_MS = 6 * 60 * 60 * 1000;
+const GSC_DEBOUNCE_MS = 60 * 1000;
+const GSC_CACHE_LIMIT = 20;
+
+async function gscGetStatus() {
+  const { gscAuth } = await browser.storage.local.get('gscAuth');
+  return {
+    connected: !!gscAuth,
+    redirectUri: getGoogleRedirectUri(),
+    connectedAt: gscAuth?.connectedAt ?? null
+  };
+}
+
+function gscConnect() {
+  return googleOAuthConnect(GSC_SCOPE, 'gscAuth');
+}
+
+function gscDisconnect() {
+  return googleDisconnect('gscAuth', ['gscSites', 'gscCache', 'gscInspectionCache', 'gscQueryCache']);
+}
+
+function gscGetAccessToken() {
+  return googleGetAccessToken('gscAuth');
 }
 
 // ─── Google Search Console: data fetching ───────────────────────────────────
@@ -631,6 +774,252 @@ async function gscResolveProperty({ pageUrl }) {
   };
 }
 
+// ─── Google Analytics (GA4): OAuth + API ─────────────────────────────────────
+
+const GA_SCOPE = 'https://www.googleapis.com/auth/analytics.readonly';
+const GA_ADMIN_SUMMARIES_URL = 'https://analyticsadmin.googleapis.com/v1beta/accountSummaries';
+const GA_DATA_BASE = 'https://analyticsdata.googleapis.com/v1beta';
+
+const GA_PROPS_STALE_MS = 7 * 24 * 60 * 60 * 1000;
+const GA_STALE_MS = 6 * 60 * 60 * 1000;
+const GA_DEBOUNCE_MS = 60 * 1000;
+
+async function gaGetStatus() {
+  const { gaAuth } = await browser.storage.local.get('gaAuth');
+  return {
+    connected: !!gaAuth,
+    redirectUri: getGoogleRedirectUri(),
+    connectedAt: gaAuth?.connectedAt ?? null
+  };
+}
+
+function gaConnect() {
+  return googleOAuthConnect(GA_SCOPE, 'gaAuth');
+}
+
+function gaDisconnect() {
+  return googleDisconnect('gaAuth', ['gaProperties', 'gaCache']);
+}
+
+function gaGetAccessToken() {
+  return googleGetAccessToken('gaAuth');
+}
+
+// GA4 properties via the Admin API account summaries, cached like gscSites
+async function gaFetchProperties(accessToken) {
+  const { gaProperties } = await browser.storage.local.get('gaProperties');
+  if (gaProperties && (Date.now() - gaProperties.fetchedAt < GA_PROPS_STALE_MS)) return gaProperties.properties;
+  try {
+    const properties = [];
+    let pageToken = '';
+    do {
+      const url = new URL(GA_ADMIN_SUMMARIES_URL);
+      url.searchParams.set('pageSize', '200');
+      if (pageToken) url.searchParams.set('pageToken', pageToken);
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!res.ok) {
+        if (gaProperties?.properties) return gaProperties.properties;
+        const body = await res.json().catch(() => null);
+        throw { code: 'API_ERROR', detail: body?.error?.message || `accountSummaries: HTTP ${res.status}` };
+      }
+      const data = await res.json();
+      (data.accountSummaries || []).forEach(acc => {
+        (acc.propertySummaries || []).forEach(p => {
+          properties.push({ property: p.property, displayName: p.displayName, account: acc.displayName || acc.account });
+        });
+      });
+      pageToken = data.nextPageToken || '';
+    } while (pageToken);
+    await browser.storage.local.set({ gaProperties: { fetchedAt: Date.now(), properties } });
+    return properties;
+  } catch (err) {
+    if (gaProperties?.properties) return gaProperties.properties;
+    throw (err && err.code) ? err : { code: 'API_ERROR', detail: 'accountSummaries: network error' };
+  }
+}
+
+// GA4 properties aren't keyed by domain, so the user picks one per host
+async function gaGetProperty(host) {
+  if (!host) return null;
+  const { gaPropertyOverrides } = await browser.storage.local.get('gaPropertyOverrides');
+  return (gaPropertyOverrides && gaPropertyOverrides[host]) || null;
+}
+
+async function gaResolveProperty({ pageUrl }) {
+  const tokenResult = await gaGetAccessToken();
+  if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
+  if (tokenResult.error === 'REAUTH_REQUIRED') return { connected: false, reauthRequired: true };
+  if (tokenResult.error) return { connected: true, error: tokenResult.error };
+
+  let properties;
+  try {
+    properties = await gaFetchProperties(tokenResult.accessToken);
+  } catch (err) {
+    return { connected: true, error: err.code || 'API_ERROR', detail: err.detail };
+  }
+
+  const host = gscPageHost(pageUrl);
+  const chosen = await gaGetProperty(host);
+  const property = (chosen && properties.some(p => p.property === chosen)) ? chosen : null;
+  return { connected: true, host, property, properties };
+}
+
+async function gaSetProperty({ host, property }) {
+  if (!host) return { ok: false };
+  const { gaPropertyOverrides } = await browser.storage.local.get('gaPropertyOverrides');
+  const overrides = gaPropertyOverrides || {};
+  if (property) overrides[host] = property; else delete overrides[host];
+  await browser.storage.local.set({ gaPropertyOverrides: overrides });
+
+  // Drop cached GA data for this host so the new property takes effect
+  const { gaCache } = await browser.storage.local.get('gaCache');
+  if (gaCache) {
+    let mutated = false;
+    for (const key of Object.keys(gaCache)) {
+      if (key.startsWith(`${host}::`)) { delete gaCache[key]; mutated = true; }
+    }
+    if (mutated) await browser.storage.local.set({ gaCache });
+  }
+  return { ok: true };
+}
+
+async function gaRunReport(accessToken, property, body) {
+  const res = await fetch(`${GA_DATA_BASE}/${property}:runReport`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (res.status === 429) throw { code: 'RATE_LIMITED' };
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => null);
+    throw { code: 'API_ERROR', detail: errBody?.error?.message || `runReport: HTTP ${res.status}` };
+  }
+  return res.json();
+}
+
+// GA data lags ~1 day (vs. GSC's ~3), so ranges end yesterday
+function gaDateRanges(range) {
+  const end = new Date();
+  end.setUTCDate(end.getUTCDate() - 1);
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - (range - 1));
+
+  const prevEnd = new Date(start);
+  prevEnd.setUTCDate(prevEnd.getUTCDate() - 1);
+  const prevStart = new Date(prevEnd);
+  prevStart.setUTCDate(prevStart.getUTCDate() - (range - 1));
+
+  return {
+    startDate: gscFormatDate(start),
+    endDate: gscFormatDate(end),
+    prevStartDate: gscFormatDate(prevStart),
+    prevEndDate: gscFormatDate(prevEnd)
+  };
+}
+
+const GA_METRIC_NAMES = ['sessions', 'activeUsers', 'screenPageViews'];
+
+function gaParseMetricRow(row) {
+  const v = row?.metricValues || [];
+  return {
+    sessions:  Number(v[0]?.value || 0),
+    users:     Number(v[1]?.value || 0),
+    pageviews: Number(v[2]?.value || 0)
+  };
+}
+
+async function gaGetPageData({ pageUrl, range, forceRefresh }) {
+  const tokenResult = await gaGetAccessToken();
+  if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
+  if (tokenResult.error === 'REAUTH_REQUIRED') return { connected: false, reauthRequired: true };
+  if (tokenResult.error) return { connected: true, error: tokenResult.error };
+  const accessToken = tokenResult.accessToken;
+
+  const host = gscPageHost(pageUrl);
+  const property = await gaGetProperty(host);
+  if (!property) return { connected: true, error: 'NO_PROPERTY', host };
+
+  let path = '/';
+  try { path = new URL(pageUrl).pathname; } catch { /* keep root */ }
+
+  const cacheKey = `${host}::${path}::${range}`;
+  const { gaCache } = await browser.storage.local.get('gaCache');
+  const cache = gaCache || {};
+  const cached = cache[cacheKey];
+
+  const isStale = !cached || cached.property !== property || (Date.now() - cached.fetchedAt > GA_STALE_MS);
+  const withinDebounce = cached && (Date.now() - cached.fetchedAt < GA_DEBOUNCE_MS);
+  const useCache = cached && cached.property === property && ((!forceRefresh && !isStale) || (forceRefresh && withinDebounce));
+
+  if (useCache) return { connected: true, ...cached, fromCache: true };
+
+  const { startDate, endDate, prevStartDate, prevEndDate } = gaDateRanges(range);
+  const metrics = GA_METRIC_NAMES.map(name => ({ name }));
+  const pageFilter = {
+    dimensionFilter: { filter: { fieldName: 'pagePath', stringFilter: { matchType: 'EXACT', value: path } } }
+  };
+
+  let tsData, totalsData, channelsData;
+  try {
+    [tsData, totalsData, channelsData] = await Promise.all([
+      gaRunReport(accessToken, property, {
+        dateRanges: [{ startDate, endDate }],
+        dimensions: [{ name: 'date' }],
+        metrics,
+        ...pageFilter,
+        orderBys: [{ dimension: { dimensionName: 'date' } }],
+        limit: 500
+      }),
+      gaRunReport(accessToken, property, {
+        dateRanges: [{ startDate, endDate }, { startDate: prevStartDate, endDate: prevEndDate }],
+        metrics,
+        ...pageFilter
+      }),
+      gaRunReport(accessToken, property, {
+        dateRanges: [{ startDate, endDate }],
+        dimensions: [{ name: 'sessionDefaultChannelGroup' }],
+        metrics,
+        ...pageFilter,
+        orderBys: [{ metric: { metricName: 'sessions' }, desc: true }],
+        limit: 10
+      })
+    ]);
+  } catch (err) {
+    if (err.code === 'RATE_LIMITED') return { connected: true, error: 'RATE_LIMITED' };
+    return { connected: true, error: err.code || 'API_ERROR', detail: err.detail };
+  }
+
+  // date dimension arrives as YYYYMMDD
+  const timeseries = (tsData.rows || []).map(row => ({
+    date: row.dimensionValues[0].value.replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3'),
+    ...gaParseMetricRow(row)
+  }));
+
+  // With two dateRanges the API adds a dateRange dimension to each row
+  let totals = { sessions: 0, users: 0, pageviews: 0 };
+  let previousTotals = { sessions: 0, users: 0, pageviews: 0 };
+  (totalsData.rows || []).forEach(row => {
+    const which = row.dimensionValues?.[0]?.value;
+    if (which === 'date_range_1') previousTotals = gaParseMetricRow(row);
+    else totals = gaParseMetricRow(row);
+  });
+
+  const channels = (channelsData.rows || []).map(row => ({
+    channel: row.dimensionValues[0].value,
+    ...gaParseMetricRow(row)
+  }));
+
+  const { gaProperties } = await browser.storage.local.get('gaProperties');
+  const propertyName = gaProperties?.properties?.find(p => p.property === property)?.displayName || property;
+
+  const entry = { fetchedAt: Date.now(), property, propertyName, range, path, timeseries, totals, previousTotals, channels };
+  cache[cacheKey] = entry;
+  await gscPruneCache(cache);
+  await browser.storage.local.set({ gaCache: cache });
+
+  return { connected: true, ...entry, fromCache: false };
+}
+
 // ─── Google Search Console: message handlers ────────────────────────────────
 
 browser.runtime.onMessage.addListener((message) => {
@@ -642,7 +1031,14 @@ browser.runtime.onMessage.addListener((message) => {
     case 'gscGetQueryData':    return gscGetQueryData(message);
     case 'gscResolveProperty': return gscResolveProperty(message);
     case 'gscSetProperty':     return gscSetProperty(message);
+    case 'gaGetStatus':        return gaGetStatus();
+    case 'gaConnect':          return gaConnect();
+    case 'gaDisconnect':       return gaDisconnect();
+    case 'gaResolveProperty':  return gaResolveProperty(message);
+    case 'gaSetProperty':      return gaSetProperty(message);
+    case 'gaGetPageData':      return gaGetPageData(message);
     case 'getRedirectInfo':    return getRedirectInfo(message);
+    case 'getTargetTab':       return getTargetTab();
     default: return undefined;
   }
 });

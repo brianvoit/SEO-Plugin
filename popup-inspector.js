@@ -586,6 +586,8 @@ async function loadData(expandMeta = false, forceRefreshGsc = false) {
     showActiveTab();
     render(data, expandMeta);
     loadGscData(forceRefreshGsc);
+    // GA loads lazily per tab; refresh it here only when it's the visible tab
+    if (activeTab === 'analytics' && typeof loadGaData === 'function') loadGaData(forceRefreshGsc);
     renderRedirectStatus(tab.id, data);
   } catch {
     document.getElementById('error-state').classList.remove('hidden');

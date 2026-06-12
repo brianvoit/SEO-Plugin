@@ -11,6 +11,7 @@
     <div class="tab-group" id="main-tabs">
       <button class="tab-btn is-active" data-tab="overview">Overview</button>
       <button class="tab-btn" data-tab="search">Search</button>
+      <button class="tab-btn" data-tab="analytics">GA</button>
     </div>
     <div class="header-actions">
       <button id="btn-status" class="status-badge hidden" title="Page status / redirects">
@@ -49,7 +50,20 @@
       <div class="mode-segmented" id="display-mode-group">
         <button class="mode-option" data-mode="popup">Popup</button>
         <button class="mode-option" data-mode="sidebar">Sidebar</button>
+        <button class="mode-option" data-mode="window">Pop Out</button>
       </div>
+    </section>
+
+    <section class="field-section">
+      <div class="field-header">
+        <span class="field-label">FOLLOW ACTIVE TAB</span>
+        <button id="btn-follow-tab" class="toggle-btn" aria-pressed="true">
+          <span class="toggle-track">
+            <span class="toggle-thumb"></span>
+          </span>
+        </button>
+      </div>
+      <div class="field-hint">In Sidebar and Pop Out modes, reload data automatically as you navigate or switch tabs.</div>
     </section>
 
     <section class="field-section">
@@ -190,6 +204,34 @@
           <div class="gsc-property-all" id="gsc-property-all"></div>
         </div>
         <button id="btn-gsc-disconnect" class="settings-back-btn">Disconnect</button>
+      </div>
+    </section>
+
+    <section class="field-section">
+      <div class="field-header">
+        <span class="field-label">GOOGLE ANALYTICS</span>
+        <div class="field-header-actions">
+          <span id="ga-status-badge" class="gsc-status-badge"></span>
+        </div>
+      </div>
+
+      <div id="ga-setup-form">
+        <div class="field-hint">Uses the OAuth client configured under Google Search Console above. Enable the "Google Analytics Admin API" and "Google Analytics Data API" in the same Google Cloud project.</div>
+        <div class="wp-form-actions">
+          <button id="btn-ga-connect" class="save-key-btn">Connect Google Analytics</button>
+        </div>
+        <div id="ga-connect-error" class="field-hint hint-red hidden"></div>
+      </div>
+
+      <div id="ga-connected-info" class="hidden">
+        <div class="gsc-property-box">
+          <div class="gsc-property-current">
+            <span class="wp-field-label" id="ga-property-label">GA4 property for this page</span>
+            <span class="gsc-property-match" id="ga-property-match">…</span>
+          </div>
+          <div class="gsc-property-all gsc-property-all--scroll" id="ga-property-all"></div>
+        </div>
+        <button id="btn-ga-disconnect" class="settings-back-btn">Disconnect</button>
       </div>
     </section>
 
@@ -418,6 +460,85 @@
 
       <section class="field-section">
         <button id="btn-gsc-open-external" class="save-key-btn" style="width:100%">Open in Search Console ↗</button>
+      </section>
+
+    </div>
+
+  </div>
+
+  <!-- Analytics (GA4) tab -->
+  <div id="analytics-tab" class="hidden">
+
+    <!-- Not connected -->
+    <div id="ga-not-connected" class="field-section hidden">
+      <div class="field-hint" id="ga-not-connected-text">Connect Google Analytics in Settings to see traffic data for this page.</div>
+      <button id="btn-ga-goto-settings" class="save-key-btn" style="margin-top:8px">Open Settings</button>
+    </div>
+
+    <!-- No property chosen for this domain -->
+    <div id="ga-no-property" class="field-section hidden">
+      <div class="field-hint">Choose which GA4 property covers <strong id="ga-no-property-host"></strong>:</div>
+      <div id="ga-property-picker" class="gsc-property-all gsc-property-all--scroll"></div>
+      <div id="ga-property-picker-empty" class="field-hint hint-muted hidden">No GA4 properties available on the connected account.</div>
+    </div>
+
+    <!-- Error -->
+    <div id="ga-error" class="field-section hidden">
+      <div class="field-hint hint-red" id="ga-error-text"></div>
+    </div>
+
+    <!-- Connected + data -->
+    <div id="ga-data" class="hidden">
+
+      <section class="field-section">
+        <div class="mode-segmented" id="ga-range-group">
+          <button class="mode-option" data-range="30">30D</button>
+          <button class="mode-option" data-range="60">60D</button>
+          <button class="mode-option" data-range="90">90D</button>
+          <button class="mode-option" data-range="365">12M</button>
+        </div>
+        <div class="field-hint" id="ga-fetched-meta"></div>
+      </section>
+
+      <section class="field-section">
+        <div class="gsc-metric-toggles" id="ga-metric-toggles">
+          <button class="gsc-metric-toggle ga-metric-toggle" data-metric="sessions" aria-pressed="true">
+            <span class="gsc-metric-dot" data-metric="sessions"></span>
+            <span class="gsc-metric-info">
+              <span class="gsc-metric-name">Sessions</span>
+              <span class="gsc-metric-stats">
+                <span class="gsc-chart-total" id="ga-total-sessions"></span><span class="gsc-chart-change" id="ga-change-sessions"></span>
+              </span>
+            </span>
+          </button>
+          <button class="gsc-metric-toggle ga-metric-toggle" data-metric="users" aria-pressed="true">
+            <span class="gsc-metric-dot" data-metric="users"></span>
+            <span class="gsc-metric-info">
+              <span class="gsc-metric-name">Users</span>
+              <span class="gsc-metric-stats">
+                <span class="gsc-chart-total" id="ga-total-users"></span><span class="gsc-chart-change" id="ga-change-users"></span>
+              </span>
+            </span>
+          </button>
+          <button class="gsc-metric-toggle ga-metric-toggle" data-metric="pageviews" aria-pressed="true">
+            <span class="gsc-metric-dot" data-metric="pageviews"></span>
+            <span class="gsc-metric-info">
+              <span class="gsc-metric-name">Pageviews</span>
+              <span class="gsc-metric-stats">
+                <span class="gsc-chart-total" id="ga-total-pageviews"></span><span class="gsc-chart-change" id="ga-change-pageviews"></span>
+              </span>
+            </span>
+          </button>
+        </div>
+        <div class="gsc-chart-svg" id="ga-chart-combined"></div>
+      </section>
+
+      <section class="field-section">
+        <div class="field-header">
+          <span class="field-label">TRAFFIC CHANNELS</span>
+        </div>
+        <div id="ga-channels-table"></div>
+        <div id="ga-channels-empty" class="field-hint hidden">No channel data for this page in the selected range.</div>
       </section>
 
     </div>
@@ -656,6 +777,7 @@
   <script src="popup-generate.js"></script>
   <script src="popup-settings.js"></script>
   <script src="popup-gsc.js"></script>
+  <script src="popup-ga.js"></script>
   <script src="popup-redirects.js"></script>
   <script src="popup.js"></script>
 </body>

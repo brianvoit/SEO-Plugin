@@ -10,6 +10,7 @@ const ogPanel       = document.getElementById('og-panel');
 const twPanel       = document.getElementById('tw-panel');
 const redirectPanel = document.getElementById('redirect-panel');
 const searchTab     = document.getElementById('search-tab');
+const analyticsTab  = document.getElementById('analytics-tab');
 const mainContent   = document.getElementById('content');
 const tabGroup      = document.getElementById('main-tabs');
 const updateFooter  = document.getElementById('update-footer');
@@ -36,12 +37,14 @@ function showActiveTab() {
   tabGroup.classList.remove('hidden');
   mainContent.classList.toggle('hidden', activeTab !== 'overview');
   searchTab.classList.toggle('hidden', activeTab !== 'search');
+  analyticsTab.classList.toggle('hidden', activeTab !== 'analytics');
 }
 
 // Shared setup for opening a detail panel: hide the tabs' content + other panels
 function enterDetailPanel() {
   mainContent.classList.add('hidden');
   searchTab.classList.add('hidden');
+  analyticsTab.classList.add('hidden');
   updateFooter.classList.add('hidden');
   errorBanner.classList.add('hidden');
   hideDetailPanels();
@@ -84,7 +87,8 @@ function showSettings() {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('is-active'));
   document.getElementById('btn-settings').classList.add('is-active');
 
-  browser.storage.local.get(['claudeApiKey', 'charRanges', 'displayMode', 'gscClientId', 'gscClientSecret']).then(({ claudeApiKey, charRanges: stored, displayMode, gscClientId, gscClientSecret }) => {
+  browser.storage.local.get(['claudeApiKey', 'charRanges', 'displayMode', 'followActiveTab', 'gscClientId', 'gscClientSecret']).then(({ claudeApiKey, charRanges: stored, displayMode, followActiveTab, gscClientId, gscClientSecret }) => {
+    document.getElementById('btn-follow-tab').setAttribute('aria-pressed', String(followActiveTab !== false));
     document.getElementById('api-key-input').value = claudeApiKey ?? '';
     document.getElementById('key-saved-msg').classList.add('hidden');
 
@@ -106,6 +110,7 @@ function showSettings() {
   refreshGscSettingsStatus().then(status => {
     if (status && status.connected) refreshGscPropertyInfo();
   });
+  refreshGaSettingsStatus();
   loadBrandedTerms();
 }
 
@@ -141,5 +146,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     // Settings reloads page data on exit; other panels just return to the tab
     if (inSettings) hideSettings();
     else showActiveTab();
+    // GA data loads lazily, on first look at the tab (cache keeps it cheap)
+    if (tab === 'analytics' && typeof loadGaData === 'function') loadGaData(false);
   });
 });

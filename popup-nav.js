@@ -11,6 +11,7 @@ const twPanel       = document.getElementById('tw-panel');
 const redirectPanel = document.getElementById('redirect-panel');
 const searchTab     = document.getElementById('search-tab');
 const analyticsTab  = document.getElementById('analytics-tab');
+const dnsTab        = document.getElementById('dns-tab');
 const mainContent   = document.getElementById('content');
 const tabGroup      = document.getElementById('main-tabs');
 const updateFooter  = document.getElementById('update-footer');
@@ -38,6 +39,7 @@ function showActiveTab() {
   mainContent.classList.toggle('hidden', activeTab !== 'overview');
   searchTab.classList.toggle('hidden', activeTab !== 'search');
   analyticsTab.classList.toggle('hidden', activeTab !== 'analytics');
+  dnsTab.classList.toggle('hidden', activeTab !== 'dns');
 }
 
 // Shared setup for opening a detail panel: hide the tabs' content + other panels
@@ -45,6 +47,7 @@ function enterDetailPanel() {
   mainContent.classList.add('hidden');
   searchTab.classList.add('hidden');
   analyticsTab.classList.add('hidden');
+  dnsTab.classList.add('hidden');
   updateFooter.classList.add('hidden');
   errorBanner.classList.add('hidden');
   hideDetailPanels();
@@ -146,7 +149,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     // Settings reloads page data on exit; other panels just return to the tab
     if (inSettings) hideSettings();
     else showActiveTab();
-    // GA data loads lazily, on first look at the tab (cache keeps it cheap)
+    // GA and DNS data load lazily, on first look at the tab (caches keep it cheap)
     if (tab === 'analytics' && typeof loadGaData === 'function') loadGaData(false);
+    if (tab === 'dns' && typeof loadDnsData === 'function') loadDnsData();
   });
 });

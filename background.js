@@ -215,6 +215,49 @@ browser.webRequest.onErrorOccurred.addListener(details => {
   }
 }, REDIRECT_FILTER);
 
+// Security headers + TLS details for the document response. Captured here
+// (not via an external API) — getSecurityInfo only works inside a blocking
+// onHeadersReceived listener for the live request.
+const SECURITY_HEADER_NAMES = [
+  'strict-transport-security',
+  'content-security-policy',
+  'x-frame-options',
+  'x-content-type-options',
+  'referrer-policy',
+  'permissions-policy'
+];
+
+browser.webRequest.onHeadersReceived.addListener(async details => {
+  if (details.frameId !== 0) return;
+  const entry = redirectByTab.get(details.tabId);
+  if (!entry || entry.requestId !== details.requestId) return;
+
+  // Final hop's headers win (each redirect hop overwrites the previous)
+  const headers = {};
+  for (const h of details.responseHeaders || []) {
+    const name = h.name.toLowerCase();
+    if (SECURITY_HEADER_NAMES.includes(name)) headers[name] = h.value || '';
+  }
+  entry.securityHeaders = headers;
+
+  if (details.url.startsWith('https:')) {
+    try {
+      const sec = await browser.webRequest.getSecurityInfo(details.requestId, {});
+      const cert = sec.certificates && sec.certificates[0];
+      entry.tls = {
+        state: sec.state,                       // secure | weak | broken | insecure
+        protocol: sec.protocolVersion || null,
+        cipher: sec.cipherSuite || null,
+        issuer: cert?.issuer || null,
+        subject: cert?.subject || null,
+        validityStart: cert?.validity?.start ?? null,
+        validityEnd: cert?.validity?.end ?? null
+      };
+    } catch { /* security info unavailable for this request */ }
+  }
+  saveRedirect(details.tabId, entry);
+}, REDIRECT_FILTER, ['blocking', 'responseHeaders']);
+
 // JS/meta redirects start a brand-new request, which webRequest sees as an
 // unrelated navigation. onCommitted's transitionQualifiers identifies them, so
 // the previous page's chain gets stitched onto this one instead of dropped.
@@ -1020,6 +1063,101 @@ async function gaGetPageData({ pageUrl, range, forceRefresh }) {
   return { connected: true, ...entry, fromCache: false };
 }
 
+// ─── Domain age (RDAP) ────────────────────────────────────────────────────────
+// rdap.org bootstraps to the registry's RDAP server — free, structured JSON,
+// no key. Cached 30 days; registration dates don't move.
+
+const DOMAIN_AGE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+async function getDomainAge({ host }) {
+  if (!host) return { error: 'NO_HOST' };
+  const clean = host.replace(/^www\./, '').toLowerCase();
+
+  const { domainAgeCache } = await browser.storage.local.get('domainAgeCache');
+  const cache = domainAgeCache || {};
+  const cached = cache[clean];
+  if (cached && (Date.now() - cached.fetchedAt < DOMAIN_AGE_TTL_MS)) return cached;
+
+  // Try the full host, then strip subdomain labels until RDAP recognizes it
+  // (api.shop.example.com → shop.example.com → example.com)
+  const labels = clean.split('.');
+  let result = null;
+  for (let i = 0; i <= labels.length - 2 && i < 3; i++) {
+    const candidate = labels.slice(i).join('.');
+    try {
+      const res = await fetch(`https://rdap.org/domain/${encodeURIComponent(candidate)}`, {
+        headers: { Accept: 'application/rdap+json, application/json' }
+      });
+      if (res.status === 404) continue;
+      if (!res.ok) break;
+      const data = await res.json();
+      const reg = (data.events || []).find(e => e.eventAction === 'registration');
+      const exp = (data.events || []).find(e => e.eventAction === 'expiration');
+      const registrar = (data.entities || []).find(e => (e.roles || []).includes('registrar'));
+      result = {
+        domain: candidate,
+        registered: reg ? reg.eventDate : null,
+        expires: exp ? exp.eventDate : null,
+        registrar: registrar?.vcardArray?.[1]?.find(f => f[0] === 'fn')?.[3] || null
+      };
+      break;
+    } catch { break; }
+  }
+
+  if (!result || !result.registered) return { error: 'NOT_FOUND', domain: clean };
+
+  const entry = { ...result, fetchedAt: Date.now() };
+  cache[clean] = entry;
+  const keys = Object.keys(cache);
+  if (keys.length > 30) {
+    keys.sort((a, b) => cache[a].fetchedAt - cache[b].fetchedAt);
+    keys.slice(0, keys.length - 30).forEach(k => delete cache[k]);
+  }
+  await browser.storage.local.set({ domainAgeCache: cache });
+  return entry;
+}
+
+// ─── DNS records (Google Public DNS over HTTPS) ───────────────────────────────
+
+const DNS_TYPE_CODES = { A: 1, AAAA: 28, CNAME: 5, MX: 15, NS: 2, TXT: 16 };
+const DNS_TTL_MS = 60 * 60 * 1000;
+
+async function dnsResolve({ host }) {
+  if (!host) return { error: 'NO_HOST' };
+  const clean = host.toLowerCase();
+
+  const { dnsCache } = await browser.storage.local.get('dnsCache');
+  const cache = dnsCache || {};
+  const cached = cache[clean];
+  if (cached && (Date.now() - cached.fetchedAt < DNS_TTL_MS)) return cached;
+
+  const records = {};
+  try {
+    await Promise.all(Object.keys(DNS_TYPE_CODES).map(async type => {
+      const res = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(clean)}&type=${type}`, {
+        headers: { Accept: 'application/json' }
+      });
+      if (!res.ok) { records[type] = []; return; }
+      const data = await res.json();
+      records[type] = (data.Answer || [])
+        .filter(a => a.type === DNS_TYPE_CODES[type])
+        .map(a => ({ data: a.data, ttl: a.TTL }));
+    }));
+  } catch {
+    return { error: 'NETWORK' };
+  }
+
+  const entry = { host: clean, records, fetchedAt: Date.now() };
+  cache[clean] = entry;
+  const keys = Object.keys(cache);
+  if (keys.length > 20) {
+    keys.sort((a, b) => cache[a].fetchedAt - cache[b].fetchedAt);
+    keys.slice(0, keys.length - 20).forEach(k => delete cache[k]);
+  }
+  await browser.storage.local.set({ dnsCache: cache });
+  return entry;
+}
+
 // ─── Google Search Console: message handlers ────────────────────────────────
 
 browser.runtime.onMessage.addListener((message) => {
@@ -1039,6 +1177,8 @@ browser.runtime.onMessage.addListener((message) => {
     case 'gaGetPageData':      return gaGetPageData(message);
     case 'getRedirectInfo':    return getRedirectInfo(message);
     case 'getTargetTab':       return getTargetTab();
+    case 'getDomainAge':       return getDomainAge(message);
+    case 'dnsResolve':         return dnsResolve(message);
     default: return undefined;
   }
 });

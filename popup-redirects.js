@@ -23,9 +23,39 @@ function countRedirects(chain) {
   return chain.filter(h => (h.status >= 300 && h.status < 400) || h.kind === 'client').length;
 }
 
+// ─── SSL summary (Overview dates section) ─────────────────────────────────────
+
+function parseIssuerOrg(issuer) {
+  if (!issuer) return null;
+  const m = /O=("[^"]+"|[^,]+)/.exec(issuer) || /CN=("[^"]+"|[^,]+)/.exec(issuer);
+  return m ? m[1].replace(/^"|"$/g, '') : null;
+}
+
+function renderSslSummary() {
+  const el = document.getElementById('ssl-summary');
+  const tls = _redirectInfo && _redirectInfo.tls;
+  if (!tls || !tls.validityEnd) {
+    el.textContent = '—';
+    el.className = 'dates-value dates-value--none';
+    el.title = '';
+    return;
+  }
+  const days = Math.floor((tls.validityEnd - Date.now()) / 86400000);
+  const issuer = parseIssuerOrg(tls.issuer);
+  el.textContent = `${issuer ? issuer + ' · ' : ''}expires in ${days} days`;
+  el.className = 'dates-value ' + (days < 8 ? 'hint-red' : days <= 30 ? 'hint-amber' : 'hint-green');
+  el.title = [tls.protocol, tls.cipher, tls.state !== 'secure' ? `state: ${tls.state}` : null]
+    .filter(Boolean).join('\n');
+}
+
 // ─── Header badge ────────────────────────────────────────────────────────────
 
 function paintRedirectBadge() {
+  renderSslSummary();
+  if (typeof renderDnsSecuritySections === 'function' && typeof activeTab !== 'undefined' && activeTab === 'dns') {
+    renderDnsSecuritySections();
+  }
+
   const badge   = document.getElementById('btn-status');
   const codeEl  = document.getElementById('status-code');
   const countEl = document.getElementById('status-count');

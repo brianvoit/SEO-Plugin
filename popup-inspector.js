@@ -20,6 +20,39 @@ function truncate(text) {
   return { display: cut + '…', truncated: true };
 }
 
+// ─── SERP pixel width ─────────────────────────────────────────────────────────
+// Google truncates by rendered pixel width, not characters. Measured with the
+// fonts Google uses in results: titles ~20px Arial, descriptions ~14px Arial.
+
+const TITLE_PX_TARGET = 600;
+const META_PX_TARGET  = 920;   // desktop; mobile is ~680
+
+const _pxCtx = document.createElement('canvas').getContext('2d');
+
+function measureSerpWidth(text, font) {
+  _pxCtx.font = font;
+  return Math.round(_pxCtx.measureText(text).width);
+}
+
+// Within 10% below target = green; over target = red; further below = amber
+function pxHintClass(w, target) {
+  if (w > target) return 'hint-red';
+  if (w >= target * 0.9) return 'hint-green';
+  return 'hint-amber';
+}
+
+// "{chars} chars · {words} words · {px}px" with the px segment independently
+// colored by the pixel rule (the line itself keeps the char-range color)
+function fillCountsLine(metaEl, charCount, wordCount, pxWidth, pxTarget) {
+  metaEl.replaceChildren();
+  metaEl.appendChild(document.createTextNode(`${charCount} chars · ${wordCount} words · `));
+  const px = document.createElement('span');
+  px.className = pxHintClass(pxWidth, pxTarget);
+  px.textContent = `${pxWidth}px`;
+  px.title = `Rendered width in Google results (truncates ~${pxTarget}px)`;
+  metaEl.appendChild(px);
+}
+
 // ─── Render: title ──────────────────────────────────────────────────────────
 
 function renderTitle(data) {
@@ -29,7 +62,8 @@ function renderTitle(data) {
   el.className = 'field-value' + (data.title.text ? '' : ' is-none');
 
   const metaEl = document.getElementById('title-meta');
-  metaEl.textContent = `${data.title.charCount} chars · ${data.title.wordCount} words`;
+  const pxWidth = measureSerpWidth(data.title.text, '20px Arial');
+  fillCountsLine(metaEl, data.title.charCount, data.title.wordCount, pxWidth, TITLE_PX_TARGET);
   metaEl.className = 'field-meta ' + countColorClass(data.title.charCount, charRanges.title);
 
   store.title = data.title.text;
@@ -58,7 +92,8 @@ function renderMeta(data, expand = false) {
   metaEl.textContent = expand ? data.metaDescription.text : display;
   metaEl.className = 'field-value';
 
-  metaMeta.textContent = `${data.metaDescription.charCount} chars · ${data.metaDescription.wordCount} words`;
+  const pxWidth = measureSerpWidth(data.metaDescription.text, '14px Arial');
+  fillCountsLine(metaMeta, data.metaDescription.charCount, data.metaDescription.wordCount, pxWidth, META_PX_TARGET);
   metaMeta.className = 'field-meta ' + countColorClass(data.metaDescription.charCount, charRanges.meta);
 
   if (truncated && !expand) {
@@ -169,16 +204,74 @@ function renderHeadings(data) {
 
 function renderCanonical(data) {
   const el = document.getElementById('canonical-text');
+  const chip = document.getElementById('canonical-chip');
+
   if (data.canonical) {
     el.textContent = data.canonical;
-    el.className = 'field-value';
+    el.className = 'field-value field-value--link';
+    el.title = 'Open canonical URL';
     store.canonical = data.canonical;
+
+    // Indexability already resolved the canonical against the current URL
+    const selfRef = !data.indexability?.canonicalMismatch;
+    chip.textContent = selfRef ? 'Self-referencing' : 'Different URL';
+    chip.className = 'canonical-chip ' + (selfRef ? 'canonical-chip--ok' : 'canonical-chip--warn');
   } else {
     el.textContent = 'None';
     el.className = 'field-value is-none';
+    el.title = '';
     store.canonical = '';
+    chip.className = 'canonical-chip hidden';
   }
 }
+
+document.getElementById('canonical-text').addEventListener('click', () => {
+  if (store.canonical) browser.tabs.create({ url: store.canonical });
+});
+
+// ─── Render: domain age (RDAP, resolved in the background) ───────────────────
+
+function loadDomainAge(tab) {
+  const el = document.getElementById('domain-age');
+  let host = '';
+  try { host = new URL(tab.url).hostname; } catch { /* non-http page */ }
+  if (!host) {
+    el.textContent = '—';
+    el.className = 'dates-value dates-value--none';
+    return;
+  }
+  el.textContent = '…';
+  el.className = 'dates-value';
+  browser.runtime.sendMessage({ action: 'getDomainAge', host }).then(res => {
+    if (!res || res.error || !res.registered) {
+      el.textContent = '—';
+      el.className = 'dates-value dates-value--none';
+      el.title = '';
+      return;
+    }
+    const reg = new Date(res.registered);
+    const years = (Date.now() - reg.getTime()) / (365.25 * 86400000);
+    el.textContent = `${years.toFixed(1)} years (${reg.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })})`;
+    el.className = 'dates-value';
+    el.title = [
+      res.domain,
+      res.registrar && `Registrar: ${res.registrar}`,
+      res.expires && `Expires: ${formatDate(res.expires)}`
+    ].filter(Boolean).join('\n');
+  }).catch(() => {
+    el.textContent = '—';
+    el.className = 'dates-value dates-value--none';
+  });
+}
+
+// ─── Robots.txt header button ─────────────────────────────────────────────────
+
+document.getElementById('btn-robots').addEventListener('click', async () => {
+  const tab = await getActiveTab();
+  try {
+    browser.tabs.create({ url: new URL('/robots.txt', tab.url).href });
+  } catch { /* non-http page */ }
+});
 
 // ─── Render: word count ──────────────────────────────────────────────────────
 
@@ -586,9 +679,12 @@ async function loadData(expandMeta = false, forceRefreshGsc = false) {
     showActiveTab();
     render(data, expandMeta);
     loadGscData(forceRefreshGsc);
-    // GA loads lazily per tab; refresh it here only when it's the visible tab
+    // GA and DNS load lazily per tab; refresh only the one that's visible
     if (activeTab === 'analytics' && typeof loadGaData === 'function') loadGaData(forceRefreshGsc);
+    if (activeTab === 'dns' && typeof loadDnsData === 'function') loadDnsData();
     renderRedirectStatus(tab.id, data);
+    loadDomainAge(tab);
+    if (typeof loadAiInsights === 'function') loadAiInsights(forceRefreshGsc);
   } catch {
     document.getElementById('error-state').classList.remove('hidden');
     tabGroup.classList.add('hidden');

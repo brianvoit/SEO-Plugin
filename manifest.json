@@ -13,7 +13,7 @@
       }
     }
   },
-  "permissions": ["storage", "activeTab", "scripting", "tabs", "menus", "identity", "webRequest", "webNavigation"],
+  "permissions": ["storage", "activeTab", "scripting", "tabs", "menus", "identity", "webRequest", "webRequestBlocking", "webNavigation"],
   "host_permissions": [
     "*://*/*",
     "https://api.github.com/*",

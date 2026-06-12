@@ -12,6 +12,7 @@
       <button class="tab-btn is-active" data-tab="overview">Overview</button>
       <button class="tab-btn" data-tab="search">Search</button>
       <button class="tab-btn" data-tab="analytics">GA</button>
+      <button class="tab-btn" data-tab="dns">DNS</button>
     </div>
     <div class="header-actions">
       <button id="btn-status" class="status-badge hidden" title="Page status / redirects">
@@ -26,6 +27,16 @@
           </span>
         </button>
       </div>
+      <button id="btn-robots" class="icon-btn" title="Open robots.txt">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="6" width="10" height="7" rx="1.5"/>
+          <line x1="8" y1="6" x2="8" y2="3.6"/>
+          <circle cx="8" cy="2.8" r="0.8" fill="currentColor" stroke="none"/>
+          <circle cx="6" cy="9" r="0.7" fill="currentColor" stroke="none"/>
+          <circle cx="10" cy="9" r="0.7" fill="currentColor" stroke="none"/>
+          <path d="M6.2 11.2h3.6"/>
+        </svg>
+      </button>
       <button id="btn-settings" class="icon-btn" title="Settings">
         <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
           <path d="M14.5 1.5a3.5 3.5 0 0 0-4.9 4.9L2.1 13.9a1.5 1.5 0 0 0 2.1 2.1l7.5-7.5a3.5 3.5 0 0 0 4.9-4.9l-2.1 2.1-1.6-1.6 2.1-2.1a3.5 3.5 0 0 0-.5-.5z"/>
@@ -545,6 +556,38 @@
 
   </div>
 
+  <!-- DNS tab -->
+  <div id="dns-tab" class="hidden">
+
+    <section class="field-section">
+      <div class="field-header">
+        <span class="field-label">DNS RECORDS</span>
+        <span class="field-nav-summary" id="dns-host"></span>
+      </div>
+      <div id="dns-records"></div>
+      <div id="dns-loading" class="field-hint hidden">Looking up records…</div>
+      <div id="dns-empty" class="field-hint hidden">No DNS records found.</div>
+      <div id="dns-error" class="field-hint hint-red hidden"></div>
+    </section>
+
+    <section class="field-section">
+      <div class="field-header">
+        <span class="field-label">SECURITY HEADERS</span>
+      </div>
+      <div id="sec-headers-list"></div>
+      <div id="sec-headers-note" class="field-hint hidden">No header data for this page — reload the page with the extension active.</div>
+    </section>
+
+    <section class="field-section">
+      <div class="field-header">
+        <span class="field-label">TLS / SSL</span>
+      </div>
+      <div id="tls-list"></div>
+      <div id="tls-note" class="field-hint hidden">No TLS data for this page — reload the page with the extension active.</div>
+    </section>
+
+  </div>
+
   <div id="error-state" class="error-banner hidden">
     Cannot read this page. Try a regular web page.
   </div>
@@ -669,7 +712,7 @@
     </section>
 
     <!-- Indexability + Word Count -->
-    <section class="field-section field-section--split">
+    <section class="field-section field-section--split" id="indexability-row">
       <div class="split-half">
         <span class="field-label">INDEXABILITY</span>
         <div id="indexability-list"></div>
@@ -678,6 +721,19 @@
       <div class="split-half">
         <span class="field-label">WORD COUNT</span>
         <div class="field-meta" id="wordcount-text"></div>
+        <div class="field-meta" id="ai-readability">—</div>
+      </div>
+    </section>
+
+    <!-- Sentiment + Intent (Claude) -->
+    <section class="field-section field-section--split">
+      <div class="split-half">
+        <span class="field-label">SENTIMENT</span>
+        <div class="field-meta" id="ai-sentiment">—</div>
+      </div>
+      <div class="split-half">
+        <span class="field-label">INTENT</span>
+        <div class="field-meta" id="ai-intent">—</div>
       </div>
     </section>
 
@@ -693,7 +749,10 @@
     <!-- Canonical URL -->
     <section class="field-section">
       <div class="field-header">
-        <span class="field-label">CANONICAL URL</span>
+        <div class="field-label-group">
+          <span class="field-label">CANONICAL URL</span>
+          <span id="canonical-chip" class="canonical-chip hidden"></span>
+        </div>
         <button class="copy-btn" data-copy-target="canonical" title="Copy canonical URL">
           <svg class="icon-copy" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
             <rect x="5" y="4" width="9" height="11" rx="1.5"/>
@@ -760,6 +819,14 @@
         <span class="dates-label">Modified</span>
         <span class="dates-value" id="date-modified"></span>
       </div>
+      <div class="dates-row">
+        <span class="dates-label">Domain age</span>
+        <span class="dates-value" id="domain-age">—</span>
+      </div>
+      <div class="dates-row">
+        <span class="dates-label">SSL</span>
+        <span class="dates-value" id="ssl-summary">—</span>
+      </div>
     </section>
 
   </main>
@@ -779,6 +846,7 @@
   <script src="popup-gsc.js"></script>
   <script src="popup-ga.js"></script>
   <script src="popup-redirects.js"></script>
+  <script src="popup-dns.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

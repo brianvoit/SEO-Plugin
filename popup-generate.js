@@ -106,6 +106,141 @@ function clearGenResults() {
   });
 }
 
+// ─── Page insights: sentiment / intent / readability / audience ──────────────
+// One Claude call returns all four labels; results are cached per URL for a
+// day so browsing back and forth doesn't re-bill.
+
+const AI_INSIGHT_LABELS = {
+  sentiment:   ['Positive', 'Negative', 'Neutral', 'Mixed'],
+  intent:      ['Informational', 'Navigational', 'Commercial', 'Transactional'],
+  readability: ['Easy', 'Medium', 'Hard'],
+  audience:    ['Technical', 'General']
+};
+
+const AI_INSIGHTS_TTL_MS = 24 * 60 * 60 * 1000;
+
+const AI_SENTIMENT_CLASS   = { Positive: 'hint-green', Negative: 'hint-red', Mixed: 'hint-amber', Neutral: '' };
+const AI_READABILITY_CLASS = { Easy: 'hint-green', Medium: 'hint-amber', Hard: 'hint-red' };
+
+function setAiInsightFields(text, hint) {
+  ['ai-sentiment', 'ai-intent', 'ai-readability'].forEach(id => {
+    const el = document.getElementById(id);
+    el.textContent = text;
+    el.className = 'field-meta';
+    el.title = hint || '';
+  });
+}
+
+function renderAiInsights(v) {
+  const sentimentEl = document.getElementById('ai-sentiment');
+  sentimentEl.textContent = v.sentiment;
+  sentimentEl.className = 'field-meta ' + (AI_SENTIMENT_CLASS[v.sentiment] || '');
+  sentimentEl.title = '';
+
+  const intentEl = document.getElementById('ai-intent');
+  intentEl.textContent = v.intent;
+  intentEl.className = 'field-meta';
+  intentEl.title = '';
+
+  // "Easy, General" — readability colored, audience plain
+  const readEl = document.getElementById('ai-readability');
+  readEl.replaceChildren();
+  const read = document.createElement('span');
+  read.className = AI_READABILITY_CLASS[v.readability] || '';
+  read.textContent = v.readability;
+  readEl.appendChild(read);
+  readEl.appendChild(document.createTextNode(`, ${v.audience}`));
+  readEl.title = 'Readability · Audience';
+}
+
+// Accept the model's answer only if every label is from its allowed set
+function normalizeAiInsights(raw) {
+  const out = {};
+  for (const [key, labels] of Object.entries(AI_INSIGHT_LABELS)) {
+    const value = String(raw?.[key] ?? '').trim().toLowerCase();
+    const match = labels.find(l => l.toLowerCase() === value);
+    if (!match) return null;
+    out[key] = match;
+  }
+  return out;
+}
+
+async function loadAiInsights(forceRefresh = false) {
+  if (!pageData || !pageData.bodyTextExcerpt) {
+    setAiInsightFields('—');
+    return;
+  }
+
+  const { claudeApiKey } = await browser.storage.local.get('claudeApiKey');
+  if (!claudeApiKey) {
+    setAiInsightFields('—', 'Add a Claude API key in Settings to analyze the page');
+    return;
+  }
+
+  const tab = await getActiveTab();
+  const cacheKey = (tab.url || '').split('#')[0];
+
+  const { aiInsightsCache } = await browser.storage.local.get('aiInsightsCache');
+  const cache = aiInsightsCache || {};
+  const cached = cache[cacheKey];
+  if (!forceRefresh && cached && (Date.now() - cached.fetchedAt < AI_INSIGHTS_TTL_MS)) {
+    renderAiInsights(cached);
+    return;
+  }
+
+  setAiInsightFields('…');
+
+  const system = `You analyze webpage content. Respond with ONLY a compact JSON object — no prose, no code fences — exactly of the form {"sentiment":"…","intent":"…","readability":"…","audience":"…"}.
+- sentiment: the sentiment of the text — Positive, Negative, Neutral or Mixed
+- intent: the search intent of the page — Informational, Navigational, Commercial or Transactional
+- readability: rate the readability of the content — Easy, Medium, or Hard
+- audience: is the content written for a Technical or General audience`;
+
+  const content = [
+    `Title: ${pageData.title.text}`,
+    pageData.metaDescription && `Meta description: ${pageData.metaDescription.text}`,
+    `Content: ${pageData.bodyTextExcerpt}`
+  ].filter(Boolean).join('\n\n');
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 120,
+        system,
+        messages: [{ role: 'user', content }]
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message ?? `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const text = (data.content?.[0]?.text ?? '').replace(/^```(?:json)?|```$/g, '').trim();
+    const values = normalizeAiInsights(JSON.parse(text));
+    if (!values) throw new Error('Unexpected labels in response');
+
+    cache[cacheKey] = { ...values, fetchedAt: Date.now() };
+    const keys = Object.keys(cache);
+    if (keys.length > 20) {
+      keys.sort((a, b) => cache[a].fetchedAt - cache[b].fetchedAt);
+      keys.slice(0, keys.length - 20).forEach(k => delete cache[k]);
+    }
+    browser.storage.local.set({ aiInsightsCache: cache });
+
+    renderAiInsights(values);
+  } catch (err) {
+    setAiInsightFields('—', `Analysis failed: ${err.message}`);
+  }
+}
+
 document.querySelectorAll('[id$="-gen-copy"]').forEach(btn => {
   btn.addEventListener('click', async () => {
     await copyToClipboard(genSuggestions[btn.dataset.field] ?? '');

@@ -30,6 +30,8 @@ function showActiveTab() {
   hideDetailPanels();
   document.body.classList.remove('settings-open');
   document.getElementById('btn-settings').classList.remove('is-active');
+  // The update checker lives only on the Setup screen
+  updateFooter.classList.add('hidden');
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('is-active', b.dataset.tab === activeTab));
   tabGroup.classList.remove('hidden');
   mainContent.classList.toggle('hidden', activeTab !== 'overview');

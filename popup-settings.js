@@ -41,21 +41,26 @@ function buildSettingsRow(line1, line2, removeTitle, withEdit) {
   info.appendChild(b);
   row.appendChild(info);
 
+  // Edit + remove grouped together on the right
+  const actions = document.createElement('div');
+  actions.className = 'wp-site-actions';
+
   let editBtn = null;
   if (withEdit) {
     editBtn = document.createElement('button');
     editBtn.className = 'wp-site-edit icon-btn';
     editBtn.title = 'Edit';
     editBtn.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2.5l2.5 2.5L6 12.5 3 13l.5-3z"/></svg>'));
-    row.appendChild(editBtn);
+    actions.appendChild(editBtn);
   }
 
   const removeBtn = document.createElement('button');
   removeBtn.className = 'wp-site-remove icon-btn';
   removeBtn.title = removeTitle;
-  removeBtn.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>'));
-  row.appendChild(removeBtn);
+  removeBtn.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11"/><path d="M6 4V2.8a.8.8 0 0 1 .8-.8h2.4a.8.8 0 0 1 .8.8V4"/><path d="M3.6 4l.6 8.5a1 1 0 0 0 1 .9h5.6a1 1 0 0 0 1-.9L12.4 4"/><line x1="6.6" y1="6.4" x2="6.8" y2="11"/><line x1="9.4" y1="6.4" x2="9.2" y2="11"/></svg>'));
+  actions.appendChild(removeBtn);
 
+  row.appendChild(actions);
   return { row, removeBtn, editBtn };
 }
 

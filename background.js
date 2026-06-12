@@ -303,7 +303,36 @@ async function gscFetchSites(accessToken) {
   }
 }
 
-function gscResolveSiteUrl(sites, pageUrl) {
+function gscPageHost(pageUrl) {
+  try { return new URL(pageUrl).hostname.replace(/^www\./, '').toLowerCase(); }
+  catch { return null; }
+}
+
+// All verified properties that cover this page's domain — every URL-prefix
+// variant (http/https, with/without www) plus the sc-domain: property.
+function gscMatchingProperties(sites, pageUrl) {
+  const host = gscPageHost(pageUrl);
+  if (!host) return [];
+  return sites.filter(s => {
+    if (s.siteUrl.startsWith('sc-domain:')) {
+      return s.siteUrl.slice('sc-domain:'.length).replace(/^www\./, '').toLowerCase() === host;
+    }
+    try { return new URL(s.siteUrl).hostname.replace(/^www\./, '').toLowerCase() === host; }
+    catch { return false; }
+  }).map(s => s.siteUrl);
+}
+
+async function gscLoadOverride(pageUrl) {
+  const host = gscPageHost(pageUrl);
+  if (!host) return null;
+  const { gscPropertyOverrides } = await browser.storage.local.get('gscPropertyOverrides');
+  return (gscPropertyOverrides && gscPropertyOverrides[host]) || null;
+}
+
+function gscResolveSiteUrl(sites, pageUrl, override) {
+  // A user-chosen property wins, as long as it's still a verified property
+  if (override && sites.some(s => s.siteUrl === override)) return override;
+
   const u = new URL(pageUrl);
   const host = u.hostname.replace(/^www\./, '');
 
@@ -324,6 +353,34 @@ function gscResolveSiteUrl(sites, pageUrl) {
 
   const domainMatch = sites.find(s => s.siteUrl === `sc-domain:${host}` || s.siteUrl === `sc-domain:www.${host}`);
   return domainMatch ? domainMatch.siteUrl : null;
+}
+
+// Persist a per-domain property choice and drop cached data so the new
+// property takes effect immediately.
+async function gscSetProperty({ host, siteUrl }) {
+  if (!host) return { ok: false };
+  const { gscPropertyOverrides } = await browser.storage.local.get('gscPropertyOverrides');
+  const overrides = gscPropertyOverrides || {};
+  if (siteUrl) overrides[host] = siteUrl; else delete overrides[host];
+  await browser.storage.local.set({ gscPropertyOverrides: overrides });
+  await gscClearCacheForHost(host);
+  return { ok: true };
+}
+
+async function gscClearCacheForHost(host) {
+  const keys = ['gscCache', 'gscQueryCache', 'gscInspectionCache'];
+  const stored = await browser.storage.local.get(keys);
+  const changed = {};
+  for (const k of keys) {
+    const cache = stored[k];
+    if (!cache) continue;
+    let mutated = false;
+    for (const key of Object.keys(cache)) {
+      if (gscPageHost(key.split('::')[0]) === host) { delete cache[key]; mutated = true; }
+    }
+    if (mutated) changed[k] = cache;
+  }
+  if (Object.keys(changed).length) await browser.storage.local.set(changed);
 }
 
 async function gscQuery(accessToken, siteUrl, body) {
@@ -435,7 +492,7 @@ async function gscGetPageData({ pageUrl, range, forceRefresh }) {
     return { connected: true, error: err.code || 'API_ERROR', detail: err.detail };
   }
 
-  const siteUrl = gscResolveSiteUrl(sites, pageUrl);
+  const siteUrl = gscResolveSiteUrl(sites, pageUrl, await gscLoadOverride(pageUrl));
   if (!siteUrl) {
     const detail = sites.length
       ? `Connected account has access to: ${sites.map(s => s.siteUrl).join(', ')}`
@@ -508,7 +565,7 @@ async function gscGetQueryData({ pageUrl, range, query, forceRefresh }) {
     return { connected: true, error: err.code || 'API_ERROR', detail: err.detail };
   }
 
-  const siteUrl = gscResolveSiteUrl(sites, pageUrl);
+  const siteUrl = gscResolveSiteUrl(sites, pageUrl, await gscLoadOverride(pageUrl));
   if (!siteUrl) return { connected: true, error: 'NO_PROPERTY' };
 
   const { startDate, endDate, prevStartDate, prevEndDate } = gscDateRanges(range);
@@ -562,9 +619,16 @@ async function gscResolveProperty({ pageUrl }) {
     return { connected: true, error: err.code || 'API_ERROR', detail: err.detail };
   }
 
+  const override = await gscLoadOverride(pageUrl);
   let siteUrl = null;
-  try { siteUrl = gscResolveSiteUrl(sites, pageUrl); } catch { /* malformed URL */ }
-  return { connected: true, siteUrl, sites: sites.map(s => s.siteUrl) };
+  try { siteUrl = gscResolveSiteUrl(sites, pageUrl, override); } catch { /* malformed URL */ }
+  return {
+    connected: true,
+    siteUrl,
+    override,
+    host: gscPageHost(pageUrl),
+    matching: gscMatchingProperties(sites, pageUrl)
+  };
 }
 
 // ─── Google Search Console: message handlers ────────────────────────────────
@@ -577,6 +641,7 @@ browser.runtime.onMessage.addListener((message) => {
     case 'gscGetPageData':     return gscGetPageData(message);
     case 'gscGetQueryData':    return gscGetQueryData(message);
     case 'gscResolveProperty': return gscResolveProperty(message);
+    case 'gscSetProperty':     return gscSetProperty(message);
     case 'getRedirectInfo':    return getRedirectInfo(message);
     default: return undefined;
   }

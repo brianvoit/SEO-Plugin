@@ -783,8 +783,10 @@ async function refreshGscSettingsStatus() {
   return status;
 }
 
-// Show which verified property the current page maps to, plus all properties
-// (so https://www. prefix vs sc-domain: differences are visible).
+// Show the verified properties that cover the current page's domain and let
+// the user pick which one to use; the choice is remembered per domain.
+let _gscPropHost = null;
+
 async function refreshGscPropertyInfo() {
   const labelEl = document.getElementById('gsc-property-label');
   const matchEl = document.getElementById('gsc-property-match');
@@ -797,7 +799,7 @@ async function refreshGscPropertyInfo() {
   const tab = await getActiveTab();
   let pageUrl = tab.url;
   let host = '';
-  try { host = new URL(pageUrl).hostname; } catch { /* keep empty */ }
+  try { host = new URL(pageUrl).hostname.replace(/^www\./, ''); } catch { /* keep empty */ }
   if (labelEl) labelEl.textContent = host ? `Property for ${host}` : 'Property for this page';
   try {
     const data = await browser.tabs.sendMessage(tab.id, { action: 'getPageData' });
@@ -809,30 +811,45 @@ async function refreshGscPropertyInfo() {
   if (res.error) {
     matchEl.textContent = 'Could not load properties';
     matchEl.title = res.detail || res.error;
+    matchEl.classList.add('gsc-property-match--none');
     return;
   }
 
-  if (res.siteUrl) {
-    matchEl.textContent = res.siteUrl;
-    matchEl.classList.add('gsc-property-match--ok');
-  } else {
-    matchEl.textContent = 'No matching property for this domain';
+  _gscPropHost = res.host;
+  const matching = res.matching || [];
+
+  if (!matching.length) {
+    matchEl.textContent = 'No verified property matches this domain';
     matchEl.classList.add('gsc-property-match--none');
+    return;
   }
 
-  const sites = res.sites || [];
-  if (sites.length) {
-    const heading = document.createElement('div');
-    heading.className = 'gsc-property-all-label';
-    heading.textContent = `All verified properties (${sites.length})`;
-    allEl.appendChild(heading);
-    sites.forEach(s => {
-      const row = document.createElement('div');
-      row.className = 'gsc-property-item' + (s === res.siteUrl ? ' gsc-property-item--active' : '');
-      row.textContent = s;
-      allEl.appendChild(row);
-    });
-  }
+  matchEl.textContent = matching.length > 1
+    ? 'Choose which property to use for this domain:'
+    : 'Using this property:';
+  matchEl.classList.add('gsc-property-match--hint');
+
+  matching.forEach(siteUrl => {
+    const opt = document.createElement('button');
+    opt.className = 'gsc-property-option' + (siteUrl === res.siteUrl ? ' gsc-property-option--active' : '');
+    opt.dataset.site = siteUrl;
+    const radio = document.createElement('span');
+    radio.className = 'gsc-property-radio';
+    const text = document.createElement('span');
+    text.className = 'gsc-property-option-text';
+    text.textContent = siteUrl;
+    opt.append(radio, text);
+    opt.addEventListener('click', () => selectGscProperty(siteUrl));
+    allEl.appendChild(opt);
+  });
+}
+
+async function selectGscProperty(siteUrl) {
+  if (!_gscPropHost) return;
+  document.querySelectorAll('#gsc-property-all .gsc-property-option').forEach(el => {
+    el.classList.toggle('gsc-property-option--active', el.dataset.site === siteUrl);
+  });
+  await browser.runtime.sendMessage({ action: 'gscSetProperty', host: _gscPropHost, siteUrl });
 }
 
 document.getElementById('btn-copy-redirect-uri').addEventListener('click', async (e) => {

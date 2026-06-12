@@ -28,6 +28,9 @@ function hideDetailPanels() {
 
 function showActiveTab() {
   hideDetailPanels();
+  document.body.classList.remove('settings-open');
+  document.getElementById('btn-settings').classList.remove('is-active');
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('is-active', b.dataset.tab === activeTab));
   tabGroup.classList.remove('hidden');
   mainContent.classList.toggle('hidden', activeTab !== 'overview');
   searchTab.classList.toggle('hidden', activeTab !== 'search');
@@ -72,8 +75,12 @@ function hideDetailPanelToTab() {
 function showSettings() {
   enterDetailPanel();
   settingsPanel.classList.remove('hidden');
-  // The update checker lives only on the settings page now
+  // The update checker lives only on the settings page now, pinned to the bottom
   updateFooter.classList.remove('hidden');
+  document.body.classList.add('settings-open');
+  // Settings reads as the active "tab": light up the wrench, dim the tabs
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('is-active'));
+  document.getElementById('btn-settings').classList.add('is-active');
 
   browser.storage.local.get(['claudeApiKey', 'charRanges', 'displayMode', 'gscClientId', 'gscClientSecret']).then(({ claudeApiKey, charRanges: stored, displayMode, gscClientId, gscClientSecret }) => {
     document.getElementById('api-key-input').value = claudeApiKey ?? '';
@@ -94,7 +101,9 @@ function showSettings() {
   });
 
   loadWpSites();
-  refreshGscSettingsStatus();
+  refreshGscSettingsStatus().then(status => {
+    if (status && status.connected) refreshGscPropertyInfo();
+  });
   loadBrandedTerms();
 }
 

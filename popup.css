@@ -142,6 +142,14 @@ header {
 }
 .icon-btn svg { overflow: visible; }
 
+/* Settings (wrench) reads as the active "tab" while the Setup screen is open */
+.icon-btn.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.icon-btn.is-active:hover { color: #fff; }
+
 /* Split row (indexability + word count) */
 .field-section--split {
   display: flex;
@@ -798,11 +806,22 @@ main, #search-tab { padding: 4px 0 8px; }
 #update-footer {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   padding: 8px 14px;
   border-top: 1px solid var(--border);
   background: var(--header-bg);
 }
+
+/* On the Setup screen the footer is pinned to the bottom of the screen, even
+   when the settings content is short. */
+body.settings-open {
+  display: flex;
+  flex-direction: column;
+  min-height: 600px;
+}
+body.embed-sidebar.settings-open { min-height: 100vh; }
+body.settings-open #update-footer { margin-top: auto; }
 
 .update-version {
   font-size: 11px;
@@ -1101,6 +1120,45 @@ main, #search-tab { padding: 4px 0 8px; }
 .dates-value--none { color: var(--text-none); }
 
 /* ── Search Console ──────────────────────────────────────────────────────── */
+
+/* Connected-account property resolver (Settings) */
+.gsc-property-box {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 11px;
+  margin-bottom: 10px;
+  background: var(--bg-section);
+}
+.gsc-property-current { display: flex; flex-direction: column; gap: 3px; }
+.gsc-property-match {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--text);
+  word-break: break-all;
+}
+.gsc-property-match--ok   { color: var(--hint-green); }
+.gsc-property-match--none { color: var(--hint-amber); }
+.gsc-property-all { margin-top: 9px; }
+.gsc-property-all-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.gsc-property-item {
+  font-size: 11px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--text-muted);
+  padding: 2px 0;
+  word-break: break-all;
+}
+.gsc-property-item--active {
+  color: var(--hint-green);
+  font-weight: 600;
+}
 
 .gsc-status-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: .05em; }
 .gsc-status-badge--connected    { background: var(--hint-green); color: #fff; }

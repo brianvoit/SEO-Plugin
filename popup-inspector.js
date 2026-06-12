@@ -609,6 +609,7 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
 
 document.getElementById('btn-refresh').addEventListener('click', () => {
   metaExpanded = false;
+  if (typeof clearGenResults === 'function') clearGenResults();
   loadData(false, true);
 });
 

@@ -547,16 +547,37 @@ async function gscGetQueryData({ pageUrl, range, query, forceRefresh }) {
   return { connected: true, ...entry };
 }
 
+// Resolve which verified property a URL maps to, plus the full property list —
+// lightweight (no analytics fetch), used by the Settings screen.
+async function gscResolveProperty({ pageUrl }) {
+  const tokenResult = await gscGetAccessToken();
+  if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
+  if (tokenResult.error === 'REAUTH_REQUIRED') return { connected: false, reauthRequired: true };
+  if (tokenResult.error) return { connected: true, error: tokenResult.error };
+
+  let sites;
+  try {
+    sites = await gscFetchSites(tokenResult.accessToken);
+  } catch (err) {
+    return { connected: true, error: err.code || 'API_ERROR', detail: err.detail };
+  }
+
+  let siteUrl = null;
+  try { siteUrl = gscResolveSiteUrl(sites, pageUrl); } catch { /* malformed URL */ }
+  return { connected: true, siteUrl, sites: sites.map(s => s.siteUrl) };
+}
+
 // ─── Google Search Console: message handlers ────────────────────────────────
 
 browser.runtime.onMessage.addListener((message) => {
   switch (message?.action) {
-    case 'gscGetStatus':     return gscGetStatus();
-    case 'gscConnect':       return gscConnect();
-    case 'gscDisconnect':    return gscDisconnect();
-    case 'gscGetPageData':   return gscGetPageData(message);
-    case 'gscGetQueryData':  return gscGetQueryData(message);
-    case 'getRedirectInfo':  return getRedirectInfo(message);
+    case 'gscGetStatus':       return gscGetStatus();
+    case 'gscConnect':         return gscConnect();
+    case 'gscDisconnect':      return gscDisconnect();
+    case 'gscGetPageData':     return gscGetPageData(message);
+    case 'gscGetQueryData':    return gscGetQueryData(message);
+    case 'gscResolveProperty': return gscResolveProperty(message);
+    case 'getRedirectInfo':    return getRedirectInfo(message);
     default: return undefined;
   }
 });

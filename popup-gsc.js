@@ -783,6 +783,58 @@ async function refreshGscSettingsStatus() {
   return status;
 }
 
+// Show which verified property the current page maps to, plus all properties
+// (so https://www. prefix vs sc-domain: differences are visible).
+async function refreshGscPropertyInfo() {
+  const labelEl = document.getElementById('gsc-property-label');
+  const matchEl = document.getElementById('gsc-property-match');
+  const allEl   = document.getElementById('gsc-property-all');
+  matchEl.textContent = '…';
+  matchEl.className = 'gsc-property-match';
+  matchEl.title = '';
+  allEl.replaceChildren();
+
+  const tab = await getActiveTab();
+  let pageUrl = tab.url;
+  let host = '';
+  try { host = new URL(pageUrl).hostname; } catch { /* keep empty */ }
+  if (labelEl) labelEl.textContent = host ? `Property for ${host}` : 'Property for this page';
+  try {
+    const data = await browser.tabs.sendMessage(tab.id, { action: 'getPageData' });
+    if (data?.canonical) pageUrl = data.canonical;
+  } catch { /* fall back to tab.url */ }
+
+  const res = await browser.runtime.sendMessage({ action: 'gscResolveProperty', pageUrl });
+  if (!res || !res.connected) { matchEl.textContent = 'Not connected'; return; }
+  if (res.error) {
+    matchEl.textContent = 'Could not load properties';
+    matchEl.title = res.detail || res.error;
+    return;
+  }
+
+  if (res.siteUrl) {
+    matchEl.textContent = res.siteUrl;
+    matchEl.classList.add('gsc-property-match--ok');
+  } else {
+    matchEl.textContent = 'No matching property for this domain';
+    matchEl.classList.add('gsc-property-match--none');
+  }
+
+  const sites = res.sites || [];
+  if (sites.length) {
+    const heading = document.createElement('div');
+    heading.className = 'gsc-property-all-label';
+    heading.textContent = `All verified properties (${sites.length})`;
+    allEl.appendChild(heading);
+    sites.forEach(s => {
+      const row = document.createElement('div');
+      row.className = 'gsc-property-item' + (s === res.siteUrl ? ' gsc-property-item--active' : '');
+      row.textContent = s;
+      allEl.appendChild(row);
+    });
+  }
+}
+
 document.getElementById('btn-copy-redirect-uri').addEventListener('click', async (e) => {
   await copyToClipboard(document.getElementById('gsc-redirect-uri').value);
   flashCopyBtn(e.currentTarget);

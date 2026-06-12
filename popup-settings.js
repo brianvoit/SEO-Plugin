@@ -23,8 +23,9 @@ let wpSites = [];
 
 const wpSiteForm = document.getElementById('wp-site-form');
 
-// Build a settings list row: two info lines + a remove button (X icon)
-function buildSettingsRow(line1, line2, removeTitle) {
+// Build a settings list row: two info lines, an optional edit (pencil) button,
+// and a remove button (X icon)
+function buildSettingsRow(line1, line2, removeTitle, withEdit) {
   const row = document.createElement('div');
   row.className = 'wp-site-row';
 
@@ -38,15 +39,24 @@ function buildSettingsRow(line1, line2, removeTitle) {
   b.textContent = line2;
   info.appendChild(a);
   info.appendChild(b);
+  row.appendChild(info);
+
+  let editBtn = null;
+  if (withEdit) {
+    editBtn = document.createElement('button');
+    editBtn.className = 'wp-site-edit icon-btn';
+    editBtn.title = 'Edit';
+    editBtn.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2.5l2.5 2.5L6 12.5 3 13l.5-3z"/></svg>'));
+    row.appendChild(editBtn);
+  }
 
   const removeBtn = document.createElement('button');
   removeBtn.className = 'wp-site-remove icon-btn';
   removeBtn.title = removeTitle;
   removeBtn.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>'));
-
-  row.appendChild(info);
   row.appendChild(removeBtn);
-  return { row, removeBtn };
+
+  return { row, removeBtn, editBtn };
 }
 
 function renderWpSites() {
@@ -128,8 +138,9 @@ function renderBrandDomains() {
   empty.classList.add('hidden');
 
   hosts.forEach(host => {
-    const { row, removeBtn } = buildSettingsRow(host, `/${allBrandedTerms[host]}/i`, 'Remove');
+    const { row, removeBtn, editBtn } = buildSettingsRow(host, `/${allBrandedTerms[host]}/i`, 'Remove', true);
     removeBtn.dataset.host = host;
+    editBtn.addEventListener('click', () => openBrandEdit(host));
     list.appendChild(row);
   });
 
@@ -139,6 +150,18 @@ function renderBrandDomains() {
       browser.storage.local.set({ brandedTerms: allBrandedTerms }).then(renderBrandDomains);
     });
   });
+}
+
+// Open the branded-terms form pre-filled to edit an existing domain. The host
+// is the storage key, so it's locked while editing — saving overwrites the regex.
+function openBrandEdit(host) {
+  document.getElementById('brand-domain-error').classList.add('hidden');
+  const hostInput = document.getElementById('brand-domain-host');
+  hostInput.value = host;
+  hostInput.readOnly = true;
+  document.getElementById('brand-domain-pattern').value = allBrandedTerms[host] || '';
+  brandDomainForm.classList.remove('hidden');
+  document.getElementById('brand-domain-pattern').focus();
 }
 
 function loadBrandedTerms() {
@@ -155,7 +178,9 @@ document.getElementById('btn-add-brand-domain').addEventListener('click', async 
     const tab = await getActiveTab();
     host = new URL(tab.url).hostname.replace(/^www\./, '');
   } catch { /* ignore */ }
-  document.getElementById('brand-domain-host').value = (host && !allBrandedTerms[host]) ? host : '';
+  const hostInput = document.getElementById('brand-domain-host');
+  hostInput.readOnly = false;
+  hostInput.value = (host && !allBrandedTerms[host]) ? host : '';
   document.getElementById('brand-domain-pattern').value = '';
   brandDomainForm.classList.remove('hidden');
 });

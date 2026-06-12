@@ -92,6 +92,20 @@ document.querySelectorAll('.gen-btn').forEach(btn => {
   btn.addEventListener('click', () => generateField(btn.dataset.field));
 });
 
+// Regenerate buttons (left of copy) ask for fresh text
+document.querySelectorAll('[id$="-gen-regen"]').forEach(btn => {
+  btn.addEventListener('click', () => generateField(btn.dataset.field));
+});
+
+// Clear any suggestions — called when the page data is refreshed, so stale
+// AI text doesn't linger over freshly-read page metadata.
+function clearGenResults() {
+  ['title', 'meta'].forEach(field => {
+    genSuggestions[field] = '';
+    document.getElementById(`${field}-gen-result`).classList.add('hidden');
+  });
+}
+
 document.querySelectorAll('[id$="-gen-copy"]').forEach(btn => {
   btn.addEventListener('click', async () => {
     await copyToClipboard(genSuggestions[btn.dataset.field] ?? '');

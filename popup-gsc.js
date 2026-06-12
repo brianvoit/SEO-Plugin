@@ -89,33 +89,72 @@ function gscAxisNum(v, metric) {
   return Math.round(v).toString();
 }
 
+// Round up to a clean axis maximum: 1/2/5 × 10^n (e.g. 12.3 → 20, 4.2 → 5)
+function niceCeil(v) {
+  if (!(v > 0)) return 1;
+  const mag = Math.pow(10, Math.floor(Math.log10(v)));
+  const norm = v / mag;
+  const nice = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+  return nice * mag;
+}
+
 function buildCombinedChart(filled, activeMetrics, { width = 320, height = 130 } = {}) {
-  const padL = 34, padR = 6, padT = 10, padB = 16;
-  const innerW = width - padL - padR, innerH = height - padT - padB;
+  const padT = 10, padB = 16;
   const n = filled.length;
+
+  // Active metrics in a fixed order (impressions, clicks, position)
+  const order = ['impressions', 'clicks', 'position'];
+  const active = order.filter(m => activeMetrics[m]);
+
+  // ── Axis placement ────────────────────────────────────────────────────────
+  // Each metric is on its own scale, so each gets its own Y axis. Position goes
+  // on the right when shown with others; counts fill the left.
+  //   1 metric  → left · 2 metrics → 1 left, 1 right · 3 metrics → 2 left, 1 right
+  let leftMetrics = [], rightMetrics = [];
+  if (active.length <= 1) {
+    leftMetrics = active.slice();
+  } else if (active.includes('position')) {
+    rightMetrics = ['position'];
+    leftMetrics = active.filter(m => m !== 'position');
+  } else {
+    leftMetrics = [active[0]];
+    rightMetrics = [active[1]];
+  }
+
+  const AXIS_W = 26;
+  const padL = leftMetrics.length ? leftMetrics.length * AXIS_W + 4 : 8;
+  const padR = rightMetrics.length ? rightMetrics.length * AXIS_W + 6 : 8;
+  const innerW = width - padL - padR, innerH = height - padT - padB;
   const xFor = i => padL + (n > 1 ? (i / (n - 1)) * innerW : innerW / 2);
 
-  // Each metric is normalized to its own min/max so wildly different scales
-  // (clicks, impressions, position) can share one chart. Real values live in
-  // the toggle headers and the hover tooltip.
+  // ── Per-metric scales ───────────────────────────────────────────────────────
+  // Position: 0 at the top (best), niceCeil(worst) at the bottom — lower
+  // positions sit higher on the chart, since lower is better. Counts: zoomed to
+  // their own data range with a little top headroom.
   const scales = {};
-  Object.keys(GSC_METRICS).forEach(metric => {
-    const cfg = GSC_METRICS[metric];
+  order.forEach(metric => {
+    if (!activeMetrics[metric]) { scales[metric] = null; return; }
     const points = filled
       .map((d, i) => ({ i, value: metric === 'position' ? (d.impressions > 0 ? d.position : null) : d[metric] }))
       .filter(p => p.value !== null && p.value !== undefined);
     if (!points.length) { scales[metric] = null; return; }
     const values = points.map(p => p.value);
-    const min = Math.min(...values), max = Math.max(...values);
-    // Always leave ~10% headroom above the data, so the line never touches the top edge
-    const headroom = ((max - min) || Math.abs(max) || 1) * 0.1;
-    const axisMin = cfg.invertY ? min - headroom : min;
-    const axisMax = cfg.invertY ? max : max + headroom;
-    const span = (axisMax - axisMin) || 1;
-    scales[metric] = {
-      points, min, max, invertY: cfg.invertY,
-      yFor: v => padT + (cfg.invertY ? (v - axisMin) / span : 1 - (v - axisMin) / span) * innerH
-    };
+    const dataMin = Math.min(...values), dataMax = Math.max(...values);
+
+    let yFor, ticks;
+    if (metric === 'position') {
+      const axisMax = niceCeil(dataMax);
+      const span = axisMax || 1;
+      yFor = v => padT + (v / span) * innerH;                  // 0 → top
+      ticks = [0, axisMax / 2, axisMax];
+    } else {
+      const headroom = ((dataMax - dataMin) || Math.abs(dataMax) || 1) * 0.1;
+      const top = dataMax + headroom, bottom = dataMin;
+      const span = (top - bottom) || 1;
+      yFor = v => padT + (1 - (v - bottom) / span) * innerH;   // max → top
+      ticks = [dataMax, (dataMax + dataMin) / 2, dataMin];
+    }
+    scales[metric] = { points, yFor, ticks };
   });
 
   // X-axis ticks: spread ~6 labeled gridlines across the range
@@ -130,9 +169,8 @@ function buildCombinedChart(filled, activeMetrics, { width = 320, height = 130 }
 
   let svg = `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">`;
 
-  // Horizontal gridlines every 20% of the plot height (visual rhythm only —
-  // not tied to a single metric's scale)
-  [0, 0.2, 0.4, 0.6, 0.8, 1].forEach(t => {
+  // Horizontal gridlines every 25% of the plot height (the mid tick sits on one)
+  [0, 0.25, 0.5, 0.75, 1].forEach(t => {
     const y = padT + t * innerH;
     svg += `<line class="gsc-chart-gridline" x1="${padL}" y1="${y.toFixed(1)}" x2="${(width-padR).toFixed(1)}" y2="${y.toFixed(1)}" />`;
   });
@@ -145,20 +183,18 @@ function buildCombinedChart(filled, activeMetrics, { width = 320, height = 130 }
     svg += `<text class="gsc-chart-axis-label" x="${x.toFixed(1)}" y="${height-3}" text-anchor="${anchor}">${escapeHtml(formatDateShort(filled[i].date, showYear))}</text>`;
   });
 
-  // Y-axis value labels: each active metric is normalized to its own scale, so
-  // label its range at the left edge in the metric's colour. Top label = the
-  // value mapped to the top of the plot (max, or min for inverted position).
-  // Stagger multiple metrics vertically so the labels never overlap.
-  const activeScaled = Object.keys(GSC_METRICS).filter(m => activeMetrics[m] && scales[m]);
-  activeScaled.forEach((metric, idx) => {
+  // ── Y-axis tick labels, per metric, on its assigned side ────────────────────
+  function drawYAxis(metric, x, anchor) {
     const s = scales[metric];
-    const topVal = s.invertY ? s.min : s.max;
-    const botVal = s.invertY ? s.max : s.min;
-    const yTop = padT + 7 + idx * 9;
-    const yBot = padT + innerH - idx * 9;
-    svg += `<text class="gsc-chart-yaxis" data-metric="${metric}" x="${(padL-4).toFixed(1)}" y="${yTop.toFixed(1)}" text-anchor="end">${escapeHtml(gscAxisNum(topVal, metric))}</text>`;
-    svg += `<text class="gsc-chart-yaxis" data-metric="${metric}" x="${(padL-4).toFixed(1)}" y="${yBot.toFixed(1)}" text-anchor="end">${escapeHtml(gscAxisNum(botVal, metric))}</text>`;
-  });
+    if (!s) return;
+    s.ticks.forEach(value => {
+      const y = Math.max(padT + 6, Math.min(padT + innerH, s.yFor(value)));
+      svg += `<text class="gsc-chart-yaxis" data-metric="${metric}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${anchor}" dominant-baseline="middle">${escapeHtml(gscAxisNum(value, metric))}</text>`;
+    });
+  }
+  // Left axes: inner one nearest the plot, extra one further out
+  leftMetrics.forEach((metric, slot) => drawYAxis(metric, padL - 4 - slot * AXIS_W, 'end'));
+  rightMetrics.forEach((metric, slot) => drawYAxis(metric, width - padR + 4 + slot * AXIS_W, 'start'));
 
   // Metric lines (position is split into segments to skip no-impression days)
   Object.keys(GSC_METRICS).forEach(metric => {

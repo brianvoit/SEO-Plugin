@@ -914,7 +914,37 @@ async function gaGetProperty(host) {
   return (gaPropertyOverrides && gaPropertyOverrides[host]) || null;
 }
 
-async function gaResolveProperty({ pageUrl }) {
+// Map a GA4 measurement ID (G-XXXX, found on the page) to its property by
+// scanning each property's data streams. Cached, and every stream seen along
+// the way is cached too, so later lookups are instant.
+async function gaMatchMeasurementId(measurementId, properties, accessToken) {
+  if (!measurementId) return null;
+  const mid = measurementId.toUpperCase();
+  const { gaStreamMap } = await browser.storage.local.get('gaStreamMap');
+  const map = gaStreamMap || {};
+  if (map[mid] && properties.some(p => p.property === map[mid])) return map[mid];
+
+  let found = null;
+  for (const p of properties.slice(0, 30)) {
+    try {
+      const res = await fetch(`https://analyticsadmin.googleapis.com/v1beta/${p.property}/dataStreams`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      for (const s of data.dataStreams || []) {
+        const sid = s.webStreamData && s.webStreamData.measurementId;
+        if (sid) map[sid.toUpperCase()] = p.property;
+        if (sid && sid.toUpperCase() === mid) found = p.property;
+      }
+      if (found) break;
+    } catch { /* skip this property */ }
+  }
+  await browser.storage.local.set({ gaStreamMap: map });
+  return found;
+}
+
+async function gaResolveProperty({ pageUrl, measurementId }) {
   const tokenResult = await gaGetAccessToken();
   if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
   if (tokenResult.error === 'REAUTH_REQUIRED') return { connected: false, reauthRequired: true };
@@ -930,7 +960,14 @@ async function gaResolveProperty({ pageUrl }) {
   const host = gscPageHost(pageUrl);
   const chosen = await gaGetProperty(host);
   const property = (chosen && properties.some(p => p.property === chosen)) ? chosen : null;
-  return { connected: true, host, property, properties };
+
+  let detectedProperty = null;
+  if (measurementId) {
+    try { detectedProperty = await gaMatchMeasurementId(measurementId, properties, tokenResult.accessToken); }
+    catch { /* ignore detection failures */ }
+  }
+
+  return { connected: true, host, property, detectedProperty, detectedId: measurementId || null, properties };
 }
 
 async function gaSetProperty({ host, property }) {
@@ -997,7 +1034,7 @@ function gaParseMetricRow(row) {
   };
 }
 
-async function gaGetPageData({ pageUrl, range, forceRefresh }) {
+async function gaGetPageData({ pageUrl, range, forceRefresh, measurementId }) {
   const tokenResult = await gaGetAccessToken();
   if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
   if (tokenResult.error === 'REAUTH_REQUIRED') return { connected: false, reauthRequired: true };
@@ -1005,7 +1042,15 @@ async function gaGetPageData({ pageUrl, range, forceRefresh }) {
   const accessToken = tokenResult.accessToken;
 
   const host = gscPageHost(pageUrl);
-  const property = await gaGetProperty(host);
+  // Manual per-domain choice wins; otherwise fall back to the property matching
+  // the page's own GA4 measurement ID (auto-suggested).
+  let property = await gaGetProperty(host);
+  if (!property && measurementId) {
+    try {
+      const properties = await gaFetchProperties(accessToken);
+      property = await gaMatchMeasurementId(measurementId, properties, accessToken);
+    } catch { /* fall through to NO_PROPERTY */ }
+  }
   if (!property) return { connected: true, error: 'NO_PROPERTY', host };
 
   let path = '/';

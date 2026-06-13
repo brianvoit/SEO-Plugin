@@ -110,6 +110,23 @@ function getMetaRefresh() {
   return { delay: parseInt(m[1], 10), url: m[2].replace(/^['"]|['"]$/g, '') };
 }
 
+// GA4 measurement IDs (G-XXXXXXXX) used on the page — from the gtag.js script
+// src and inline gtag('config', …) calls. Used to suggest the matching GA4
+// property in the Analytics picker.
+function getGaMeasurementIds() {
+  const ids = new Set();
+  document.querySelectorAll('script[src]').forEach(s => {
+    const m = /[?&]id=(G-[A-Z0-9]+)/i.exec(s.src);
+    if (m) ids.add(m[1].toUpperCase());
+  });
+  document.querySelectorAll('script:not([src])').forEach(s => {
+    const re = /G-[A-Z0-9]{6,}/gi;
+    let m;
+    while ((m = re.exec(s.textContent || ''))) ids.add(m[0].toUpperCase());
+  });
+  return Array.from(ids).slice(0, 10);
+}
+
 function getPageData() {
   const titleEl     = document.querySelector('title');
   const titleText   = titleEl ? titleEl.textContent.trim() : '';
@@ -143,7 +160,8 @@ function getPageData() {
     openGraph:        getOpenGraph(),
     structuredData:        sd.schemas,
     structuredDataInvalid: sd.invalid,
-    dates:            getDates()
+    dates:            getDates(),
+    gaMeasurementIds: getGaMeasurementIds()
   };
 }
 

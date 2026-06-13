@@ -131,7 +131,6 @@ function renderGaPanel(response) {
 
   if (response.error === 'NO_PROPERTY') {
     if (response.host) _gaHost = response.host;
-    document.getElementById('ga-no-property-host').textContent = response.host || 'this domain';
     loadGaPropertyPicker();
     noProperty.classList.remove('hidden');
     return;
@@ -151,13 +150,20 @@ function renderGaPanel(response) {
   dataBox.classList.remove('hidden');
 }
 
+// First GA4 measurement ID (G-XXXX) detected on the current page, if any
+function gaDetectedId() {
+  return (typeof pageData !== 'undefined' && pageData && pageData.gaMeasurementIds && pageData.gaMeasurementIds[0]) || null;
+}
+
 async function loadGaData(forceRefresh = false) {
   const tab = await getActiveTab();
   // GA records the live URL's path (unlike GSC, which keys off the canonical)
   const pageUrl = tab.url;
   try { _gaHost = new URL(pageUrl).hostname.replace(/^www\./, '').toLowerCase(); } catch { _gaHost = null; }
 
-  const response = await browser.runtime.sendMessage({ action: 'gaGetPageData', pageUrl, range: gaSelectedRange, forceRefresh });
+  const response = await browser.runtime.sendMessage({
+    action: 'gaGetPageData', pageUrl, range: gaSelectedRange, forceRefresh, measurementId: gaDetectedId()
+  });
   renderGaPanel(response);
 }
 
@@ -165,33 +171,61 @@ async function loadGaData(forceRefresh = false) {
 // GA4 properties aren't keyed by domain, so the user picks which property
 // covers the current host; the choice is stored per domain.
 
-function renderGaPropertyOptions(container, properties, selected, onSelect) {
+function renderGaPropertyOptions(container, properties, selected, onSelect, opts = {}) {
   container.replaceChildren();
 
-  // Group properties under their GA account, so you pick Account → Property
+  const detected = opts.detectedProperty || null;
+  const highlight = selected || detected;   // suggest the page-detected match when unset
+
+  // Search box (sticky), filters the list as you type
+  const search = document.createElement('input');
+  search.type = 'text';
+  search.className = 'ga-property-search';
+  search.placeholder = 'Search properties or accounts…';
+  search.autocomplete = 'off';
+  search.spellcheck = false;
+  container.appendChild(search);
+
+  // Group by account, sort accounts (and properties within) alphabetically
   const byAccount = new Map();
   properties.forEach(p => {
     const acc = p.account || 'Account';
     if (!byAccount.has(acc)) byAccount.set(acc, []);
     byAccount.get(acc).push(p);
   });
+  const accounts = Array.from(byAccount.keys()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 
-  byAccount.forEach((props, account) => {
-    if (byAccount.size > 1 || account !== 'Account') {
-      const header = document.createElement('div');
-      header.className = 'ga-property-account';
-      header.textContent = account;
-      container.appendChild(header);
-    }
+  accounts.forEach(account => {
+    const props = byAccount.get(account).sort((a, b) =>
+      (a.displayName || '').localeCompare(b.displayName || '', undefined, { sensitivity: 'base' }));
+
+    const header = document.createElement('div');
+    header.className = 'ga-property-account';
+    header.textContent = account;
+    header.dataset.account = account.toLowerCase();
+    container.appendChild(header);
+
     props.forEach(p => {
       const opt = document.createElement('button');
-      opt.className = 'gsc-property-option' + (p.property === selected ? ' gsc-property-option--active' : '');
+      opt.className = 'gsc-property-option' + (p.property === highlight ? ' gsc-property-option--active' : '');
+      opt.dataset.search = `${p.displayName} ${account} ${p.property}`.toLowerCase();
+      opt.dataset.account = account.toLowerCase();
+
       const radio = document.createElement('span');
       radio.className = 'gsc-property-radio';
       const text = document.createElement('span');
       text.className = 'gsc-property-option-text';
       text.textContent = `${p.displayName} · ${p.property.replace('properties/', '#')}`;
       opt.append(radio, text);
+
+      if (p.property === detected) {
+        const chip = document.createElement('span');
+        chip.className = 'ga-detected-chip';
+        chip.textContent = 'On page';
+        chip.title = opts.detectedId ? `Detected ${opts.detectedId} on this page` : 'Detected on this page';
+        opt.appendChild(chip);
+      }
+
       opt.addEventListener('click', async () => {
         container.querySelectorAll('.gsc-property-option').forEach(el =>
           el.classList.toggle('gsc-property-option--active', el === opt));
@@ -199,6 +233,20 @@ function renderGaPropertyOptions(container, properties, selected, onSelect) {
         if (onSelect) onSelect();
       });
       container.appendChild(opt);
+    });
+  });
+
+  // Live filter: hide non-matching options and any account header left empty
+  search.addEventListener('input', () => {
+    const q = search.value.trim().toLowerCase();
+    container.querySelectorAll('.gsc-property-option').forEach(el => {
+      el.classList.toggle('hidden', q && !el.dataset.search.includes(q));
+    });
+    container.querySelectorAll('.ga-property-account').forEach(h => {
+      const acc = h.dataset.account;
+      const anyVisible = Array.from(container.querySelectorAll('.gsc-property-option'))
+        .some(el => el.dataset.account === acc && !el.classList.contains('hidden'));
+      h.classList.toggle('hidden', !anyVisible);
     });
   });
 }
@@ -211,7 +259,7 @@ async function loadGaPropertyPicker() {
   emptyEl.classList.add('hidden');
 
   const tab = await getActiveTab();
-  const res = await browser.runtime.sendMessage({ action: 'gaResolveProperty', pageUrl: tab.url });
+  const res = await browser.runtime.sendMessage({ action: 'gaResolveProperty', pageUrl: tab.url, measurementId: gaDetectedId() });
   if (!res || !res.connected) return;
   if (res.error) {
     emptyEl.textContent = res.error === 'API_ERROR'
@@ -226,7 +274,8 @@ async function loadGaPropertyPicker() {
     emptyEl.classList.remove('hidden');
     return;
   }
-  renderGaPropertyOptions(container, res.properties, res.property, () => loadGaData(false));
+  renderGaPropertyOptions(container, res.properties, res.property, () => loadGaData(false),
+    { detectedProperty: res.detectedProperty, detectedId: res.detectedId });
 }
 
 // ─── Settings: connection + property info ─────────────────────────────────────
@@ -254,42 +303,38 @@ async function refreshGaSettingsStatus() {
 }
 
 async function refreshGaPropertyInfo() {
-  const labelEl = document.getElementById('ga-property-label');
   const matchEl = document.getElementById('ga-property-match');
   const allEl   = document.getElementById('ga-property-all');
-  matchEl.textContent = '…';
-  matchEl.className = 'gsc-property-match';
+  matchEl.textContent = '';
+  matchEl.className = 'gsc-property-match hidden';
   matchEl.title = '';
   allEl.replaceChildren();
 
   const tab = await getActiveTab();
-  let host = '';
-  try { host = new URL(tab.url).hostname.replace(/^www\./, ''); } catch { /* keep empty */ }
-  labelEl.textContent = host ? `GA4 property for ${host}` : 'GA4 property for this page';
-
-  const res = await browser.runtime.sendMessage({ action: 'gaResolveProperty', pageUrl: tab.url });
-  if (!res || !res.connected) { matchEl.textContent = 'Not connected'; return; }
+  const res = await browser.runtime.sendMessage({ action: 'gaResolveProperty', pageUrl: tab.url, measurementId: gaDetectedId() });
+  if (!res || !res.connected) {
+    matchEl.textContent = 'Not connected';
+    matchEl.className = 'gsc-property-match gsc-property-match--none';
+    return;
+  }
   if (res.error) {
     matchEl.textContent = res.error === 'API_ERROR'
       ? 'Enable the "Google Analytics Admin API" in Google Cloud'
       : 'Could not load properties';
     matchEl.title = res.detail || res.error;
-    matchEl.classList.add('gsc-property-match--none');
+    matchEl.className = 'gsc-property-match gsc-property-match--none';
     return;
   }
 
   _gaHost = res.host;
   if (!res.properties.length) {
     matchEl.textContent = 'No GA4 properties on this account';
-    matchEl.classList.add('gsc-property-match--none');
+    matchEl.className = 'gsc-property-match gsc-property-match--none';
     return;
   }
 
-  matchEl.textContent = res.property
-    ? 'Using this property:'
-    : 'Choose which property to use for this domain:';
-  matchEl.classList.add('gsc-property-match--hint');
-  renderGaPropertyOptions(allEl, res.properties, res.property, null);
+  renderGaPropertyOptions(allEl, res.properties, res.property, null,
+    { detectedProperty: res.detectedProperty, detectedId: res.detectedId });
 }
 
 document.getElementById('btn-ga-connect').addEventListener('click', async () => {

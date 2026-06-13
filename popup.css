@@ -1226,6 +1226,38 @@ body.settings-open #update-footer { margin-top: auto; }
 }
 .ga-property-account:first-child { margin-top: 0; }
 
+/* GA property picker: sticky search box */
+.ga-property-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+.ga-property-search:focus { border-color: var(--accent); }
+
+/* "On page" chip on the auto-detected property */
+.ga-detected-chip {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 8px;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
 /* ── Canonical chip + clickable URL ───────────────────────────────────────── */
 
 .field-label-group { display: flex; align-items: center; gap: 7px; }

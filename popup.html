@@ -240,10 +240,7 @@
 
       <div id="ga-connected-info" class="hidden">
         <div class="gsc-property-box">
-          <div class="gsc-property-current">
-            <span class="wp-field-label" id="ga-property-label">GA4 property for this page</span>
-            <span class="gsc-property-match" id="ga-property-match">…</span>
-          </div>
+          <span class="gsc-property-match hidden" id="ga-property-match"></span>
           <div class="gsc-property-all gsc-property-all--scroll" id="ga-property-all"></div>
         </div>
         <button id="btn-ga-disconnect" class="settings-back-btn">Disconnect</button>
@@ -487,7 +484,6 @@
 
     <!-- No property chosen for this domain -->
     <div id="ga-no-property" class="field-section hidden">
-      <div class="field-hint">Choose which GA4 property covers <strong id="ga-no-property-host"></strong>:</div>
       <div id="ga-property-picker" class="gsc-property-all gsc-property-all--scroll"></div>
       <div id="ga-property-picker-empty" class="field-hint hint-muted hidden">No GA4 properties available on the connected account.</div>
     </div>

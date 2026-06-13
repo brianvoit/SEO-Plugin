@@ -175,16 +175,29 @@ browser.webRequest.onBeforeRequest.addListener(details => {
     finalStatus: null,
     error: null,
     done: false,
+    startedAt: details.timeStamp,
+    _lastTs: details.timeStamp,
+    _pending: null,
     prevChain: (prev && prev.done && prev.chain && prev.chain.length) ? prev.chain : null
   });
   setActionBadge(details.tabId, '');   // clear while the new navigation loads
 }, REDIRECT_FILTER);
 
+// Pull per-hop metadata off a hop's response: how long it took, whether it
+// came from cache, the cookies it set, and any X-Robots-Tag directive.
+function takePendingHopMeta(entry, details) {
+  const ms = entry._lastTs != null ? Math.max(0, Math.round(details.timeStamp - entry._lastTs)) : null;
+  entry._lastTs = details.timeStamp;
+  const pending = entry._pending || {};
+  entry._pending = null;
+  return { ms, fromCache: !!details.fromCache, cookies: pending.cookies || [], xRobots: pending.xRobots || null };
+}
+
 browser.webRequest.onBeforeRedirect.addListener(details => {
   if (details.frameId !== 0) return;
   const entry = redirectByTab.get(details.tabId);
   if (!entry || entry.requestId !== details.requestId) return;
-  entry.chain.push({ url: details.url, status: details.statusCode });
+  entry.chain.push({ url: details.url, status: details.statusCode, ...takePendingHopMeta(entry, details) });
   saveRedirect(details.tabId, entry);
 }, REDIRECT_FILTER);
 
@@ -192,10 +205,11 @@ browser.webRequest.onCompleted.addListener(details => {
   if (details.frameId !== 0) return;
   const entry = redirectByTab.get(details.tabId);
   if (!entry || entry.requestId !== details.requestId) return;
-  entry.chain.push({ url: details.url, status: details.statusCode });
+  entry.chain.push({ url: details.url, status: details.statusCode, ...takePendingHopMeta(entry, details) });
   entry.finalUrl = details.url;
   entry.finalStatus = details.statusCode;
   entry.done = true;
+  entry.totalMs = entry.startedAt != null ? Math.max(0, Math.round(details.timeStamp - entry.startedAt)) : null;
   saveRedirect(details.tabId, entry);
   const redirectCount = entry.chain.filter(h => h.status >= 300 && h.status < 400).length;
   setActionBadge(details.tabId, String(details.statusCode), badgeLevelFor(details.statusCode, redirectCount));
@@ -234,11 +248,23 @@ browser.webRequest.onHeadersReceived.addListener(async details => {
 
   // Final hop's headers win (each redirect hop overwrites the previous)
   const headers = {};
+  const cookies = [];
+  let xRobots = null;
   for (const h of details.responseHeaders || []) {
     const name = h.name.toLowerCase();
     if (SECURITY_HEADER_NAMES.includes(name)) headers[name] = h.value || '';
+    if (name === 'set-cookie') {
+      // A Set-Cookie value can carry multiple cookies on separate lines
+      (h.value || '').split('\n').forEach(line => {
+        const cookieName = line.split('=')[0].trim();
+        if (cookieName) cookies.push(cookieName);
+      });
+    }
+    if (name === 'x-robots-tag') xRobots = h.value || '';
   }
   entry.securityHeaders = headers;
+  // Stashed for the hop that onBeforeRedirect/onCompleted is about to push
+  entry._pending = { cookies, xRobots };
 
   if (details.url.startsWith('https:')) {
     try {

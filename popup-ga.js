@@ -167,23 +167,39 @@ async function loadGaData(forceRefresh = false) {
 
 function renderGaPropertyOptions(container, properties, selected, onSelect) {
   container.replaceChildren();
+
+  // Group properties under their GA account, so you pick Account → Property
+  const byAccount = new Map();
   properties.forEach(p => {
-    const opt = document.createElement('button');
-    opt.className = 'gsc-property-option' + (p.property === selected ? ' gsc-property-option--active' : '');
-    const radio = document.createElement('span');
-    radio.className = 'gsc-property-radio';
-    const text = document.createElement('span');
-    text.className = 'gsc-property-option-text';
-    text.textContent = `${p.displayName} · ${p.property.replace('properties/', '#')}`;
-    text.title = p.account ? `Account: ${p.account}` : '';
-    opt.append(radio, text);
-    opt.addEventListener('click', async () => {
-      container.querySelectorAll('.gsc-property-option').forEach(el =>
-        el.classList.toggle('gsc-property-option--active', el === opt));
-      await browser.runtime.sendMessage({ action: 'gaSetProperty', host: _gaHost, property: p.property });
-      if (onSelect) onSelect();
+    const acc = p.account || 'Account';
+    if (!byAccount.has(acc)) byAccount.set(acc, []);
+    byAccount.get(acc).push(p);
+  });
+
+  byAccount.forEach((props, account) => {
+    if (byAccount.size > 1 || account !== 'Account') {
+      const header = document.createElement('div');
+      header.className = 'ga-property-account';
+      header.textContent = account;
+      container.appendChild(header);
+    }
+    props.forEach(p => {
+      const opt = document.createElement('button');
+      opt.className = 'gsc-property-option' + (p.property === selected ? ' gsc-property-option--active' : '');
+      const radio = document.createElement('span');
+      radio.className = 'gsc-property-radio';
+      const text = document.createElement('span');
+      text.className = 'gsc-property-option-text';
+      text.textContent = `${p.displayName} · ${p.property.replace('properties/', '#')}`;
+      opt.append(radio, text);
+      opt.addEventListener('click', async () => {
+        container.querySelectorAll('.gsc-property-option').forEach(el =>
+          el.classList.toggle('gsc-property-option--active', el === opt));
+        await browser.runtime.sendMessage({ action: 'gaSetProperty', host: _gaHost, property: p.property });
+        if (onSelect) onSelect();
+      });
+      container.appendChild(opt);
     });
-    container.appendChild(opt);
   });
 }
 
@@ -196,9 +212,17 @@ async function loadGaPropertyPicker() {
 
   const tab = await getActiveTab();
   const res = await browser.runtime.sendMessage({ action: 'gaResolveProperty', pageUrl: tab.url });
-  if (!res || !res.connected || res.error) return;
+  if (!res || !res.connected) return;
+  if (res.error) {
+    emptyEl.textContent = res.error === 'API_ERROR'
+      ? `Couldn't list GA4 properties: ${res.detail || 'API error'}. Enable the "Google Analytics Admin API" in your Google Cloud project.`
+      : gaErrorMessage(res.error, res.detail);
+    emptyEl.classList.remove('hidden');
+    return;
+  }
   _gaHost = res.host;
   if (!res.properties.length) {
+    emptyEl.textContent = 'No GA4 properties on the connected Google account.';
     emptyEl.classList.remove('hidden');
     return;
   }
@@ -246,7 +270,9 @@ async function refreshGaPropertyInfo() {
   const res = await browser.runtime.sendMessage({ action: 'gaResolveProperty', pageUrl: tab.url });
   if (!res || !res.connected) { matchEl.textContent = 'Not connected'; return; }
   if (res.error) {
-    matchEl.textContent = 'Could not load properties';
+    matchEl.textContent = res.error === 'API_ERROR'
+      ? 'Enable the "Google Analytics Admin API" in Google Cloud'
+      : 'Could not load properties';
     matchEl.title = res.detail || res.error;
     matchEl.classList.add('gsc-property-match--none');
     return;

@@ -8,10 +8,11 @@ const settingsPanel = document.getElementById('settings-panel');
 const schemaPanel   = document.getElementById('schema-panel');
 const ogPanel       = document.getElementById('og-panel');
 const twPanel       = document.getElementById('tw-panel');
-const redirectPanel = document.getElementById('redirect-panel');
 const searchTab     = document.getElementById('search-tab');
 const analyticsTab  = document.getElementById('analytics-tab');
 const dnsTab        = document.getElementById('dns-tab');
+const redirectTab   = document.getElementById('redirect-tab');
+const statusBadge   = document.getElementById('btn-status');
 const mainContent   = document.getElementById('content');
 const tabGroup      = document.getElementById('main-tabs');
 const updateFooter  = document.getElementById('update-footer');
@@ -25,7 +26,6 @@ function hideDetailPanels() {
   schemaPanel.classList.add('hidden');
   ogPanel.classList.add('hidden');
   twPanel.classList.add('hidden');
-  redirectPanel.classList.add('hidden');
 }
 
 function showActiveTab() {
@@ -35,11 +35,15 @@ function showActiveTab() {
   // The update checker lives only on the Setup screen
   updateFooter.classList.add('hidden');
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('is-active', b.dataset.tab === activeTab));
+  // The status pill doubles as the redirect-trace tab; mark it active there
+  statusBadge.classList.toggle('status-badge--tab-active', activeTab === 'redirect');
   tabGroup.classList.remove('hidden');
   mainContent.classList.toggle('hidden', activeTab !== 'overview');
   searchTab.classList.toggle('hidden', activeTab !== 'search');
   analyticsTab.classList.toggle('hidden', activeTab !== 'analytics');
   dnsTab.classList.toggle('hidden', activeTab !== 'dns');
+  redirectTab.classList.toggle('hidden', activeTab !== 'redirect');
+  if (activeTab === 'redirect') renderRedirectPanel();
 }
 
 // Shared setup for opening a detail panel: hide the tabs' content + other panels
@@ -48,6 +52,7 @@ function enterDetailPanel() {
   searchTab.classList.add('hidden');
   analyticsTab.classList.add('hidden');
   dnsTab.classList.add('hidden');
+  redirectTab.classList.add('hidden');
   updateFooter.classList.add('hidden');
   errorBanner.classList.add('hidden');
   hideDetailPanels();
@@ -68,12 +73,6 @@ function showOgPanel() {
 function showTwPanel() {
   enterDetailPanel();
   twPanel.classList.remove('hidden');
-}
-
-function showRedirectPanel() {
-  enterDetailPanel();
-  redirectPanel.classList.remove('hidden');
-  renderRedirectPanel();
 }
 
 function hideDetailPanelToTab() {
@@ -129,23 +128,21 @@ document.getElementById('btn-og').addEventListener('click', showOgPanel);
 document.getElementById('btn-og-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-tw').addEventListener('click', showTwPanel);
 document.getElementById('btn-tw-back').addEventListener('click', hideDetailPanelToTab);
-document.getElementById('btn-status').addEventListener('click', showRedirectPanel);
-document.getElementById('btn-redirect-back').addEventListener('click', hideDetailPanelToTab);
 
-// ─── Main tabs (Overview / Search) ──────────────────────────────────────────
+// ─── Main tabs (Overview / Search / Analytics / DNS / Redirect) ──────────────
+// The status pill is also a tab trigger (data-tab="redirect"), so the handler
+// targets every [data-tab] in the tab group, not just .tab-btn.
 
-document.querySelectorAll('.tab-btn').forEach(btn => {
+document.querySelectorAll('#main-tabs [data-tab]').forEach(btn => {
   btn.addEventListener('click', () => {
     const tab = btn.dataset.tab;
     const inSettings = !settingsPanel.classList.contains('hidden');
     const inPanel = inSettings
       || !schemaPanel.classList.contains('hidden')
       || !ogPanel.classList.contains('hidden')
-      || !twPanel.classList.contains('hidden')
-      || !redirectPanel.classList.contains('hidden');
+      || !twPanel.classList.contains('hidden');
     if (tab === activeTab && !inPanel) return;
     activeTab = tab;
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('is-active', b.dataset.tab === tab));
     // Settings reloads page data on exit; other panels just return to the tab
     if (inSettings) hideSettings();
     else showActiveTab();

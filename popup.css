@@ -79,14 +79,15 @@ body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
 }
 
 header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 9px;
+  gap: 4px;
+  padding: 10px 6px;
   background: var(--header-bg);
   border-bottom: 1px solid var(--border);
   position: sticky;
@@ -109,7 +110,7 @@ header {
   background: none;
   border: none;
   border-radius: 5px;
-  padding: 5px 7px;
+  padding: 5px 5px;
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
   white-space: nowrap;
@@ -126,8 +127,8 @@ header {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 25px;
+  height: 25px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
@@ -406,8 +407,11 @@ main, #search-tab { padding: 4px 0 8px; }
   display: flex;
   align-items: center;
   gap: 4px;
-  margin-right: 1px;
+  margin-right: 0;
+  color: var(--text-muted);
 }
+.alt-header-control:hover { color: var(--text); }
+.alt-header-icon { flex-shrink: 0; }
 
 .alt-header-label {
   font-size: 9px;
@@ -901,7 +905,7 @@ body.settings-open #update-footer { margin-top: auto; }
   align-items: center;
   gap: 3px;
   height: 22px;
-  padding: 0 5px;
+  padding: 0 4px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
@@ -918,16 +922,27 @@ body.settings-open #update-footer { margin-top: auto; }
 .status-badge--server   { color: var(--text-muted); border-color: var(--text-muted); }
 .status-code  { color: inherit; font-size: 11px; }
 .status-count { color: inherit; opacity: 0.8; font-size: 10px; }
+/* When the pill is the active (redirect) tab, tint its fill with its own color */
+.status-badge--tab-active { background: color-mix(in srgb, currentColor 14%, var(--bg)); }
 
+.redirect-hop {
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+.redirect-hop:last-child { border-bottom: none; }
+.redirect-hop-meta {
+  margin-top: 2px;
+  margin-left: 42px;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
 .redirect-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 0;
-  border-bottom: 1px solid var(--border);
   font-size: 12px;
 }
-.redirect-row:last-child { border-bottom: none; }
 .redirect-status {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-weight: 700;
@@ -1199,6 +1214,17 @@ body.settings-open #update-footer { margin-top: auto; }
 
 /* Long property lists (GA accounts can have dozens) scroll instead of growing */
 .gsc-property-all--scroll { max-height: 190px; overflow-y: auto; }
+
+/* GA property picker: account grouping header */
+.ga-property-account {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-muted);
+  margin: 6px 0 2px;
+}
+.ga-property-account:first-child { margin-top: 0; }
 
 /* ── Canonical chip + clickable URL ───────────────────────────────────────── */
 

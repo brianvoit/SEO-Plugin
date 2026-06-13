@@ -231,7 +231,30 @@ document.getElementById('btn-save-brand-domain').addEventListener('click', () =>
 
 // ─── Claude API key ───────────────────────────────────────────────────────────
 
-// Show/hide API key
+// Two states: empty (editable input + reveal eye + Save) and stored (locked,
+// masked, no reveal — only a trash button to clear it and re-enter from scratch).
+function setKeyState(hasKey) {
+  const input = document.getElementById('api-key-input');
+  document.getElementById('btn-toggle-key-vis').classList.toggle('hidden', hasKey);
+  document.getElementById('btn-clear-key').classList.toggle('hidden', !hasKey);
+  document.getElementById('btn-save-key').classList.toggle('hidden', hasKey);
+
+  if (hasKey) {
+    input.type = 'password';
+    input.readOnly = true;
+    input.value = '';
+    input.placeholder = '••••••••••••  saved';
+    document.getElementById('icon-eye-open').classList.remove('hidden');
+    document.getElementById('icon-eye-closed').classList.add('hidden');
+  } else {
+    input.type = 'password';
+    input.readOnly = false;
+    input.value = '';
+    input.placeholder = 'sk-ant-api03-…';
+  }
+}
+
+// Show/hide the key only while entering a new one (never once stored)
 document.getElementById('btn-toggle-key-vis').addEventListener('click', () => {
   const input     = document.getElementById('api-key-input');
   const eyeOpen   = document.getElementById('icon-eye-open');
@@ -245,11 +268,18 @@ document.getElementById('btn-toggle-key-vis').addEventListener('click', () => {
 // Save API key
 document.getElementById('btn-save-key').addEventListener('click', () => {
   const key = document.getElementById('api-key-input').value.trim();
+  if (!key) return;
   browser.storage.local.set({ claudeApiKey: key }).then(() => {
+    setKeyState(true);
     const saved = document.getElementById('key-saved-msg');
     saved.classList.remove('hidden');
     setTimeout(() => saved.classList.add('hidden'), 2500);
   });
+});
+
+// Clear (trash) — wipes the key and returns to the empty, editable state
+document.getElementById('btn-clear-key').addEventListener('click', () => {
+  browser.storage.local.remove('claudeApiKey').then(() => setKeyState(false));
 });
 
 // ─── SEO character ranges ────────────────────────────────────────────────────

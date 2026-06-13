@@ -91,7 +91,7 @@ function showSettings() {
 
   browser.storage.local.get(['claudeApiKey', 'charRanges', 'displayMode', 'followActiveTab', 'gscClientId', 'gscClientSecret']).then(({ claudeApiKey, charRanges: stored, displayMode, followActiveTab, gscClientId, gscClientSecret }) => {
     document.getElementById('btn-follow-tab').setAttribute('aria-pressed', String(followActiveTab !== false));
-    document.getElementById('api-key-input').value = claudeApiKey ?? '';
+    setKeyState(!!claudeApiKey);
     document.getElementById('key-saved-msg').classList.add('hidden');
 
     const ranges = stored ?? DEFAULT_RANGES;

@@ -816,6 +816,81 @@ async function gscGetQueryData({ pageUrl, range, query, forceRefresh }) {
   return { connected: true, ...entry };
 }
 
+// Next page of queries for the table ("Request More" / branded top-up). Not
+// cached — it's an explicit, paged fetch on top of the first 25.
+async function gscGetMoreQueries({ pageUrl, range, startRow }) {
+  const tokenResult = await gscGetAccessToken();
+  if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
+  if (tokenResult.error === 'REAUTH_REQUIRED') return { connected: false, reauthRequired: true };
+  if (tokenResult.error) return { connected: true, error: tokenResult.error };
+  const accessToken = tokenResult.accessToken;
+
+  let sites;
+  try { sites = await gscFetchSites(accessToken); }
+  catch (err) { return { connected: true, error: err.code || 'API_ERROR', detail: err.detail }; }
+
+  const siteUrl = gscResolveSiteUrl(sites, pageUrl, await gscLoadOverride(pageUrl));
+  if (!siteUrl) return { connected: true, error: 'NO_PROPERTY' };
+
+  const { startDate, endDate } = gscDateRanges(range);
+  const pageFilter = { dimensionFilterGroups: [{ filters: [{ dimension: 'page', operator: 'equals', expression: pageUrl }] }] };
+
+  let data;
+  try {
+    data = await gscQuery(accessToken, siteUrl, { startDate, endDate, dimensions: ['query'], rowLimit: 50, startRow: startRow || 0, dataState: 'all', ...pageFilter });
+  } catch (err) {
+    if (err.code === 'RATE_LIMITED') return { connected: true, error: 'RATE_LIMITED' };
+    return { connected: true, error: 'API_ERROR', detail: err.detail };
+  }
+
+  const queries = (data.rows || []).map(r => ({
+    query: r.keys[0], clicks: r.clicks, impressions: r.impressions, ctr: r.ctr, position: r.position
+  }));
+  return { connected: true, queries };
+}
+
+// Page timeseries + totals, optionally excluding branded queries (RE2 regex)
+// so the chart can drop branded traffic when "Hide branded" is on.
+async function gscGetChartData({ pageUrl, range, excludeRegex }) {
+  const tokenResult = await gscGetAccessToken();
+  if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
+  if (tokenResult.error === 'REAUTH_REQUIRED') return { connected: false, reauthRequired: true };
+  if (tokenResult.error) return { connected: true, error: tokenResult.error };
+  const accessToken = tokenResult.accessToken;
+
+  let sites;
+  try { sites = await gscFetchSites(accessToken); }
+  catch (err) { return { connected: true, error: err.code || 'API_ERROR', detail: err.detail }; }
+
+  const siteUrl = gscResolveSiteUrl(sites, pageUrl, await gscLoadOverride(pageUrl));
+  if (!siteUrl) return { connected: true, error: 'NO_PROPERTY' };
+
+  const { startDate, endDate, prevStartDate, prevEndDate } = gscDateRanges(range);
+  const filters = [{ dimension: 'page', operator: 'equals', expression: pageUrl }];
+  if (excludeRegex) filters.push({ dimension: 'query', operator: 'excludingRegex', expression: excludeRegex });
+  const grp = { dimensionFilterGroups: [{ filters }] };
+
+  let timeseriesData, prevData;
+  try {
+    [timeseriesData, prevData] = await Promise.all([
+      gscQuery(accessToken, siteUrl, { startDate, endDate, dimensions: ['date'], dataState: 'all', ...grp }),
+      gscQuery(accessToken, siteUrl, { startDate: prevStartDate, endDate: prevEndDate, dataState: 'all', ...grp })
+    ]);
+  } catch (err) {
+    if (err.code === 'RATE_LIMITED') return { connected: true, error: 'RATE_LIMITED' };
+    return { connected: true, error: 'API_ERROR', detail: err.detail };
+  }
+
+  return {
+    connected: true,
+    timeseries: (timeseriesData.rows || []).map(r => ({
+      date: r.keys[0], clicks: r.clicks, impressions: r.impressions, ctr: r.ctr, position: r.position
+    })),
+    totals: gscAggregateTotals(timeseriesData.rows),
+    previousTotals: gscAggregateTotals(prevData.rows)
+  };
+}
+
 // Resolve which verified property a URL maps to, plus the full property list —
 // lightweight (no analytics fetch), used by the Settings screen.
 async function gscResolveProperty({ pageUrl }) {
@@ -1238,6 +1313,8 @@ browser.runtime.onMessage.addListener((message) => {
     case 'gscDisconnect':      return gscDisconnect();
     case 'gscGetPageData':     return gscGetPageData(message);
     case 'gscGetQueryData':    return gscGetQueryData(message);
+    case 'gscGetMoreQueries':  return gscGetMoreQueries(message);
+    case 'gscGetChartData':    return gscGetChartData(message);
     case 'gscResolveProperty': return gscResolveProperty(message);
     case 'gscSetProperty':     return gscSetProperty(message);
     case 'gaGetStatus':        return gaGetStatus();

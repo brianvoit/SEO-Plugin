@@ -10,6 +10,7 @@ let gscQuerySort = { column: 'clicks', direction: 'desc' };
 let _gscPageUrl = null;
 let _gscSiteUrl = null;
 let _gscQueries = [];
+let _gscQueriesExhausted = false;   // no more pages to request
 let _gscFilled = [];
 let _gscOverviewData = null;
 let _gscSelectedQuery = null;
@@ -532,7 +533,68 @@ function addQueryToBranded(query) {
   browser.storage.local.set({ brandedTerms: allBrandedTerms }).then(() => {
     renderGscQueries(_gscQueries, _gscPageUrl);
     if (typeof renderBrandDomains === 'function') renderBrandDomains();
+    // Newly branded query drops out of the table — backfill to keep ~25 visible,
+    // and (if hiding branded) take it out of the chart too.
+    topUpGscQueries(25);
+    refreshGscChartForBranded();
   });
+}
+
+// Branded regex for the current page's domain
+function gscBrandedPattern() {
+  let host = '';
+  try { host = new URL(_gscPageUrl).hostname.replace(/^www\./, ''); } catch { return ''; }
+  return allBrandedTerms[host] || '';
+}
+
+// Count queries that would be visible right now (respecting Hide branded)
+function gscVisibleCount() {
+  const pattern = gscBrandedPattern();
+  return _gscQueries.filter(q => !(gscHideBranded && isQueryBranded(q.query, pattern))).length;
+}
+
+// Fetch the next page of queries and append (dedup by query); returns # added
+async function fetchMoreGscQueries() {
+  if (_gscQueriesExhausted || !_gscPageUrl) return 0;
+  const res = await browser.runtime.sendMessage({
+    action: 'gscGetMoreQueries', pageUrl: _gscPageUrl, range: gscSelectedRange, startRow: _gscQueries.length
+  });
+  if (!res || !res.connected || res.error) return 0;
+  const batch = res.queries || [];
+  const seen = new Set(_gscQueries.map(q => q.query));
+  const added = batch.filter(q => !seen.has(q.query));
+  _gscQueries = _gscQueries.concat(added);
+  if (batch.length < 50) _gscQueriesExhausted = true;
+  return added.length;
+}
+
+// Pull more pages until `target` non-branded queries are visible (used after a
+// branded term is added so the table doesn't shrink)
+async function topUpGscQueries(target = 25) {
+  let guard = 0;
+  while (gscVisibleCount() < target && !_gscQueriesExhausted && guard < 12) {
+    const added = await fetchMoreGscQueries();
+    guard++;
+    if (!added) break;
+  }
+  renderGscQueries(_gscQueries, _gscPageUrl);
+}
+
+// Repaint the chart with branded queries excluded when Hide branded is on
+// (a specific query filter, if active, owns the chart instead)
+async function refreshGscChartForBranded() {
+  if (_gscSelectedQuery) return;
+  const pattern = gscBrandedPattern();
+  if (gscHideBranded && pattern) {
+    const res = await browser.runtime.sendMessage({
+      action: 'gscGetChartData', pageUrl: _gscPageUrl, range: gscSelectedRange, excludeRegex: pattern
+    });
+    if (res && res.connected && !res.error) {
+      renderGscCharts(res.timeseries, res.totals, res.previousTotals, gscSelectedRange);
+    }
+  } else if (_gscOverviewData) {
+    renderGscCharts(_gscOverviewData.timeseries, _gscOverviewData.totals, _gscOverviewData.previousTotals, gscSelectedRange);
+  }
 }
 
 function renderGscQueries(queries, pageUrl) {
@@ -540,12 +602,16 @@ function renderGscQueries(queries, pageUrl) {
   try { host = new URL(pageUrl).hostname.replace(/^www\./, ''); } catch { /* keep empty */ }
   const pattern = allBrandedTerms[host] || '';
   const container = document.getElementById('gsc-queries-table');
+  const moreBtn = document.getElementById('btn-gsc-more-queries');
   container.innerHTML = '';
 
   if (!queries.length) {
     document.getElementById('gsc-queries-empty').classList.remove('hidden');
+    moreBtn.classList.add('hidden');
     return;
   }
+  // "Request more" shows whenever the property may have more queries to page in
+  moreBtn.classList.toggle('hidden', _gscQueriesExhausted);
 
   const headerRow = buildQueryHeaderRow(gscQuerySort);
   container.appendChild(headerRow);
@@ -598,7 +664,8 @@ function selectGscQuery(query) {
     _gscSelectedQuery = null;
     hideGscQueryFilterBar();
     renderGscQueries(_gscQueries, _gscPageUrl);
-    if (_gscOverviewData) renderGscCharts(_gscOverviewData.timeseries, _gscOverviewData.totals, _gscOverviewData.previousTotals, gscSelectedRange);
+    // Restore the chart — branded-excluded if Hide branded is on, else overview
+    refreshGscChartForBranded();
     return;
   }
   _gscSelectedQuery = query;
@@ -690,6 +757,7 @@ function renderGscPanel(response, pageUrl) {
 
   _gscSiteUrl = response.siteUrl;
   _gscQueries = response.queries || [];
+  _gscQueriesExhausted = _gscQueries.length < 25;   // first page is 25
   _gscPageUrl = pageUrl;
   _gscOverviewData = response.overview;
 
@@ -706,6 +774,11 @@ function renderGscPanel(response, pageUrl) {
     applyGscQueryFilter(_gscSelectedQuery);
   } else {
     hideGscQueryFilterBar();
+    // Honor a persisted Hide-branded: drop branded from the chart + backfill table
+    if (gscHideBranded && gscBrandedPattern()) {
+      refreshGscChartForBranded();
+      topUpGscQueries(25);
+    }
   }
 
   document.getElementById('gsc-fetched-meta').textContent =
@@ -748,7 +821,22 @@ document.getElementById('btn-gsc-branded-toggle').addEventListener('click', () =
   gscHideBranded = !gscHideBranded;
   document.getElementById('btn-gsc-branded-toggle').setAttribute('aria-pressed', String(gscHideBranded));
   browser.storage.local.set({ gscHideBranded });
-  if (_gscPageUrl) renderGscQueries(_gscQueries, _gscPageUrl);
+  if (_gscPageUrl) {
+    renderGscQueries(_gscQueries, _gscPageUrl);
+    refreshGscChartForBranded();              // chart drops/restores branded traffic
+    if (gscHideBranded) topUpGscQueries(25);  // backfill the table to ~25 visible
+  }
+});
+
+document.getElementById('btn-gsc-more-queries').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-gsc-more-queries');
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = 'Loading…';
+  await fetchMoreGscQueries();
+  renderGscQueries(_gscQueries, _gscPageUrl);
+  btn.disabled = false;
+  btn.textContent = label;
 });
 
 document.getElementById('btn-gsc-clear-query-filter').addEventListener('click', () => {
@@ -805,30 +893,30 @@ async function refreshGscSettingsStatus() {
 let _gscPropHost = null;
 
 async function refreshGscPropertyInfo() {
-  const labelEl = document.getElementById('gsc-property-label');
   const matchEl = document.getElementById('gsc-property-match');
   const allEl   = document.getElementById('gsc-property-all');
-  matchEl.textContent = '…';
-  matchEl.className = 'gsc-property-match';
+  matchEl.textContent = '';
+  matchEl.className = 'gsc-property-match hidden';
   matchEl.title = '';
   allEl.replaceChildren();
 
   const tab = await getActiveTab();
   let pageUrl = tab.url;
-  let host = '';
-  try { host = new URL(pageUrl).hostname.replace(/^www\./, ''); } catch { /* keep empty */ }
-  if (labelEl) labelEl.textContent = host ? `Property for ${host}` : 'Property for this page';
   try {
     const data = await browser.tabs.sendMessage(tab.id, { action: 'getPageData' });
     if (data?.canonical) pageUrl = data.canonical;
   } catch { /* fall back to tab.url */ }
 
   const res = await browser.runtime.sendMessage({ action: 'gscResolveProperty', pageUrl });
-  if (!res || !res.connected) { matchEl.textContent = 'Not connected'; return; }
+  if (!res || !res.connected) {
+    matchEl.textContent = 'Not connected';
+    matchEl.className = 'gsc-property-match gsc-property-match--none';
+    return;
+  }
   if (res.error) {
     matchEl.textContent = 'Could not load properties';
     matchEl.title = res.detail || res.error;
-    matchEl.classList.add('gsc-property-match--none');
+    matchEl.className = 'gsc-property-match gsc-property-match--none';
     return;
   }
 
@@ -837,14 +925,9 @@ async function refreshGscPropertyInfo() {
 
   if (!matching.length) {
     matchEl.textContent = 'No verified property matches this domain';
-    matchEl.classList.add('gsc-property-match--none');
+    matchEl.className = 'gsc-property-match gsc-property-match--none';
     return;
   }
-
-  matchEl.textContent = matching.length > 1
-    ? 'Choose which property to use for this domain:'
-    : 'Using this property:';
-  matchEl.classList.add('gsc-property-match--hint');
 
   matching.forEach(siteUrl => {
     const opt = document.createElement('button');

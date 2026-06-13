@@ -1226,6 +1226,25 @@ body.settings-open #update-footer { margin-top: auto; }
 }
 .ga-property-account:first-child { margin-top: 0; }
 
+/* "Request more" queries button (Search tab) */
+.gsc-more-queries-btn {
+  width: 100%;
+  margin-top: 8px;
+  padding: 7px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.gsc-more-queries-btn:hover { border-color: var(--accent); }
+.gsc-more-queries-btn:disabled { color: var(--text-muted); cursor: default; }
+
+/* Trash (clear) API key button shares the red affordance */
+#btn-clear-key:hover { color: var(--hint-red); border-color: var(--hint-red); }
+
 /* GA property picker: sticky search box */
 .ga-property-search {
   position: sticky;

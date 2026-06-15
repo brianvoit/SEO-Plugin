@@ -1197,19 +1197,20 @@ body.settings-open #update-footer { margin-top: auto; }
   color: var(--text);
   word-break: break-all;
 }
+/* Associated/selected property reads green (a confirmed connection) */
 .gsc-property-option--active {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+  border-color: var(--hint-green);
+  background: color-mix(in srgb, var(--hint-green) 10%, var(--bg));
 }
 .gsc-property-option--active .gsc-property-radio {
-  border-color: var(--accent);
+  border-color: var(--hint-green);
 }
 .gsc-property-option--active .gsc-property-radio::after {
   content: "";
   position: absolute;
   inset: 2px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--hint-green);
 }
 
 /* Long property lists (GA accounts can have dozens) scroll instead of growing */

@@ -10,6 +10,7 @@ const ogPanel       = document.getElementById('og-panel');
 const twPanel       = document.getElementById('tw-panel');
 const searchTab     = document.getElementById('search-tab');
 const analyticsTab  = document.getElementById('analytics-tab');
+const adsTab        = document.getElementById('ads-tab');
 const dnsTab        = document.getElementById('dns-tab');
 const redirectTab   = document.getElementById('redirect-tab');
 const statusBadge   = document.getElementById('btn-status');
@@ -41,6 +42,7 @@ function showActiveTab() {
   mainContent.classList.toggle('hidden', activeTab !== 'overview');
   searchTab.classList.toggle('hidden', activeTab !== 'search');
   analyticsTab.classList.toggle('hidden', activeTab !== 'analytics');
+  adsTab.classList.toggle('hidden', activeTab !== 'ads');
   dnsTab.classList.toggle('hidden', activeTab !== 'dns');
   redirectTab.classList.toggle('hidden', activeTab !== 'redirect');
   if (activeTab === 'redirect') renderRedirectPanel();
@@ -51,6 +53,7 @@ function enterDetailPanel() {
   mainContent.classList.add('hidden');
   searchTab.classList.add('hidden');
   analyticsTab.classList.add('hidden');
+  adsTab.classList.add('hidden');
   dnsTab.classList.add('hidden');
   redirectTab.classList.add('hidden');
   updateFooter.classList.add('hidden');
@@ -113,6 +116,7 @@ function showSettings() {
     if (status && status.connected) refreshGscPropertyInfo();
   });
   refreshGaSettingsStatus();
+  refreshAdsSettingsStatus();
   loadBrandedTerms();
 }
 
@@ -148,6 +152,7 @@ document.querySelectorAll('#main-tabs [data-tab]').forEach(btn => {
     else showActiveTab();
     // GA and DNS data load lazily, on first look at the tab (caches keep it cheap)
     if (tab === 'analytics' && typeof loadGaData === 'function') loadGaData(false);
+    if (tab === 'ads' && typeof loadAdsData === 'function') loadAdsData(false);
     if (tab === 'dns' && typeof loadDnsData === 'function') loadDnsData();
   });
 });

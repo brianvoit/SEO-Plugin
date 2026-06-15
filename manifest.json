@@ -23,6 +23,7 @@
     "https://searchconsole.googleapis.com/*",
     "https://analyticsadmin.googleapis.com/*",
     "https://analyticsdata.googleapis.com/*",
+    "https://googleads.googleapis.com/*",
     "https://accounts.google.com/*"
   ],
   "background": {

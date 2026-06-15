@@ -12,6 +12,7 @@
       <button class="tab-btn is-active" data-tab="overview">Overview</button>
       <button class="tab-btn" data-tab="search">Search</button>
       <button class="tab-btn" data-tab="analytics">Analytics</button>
+      <button class="tab-btn" data-tab="ads">Ads</button>
       <button class="tab-btn" data-tab="dns">DNS</button>
       <button id="btn-status" class="status-badge hidden" data-tab="redirect" title="Page status / redirect trace">
         <span class="status-code" id="status-code"></span>
@@ -250,6 +251,47 @@
           <div class="gsc-property-all gsc-property-all--scroll" id="ga-property-all"></div>
         </div>
         <button id="btn-ga-disconnect" class="settings-back-btn">Disconnect</button>
+      </div>
+    </section>
+
+    <section class="field-section">
+      <div class="field-header">
+        <span class="field-label">GOOGLE ADS</span>
+        <div class="field-header-actions">
+          <span id="ads-status-badge" class="gsc-status-badge"></span>
+        </div>
+      </div>
+
+      <div id="ads-setup-form">
+        <div class="field-hint">Uses the OAuth client configured under Google Search Console above. Enable the "Google Ads API" in the same Google Cloud project.</div>
+        <div class="wp-form-actions">
+          <button id="btn-ads-connect" class="save-key-btn">Connect Google Ads</button>
+        </div>
+        <div id="ads-connect-error" class="field-hint hint-red hidden"></div>
+      </div>
+
+      <div id="ads-connected-info" class="hidden">
+        <label class="wp-field">
+          <span class="wp-field-label">Developer token</span>
+          <input type="password" id="ads-dev-token" class="wp-input" placeholder="Google Ads developer token" autocomplete="off" spellcheck="false" />
+        </label>
+        <div class="field-hint"><span class="ads-link" id="ads-token-link-2">How to get a developer token →</span> (needs Google approval for live data)</div>
+        <label class="wp-field">
+          <span class="wp-field-label">Manager (MCC) ID — login-customer-id</span>
+          <input type="text" id="ads-manager-id" class="wp-input" placeholder="123-456-7890" autocomplete="off" spellcheck="false" />
+        </label>
+        <button id="btn-ads-save-config" class="save-key-btn">Save</button>
+        <span class="key-saved-msg hidden" id="ads-config-saved">
+          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px"><polyline points="2 8 6 12 14 4"/></svg>
+          Saved
+        </span>
+        <div class="gsc-property-box" id="ads-account-box">
+          <span class="wp-field-label" style="display:block;margin-bottom:6px">Account for this domain</span>
+          <span class="gsc-property-match hidden" id="ads-account-match"></span>
+          <input type="text" id="ads-account-search" class="ga-property-search" placeholder="Search accounts…" autocomplete="off" spellcheck="false" />
+          <div class="gsc-property-all gsc-property-all--scroll" id="ads-account-all"></div>
+        </div>
+        <button id="btn-ads-disconnect" class="settings-back-btn">Disconnect</button>
       </div>
     </section>
 
@@ -558,6 +600,68 @@
 
   </div>
 
+  <!-- Ads (Google Ads) tab -->
+  <div id="ads-tab" class="hidden">
+
+    <!-- Not connected -->
+    <div id="ads-not-connected" class="field-section hidden">
+      <div class="field-hint" id="ads-not-connected-text">Connect Google Ads in Settings to see the paid campaigns, keywords, and search terms pointing to this page.</div>
+      <button id="btn-ads-goto-settings" class="save-key-btn" style="margin-top:8px">Open Settings</button>
+    </div>
+
+    <!-- No developer token -->
+    <div id="ads-no-token" class="field-section hidden">
+      <div class="field-hint">Google Ads needs a developer token. Add one in Settings — see <span class="ads-link" id="ads-token-link">how to get a developer token</span>.</div>
+      <button id="btn-ads-goto-settings-2" class="save-key-btn" style="margin-top:8px">Open Settings</button>
+    </div>
+
+    <!-- No account chosen for this domain -->
+    <div id="ads-no-account" class="field-section hidden">
+      <input type="text" id="ads-tab-account-search" class="ga-property-search" placeholder="Search accounts…" autocomplete="off" spellcheck="false" />
+      <div id="ads-account-picker" class="gsc-property-all gsc-property-all--scroll"></div>
+      <div id="ads-account-picker-empty" class="field-hint hint-muted hidden">No Google Ads accounts available on the connected login.</div>
+    </div>
+
+    <!-- Error -->
+    <div id="ads-error" class="field-section hidden">
+      <div class="field-hint hint-red" id="ads-error-text"></div>
+    </div>
+
+    <!-- Data -->
+    <div id="ads-data" class="hidden">
+      <section class="field-section">
+        <div class="mode-segmented" id="ads-range-group">
+          <button class="mode-option" data-range="30">30D</button>
+          <button class="mode-option" data-range="60">60D</button>
+          <button class="mode-option" data-range="90">90D</button>
+          <button class="mode-option" data-range="365">12M</button>
+        </div>
+        <div class="field-hint" id="ads-fetched-meta"></div>
+      </section>
+
+      <!-- No ads point to this page -->
+      <div id="ads-none" class="field-section hidden">
+        <div class="field-hint">No active ads point to this page in the selected period.</div>
+      </div>
+
+      <section class="field-section" id="ads-campaigns-section">
+        <div class="field-header"><span class="field-label">ADS POINTING HERE</span></div>
+        <div id="ads-tree"></div>
+      </section>
+
+      <section class="field-section" id="ads-keywords-section">
+        <div class="field-header"><span class="field-label">KEYWORDS</span></div>
+        <div id="ads-keywords-table"></div>
+      </section>
+
+      <section class="field-section" id="ads-terms-section">
+        <div class="field-header"><span class="field-label">SEARCH TERMS</span></div>
+        <div id="ads-terms-table"></div>
+      </section>
+    </div>
+
+  </div>
+
   <!-- DNS tab -->
   <div id="dns-tab" class="hidden">
 
@@ -847,6 +951,7 @@
   <script src="popup-settings.js"></script>
   <script src="popup-gsc.js"></script>
   <script src="popup-ga.js"></script>
+  <script src="popup-ads.js"></script>
   <script src="popup-redirects.js"></script>
   <script src="popup-dns.js"></script>
   <script src="popup.js"></script>

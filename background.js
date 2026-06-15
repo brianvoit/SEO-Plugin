@@ -1304,6 +1304,278 @@ async function dnsResolve({ host }) {
   return entry;
 }
 
+// ─── Google Ads (GAQL) ────────────────────────────────────────────────────────
+// Needs an OAuth grant (scope adwords), a developer token (from the Ads account
+// API Center, approved by Google for production data), and — for MCC setups —
+// the manager account's login-customer-id. Customer IDs are 10 digits, no dashes.
+
+const GA_ADS_API = 'https://googleads.googleapis.com/v17';
+const ADS_ACCOUNTS_STALE_MS = 7 * 24 * 60 * 60 * 1000;
+const ADS_STALE_MS = 6 * 60 * 60 * 1000;
+const ADS_DEBOUNCE_MS = 60 * 1000;
+
+function adsDigits(id) { return String(id || '').replace(/\D/g, ''); }
+
+async function adsGetStatus() {
+  const { adsAuth, adsDeveloperToken, adsManagerId } = await browser.storage.local.get(['adsAuth', 'adsDeveloperToken', 'adsManagerId']);
+  return {
+    connected: !!adsAuth,
+    hasDevToken: !!adsDeveloperToken,
+    managerId: adsManagerId || null,
+    redirectUri: getGoogleRedirectUri(),
+    connectedAt: adsAuth?.connectedAt ?? null
+  };
+}
+
+function adsConnect() {
+  return googleOAuthConnect('https://www.googleapis.com/auth/adwords', 'adsAuth');
+}
+
+function adsDisconnect() {
+  return googleDisconnect('adsAuth', ['adsAccounts', 'adsCache', 'adsAccountOverrides']);
+}
+
+function adsGetAccessToken() {
+  return googleGetAccessToken('adsAuth');
+}
+
+// One GAQL request via searchStream (returns concatenated result rows)
+async function adsSearch(accessToken, customerId, query) {
+  const { adsDeveloperToken, adsManagerId } = await browser.storage.local.get(['adsDeveloperToken', 'adsManagerId']);
+  if (!adsDeveloperToken) return { error: 'NO_DEV_TOKEN' };
+
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    'developer-token': adsDeveloperToken,
+    'Content-Type': 'application/json'
+  };
+  if (adsManagerId) headers['login-customer-id'] = adsDigits(adsManagerId);
+
+  let res;
+  try {
+    res = await fetch(`${GA_ADS_API}/customers/${adsDigits(customerId)}/googleAds:searchStream`, {
+      method: 'POST', headers, body: JSON.stringify({ query })
+    });
+  } catch {
+    return { error: 'NETWORK' };
+  }
+  if (res.status === 429) return { error: 'RATE_LIMITED' };
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    const msg = (Array.isArray(body) ? body[0] : body)?.error?.message;
+    return { error: 'API_ERROR', detail: msg || `HTTP ${res.status}` };
+  }
+  const data = await res.json();
+  // searchStream returns an array of {results:[...]} batches
+  const rows = [];
+  (Array.isArray(data) ? data : [data]).forEach(batch => {
+    (batch.results || []).forEach(r => rows.push(r));
+  });
+  return { rows };
+}
+
+// Accessible accounts. With a manager ID, list its client accounts (id + name);
+// otherwise fall back to the bare accessible-customers id list.
+async function adsListAccounts(accessToken) {
+  const { adsAccounts, adsManagerId, adsDeveloperToken } = await browser.storage.local.get(['adsAccounts', 'adsManagerId', 'adsDeveloperToken']);
+  if (adsAccounts && (Date.now() - adsAccounts.fetchedAt < ADS_ACCOUNTS_STALE_MS)) return { accounts: adsAccounts.accounts };
+  if (!adsDeveloperToken) return { error: 'NO_DEV_TOKEN' };
+
+  let accounts = [];
+  if (adsManagerId) {
+    const res = await adsSearch(accessToken, adsManagerId,
+      'SELECT customer_client.id, customer_client.descriptive_name, customer_client.manager, customer_client.currency_code FROM customer_client WHERE customer_client.level <= 1');
+    if (res.error) return res;
+    accounts = (res.rows || [])
+      .map(r => r.customerClient)
+      .filter(c => c && !c.manager)
+      .map(c => ({ id: adsDigits(c.id), name: c.descriptiveName || `Account ${c.id}`, currency: c.currencyCode || '' }));
+  } else {
+    let res;
+    try {
+      res = await fetch(`${GA_ADS_API}/customers:listAccessibleCustomers`, {
+        headers: { Authorization: `Bearer ${accessToken}`, 'developer-token': adsDeveloperToken }
+      });
+    } catch { return { error: 'NETWORK' }; }
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      return { error: 'API_ERROR', detail: body?.error?.message || `HTTP ${res.status}` };
+    }
+    const data = await res.json();
+    accounts = (data.resourceNames || []).map(rn => {
+      const id = adsDigits(rn.split('/').pop());
+      return { id, name: `Account ${id}`, currency: '' };
+    });
+  }
+  await browser.storage.local.set({ adsAccounts: { fetchedAt: Date.now(), accounts } });
+  return { accounts };
+}
+
+async function adsGetAccount(host) {
+  if (!host) return null;
+  const { adsAccountOverrides } = await browser.storage.local.get('adsAccountOverrides');
+  return (adsAccountOverrides && adsAccountOverrides[host]) || null;
+}
+
+async function adsResolveAccount({ pageUrl }) {
+  const tokenResult = await adsGetAccessToken();
+  if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
+  if (tokenResult.error === 'REAUTH_REQUIRED') return { connected: false, reauthRequired: true };
+  if (tokenResult.error) return { connected: true, error: tokenResult.error };
+
+  const listed = await adsListAccounts(tokenResult.accessToken);
+  if (listed.error) return { connected: true, error: listed.error, detail: listed.detail };
+
+  const host = gscPageHost(pageUrl);
+  const chosen = await adsGetAccount(host);
+  const account = (chosen && listed.accounts.some(a => a.id === chosen)) ? chosen : null;
+  return { connected: true, host, account, accounts: listed.accounts };
+}
+
+async function adsSetAccount({ host, account }) {
+  if (!host) return { ok: false };
+  const { adsAccountOverrides } = await browser.storage.local.get('adsAccountOverrides');
+  const overrides = adsAccountOverrides || {};
+  if (account) overrides[host] = adsDigits(account); else delete overrides[host];
+  await browser.storage.local.set({ adsAccountOverrides: overrides });
+  const { adsCache } = await browser.storage.local.get('adsCache');
+  if (adsCache) {
+    let mutated = false;
+    for (const k of Object.keys(adsCache)) { if (k.startsWith(`${host}::`)) { delete adsCache[k]; mutated = true; } }
+    if (mutated) await browser.storage.local.set({ adsCache });
+  }
+  return { ok: true };
+}
+
+// GAQL date range (Ads data is ~current; end = yesterday to be safe)
+function adsDateRange(range) {
+  const end = new Date(); end.setUTCDate(end.getUTCDate() - 1);
+  const start = new Date(end); start.setUTCDate(start.getUTCDate() - (range - 1));
+  return { startDate: gscFormatDate(start), endDate: gscFormatDate(end) };
+}
+
+function adsMetrics(m) {
+  m = m || {};
+  return {
+    impressions: Number(m.impressions || 0),
+    clicks: Number(m.clicks || 0),
+    cost: Number(m.costMicros || 0) / 1e6,
+    conversions: Number(m.conversions || 0)
+  };
+}
+
+// Normalize a URL to origin+path (lowercased, no trailing slash) for matching
+function adsNormUrl(u) {
+  try { const x = new URL(u); return (x.origin + x.pathname).replace(/\/$/, '').toLowerCase(); }
+  catch { return (u || '').replace(/\/$/, '').toLowerCase(); }
+}
+
+async function adsGetPageData({ pageUrl, range, forceRefresh }) {
+  const tokenResult = await adsGetAccessToken();
+  if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
+  if (tokenResult.error === 'REAUTH_REQUIRED') return { connected: false, reauthRequired: true };
+  if (tokenResult.error) return { connected: true, error: tokenResult.error };
+  const accessToken = tokenResult.accessToken;
+
+  const { adsDeveloperToken } = await browser.storage.local.get('adsDeveloperToken');
+  if (!adsDeveloperToken) return { connected: true, error: 'NO_DEV_TOKEN' };
+
+  const host = gscPageHost(pageUrl);
+  const customerId = await adsGetAccount(host);
+  if (!customerId) return { connected: true, error: 'NO_ACCOUNT', host };
+
+  let path = '/';
+  try { path = new URL(pageUrl).pathname; } catch { /* root */ }
+  const target = adsNormUrl(pageUrl);
+
+  const cacheKey = `${host}::${path}::${range}`;
+  const { adsCache } = await browser.storage.local.get('adsCache');
+  const cache = adsCache || {};
+  const cached = cache[cacheKey];
+  const isStale = !cached || cached.account !== customerId || (Date.now() - cached.fetchedAt > ADS_STALE_MS);
+  const withinDebounce = cached && (Date.now() - cached.fetchedAt < ADS_DEBOUNCE_MS);
+  if (cached && cached.account === customerId && ((!forceRefresh && !isStale) || (forceRefresh && withinDebounce))) {
+    return { connected: true, ...cached, fromCache: true };
+  }
+
+  const { startDate, endDate } = adsDateRange(range);
+  const dateWhere = `segments.date BETWEEN '${startDate}' AND '${endDate}'`;
+
+  // 1) Ads + their final URLs/metrics, filtered client-side to this page
+  const adRes = await adsSearch(accessToken, customerId,
+    `SELECT campaign.id, campaign.name, ad_group.id, ad_group.name, ad_group_ad.ad.id, ad_group_ad.ad.name,
+            ad_group_ad.ad.type, ad_group_ad.ad.final_urls, ad_group_ad.status,
+            metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
+     FROM ad_group_ad WHERE ${dateWhere} AND ad_group_ad.status != 'REMOVED'`);
+  if (adRes.error) return { connected: true, error: adRes.error, detail: adRes.detail };
+
+  const ads = [];
+  const adGroupIds = new Set();
+  const campaignIds = new Set();
+  (adRes.rows || []).forEach(r => {
+    const urls = (r.adGroupAd?.ad?.finalUrls) || [];
+    if (!urls.some(u => adsNormUrl(u) === target)) return;
+    adGroupIds.add(String(r.adGroup.id));
+    campaignIds.add(String(r.campaign.id));
+    ads.push({
+      campaignId: String(r.campaign.id), campaign: r.campaign.name,
+      adGroupId: String(r.adGroup.id), adGroup: r.adGroup.name,
+      adId: String(r.adGroupAd.ad.id), adName: r.adGroupAd.ad.name || '',
+      type: r.adGroupAd.ad.type || '', finalUrls: urls,
+      ...adsMetrics(r.metrics)
+    });
+  });
+
+  if (!ads.length) {
+    const entry = { fetchedAt: Date.now(), account: customerId, range, path, ads: [], campaigns: [], keywords: [], searchTerms: [], currency: '' };
+    cache[cacheKey] = entry; await gscPruneCache(cache); await browser.storage.local.set({ adsCache: cache });
+    return { connected: true, ...entry, fromCache: false };
+  }
+
+  const agList = `(${[...adGroupIds].join(',')})`;
+  const campList = `(${[...campaignIds].join(',')})`;
+
+  // 2) Campaign impression share, 3) keywords (+QS), 4) search terms — scoped to serving ad groups
+  const [campRes, kwRes, stRes, custRes] = await Promise.all([
+    adsSearch(accessToken, customerId,
+      `SELECT campaign.id, campaign.name, metrics.search_impression_share,
+              metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share
+       FROM campaign WHERE ${dateWhere} AND campaign.id IN ${campList}`),
+    adsSearch(accessToken, customerId,
+      `SELECT ad_group.id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type,
+              ad_group_criterion.quality_info.quality_score,
+              metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
+       FROM keyword_view WHERE ${dateWhere} AND ad_group.id IN ${agList}`),
+    adsSearch(accessToken, customerId,
+      `SELECT search_term_view.search_term, ad_group.id,
+              metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
+       FROM search_term_view WHERE ${dateWhere} AND ad_group.id IN ${agList}`),
+    adsSearch(accessToken, customerId, 'SELECT customer.currency_code FROM customer LIMIT 1')
+  ]);
+
+  const campaigns = (campRes.rows || []).map(r => ({
+    id: String(r.campaign.id), name: r.campaign.name,
+    impressionShare: r.metrics?.searchImpressionShare ?? null,
+    lostBudget: r.metrics?.searchBudgetLostImpressionShare ?? null,
+    lostRank: r.metrics?.searchRankLostImpressionShare ?? null
+  }));
+  const keywords = (kwRes.rows || []).map(r => ({
+    text: r.adGroupCriterion?.keyword?.text || '',
+    matchType: r.adGroupCriterion?.keyword?.matchType || '',
+    qualityScore: r.adGroupCriterion?.qualityInfo?.qualityScore ?? null,
+    ...adsMetrics(r.metrics)
+  }));
+  const searchTerms = (stRes.rows || []).map(r => ({
+    text: r.searchTermView?.searchTerm || '',
+    ...adsMetrics(r.metrics)
+  }));
+  const currency = custRes.rows?.[0]?.customer?.currencyCode || '';
+
+  const entry = { fetchedAt: Date.now(), account: customerId, range, path, ads, campaigns, keywords, searchTerms, currency };
+  cache[cacheKey] = entry; await gscPruneCache(cache); await browser.storage.local.set({ adsCache: cache });
+  return { connected: true, ...entry, fromCache: false };
+}
+
 // ─── Google Search Console: message handlers ────────────────────────────────
 
 browser.runtime.onMessage.addListener((message) => {
@@ -1323,6 +1595,12 @@ browser.runtime.onMessage.addListener((message) => {
     case 'gaResolveProperty':  return gaResolveProperty(message);
     case 'gaSetProperty':      return gaSetProperty(message);
     case 'gaGetPageData':      return gaGetPageData(message);
+    case 'adsGetStatus':       return adsGetStatus();
+    case 'adsConnect':         return adsConnect();
+    case 'adsDisconnect':      return adsDisconnect();
+    case 'adsResolveAccount':  return adsResolveAccount(message);
+    case 'adsSetAccount':      return adsSetAccount(message);
+    case 'adsGetPageData':     return adsGetPageData(message);
     case 'getRedirectInfo':    return getRedirectInfo(message);
     case 'getTargetTab':       return getTargetTab();
     case 'getDomainAge':       return getDomainAge(message);

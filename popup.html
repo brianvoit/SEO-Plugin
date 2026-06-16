@@ -654,6 +654,42 @@
         <div class="field-hint">No active ads point to this page in the selected period.</div>
       </div>
 
+      <!-- Chart: toggleable metric scorecards + combined timeseries -->
+      <section class="field-section" id="ads-chart-section">
+        <div class="gsc-metric-toggles" id="ads-metric-toggles">
+          <button class="gsc-metric-toggle ads-metric-toggle" data-metric="impressions" aria-pressed="true">
+            <span class="gsc-metric-dot" data-metric="impressions"></span>
+            <span class="gsc-metric-info"><span class="gsc-metric-name">Impr</span>
+              <span class="gsc-metric-stats"><span class="gsc-chart-total" id="ads-total-impressions"></span><span class="gsc-chart-change" id="ads-change-impressions"></span></span></span>
+          </button>
+          <button class="gsc-metric-toggle ads-metric-toggle" data-metric="clicks" aria-pressed="true">
+            <span class="gsc-metric-dot" data-metric="clicks"></span>
+            <span class="gsc-metric-info"><span class="gsc-metric-name">Clicks</span>
+              <span class="gsc-metric-stats"><span class="gsc-chart-total" id="ads-total-clicks"></span><span class="gsc-chart-change" id="ads-change-clicks"></span></span></span>
+          </button>
+          <button class="gsc-metric-toggle ads-metric-toggle" data-metric="cost" aria-pressed="true">
+            <span class="gsc-metric-dot" data-metric="cost"></span>
+            <span class="gsc-metric-info"><span class="gsc-metric-name">Cost</span>
+              <span class="gsc-metric-stats"><span class="gsc-chart-total" id="ads-total-cost"></span><span class="gsc-chart-change" id="ads-change-cost"></span></span></span>
+          </button>
+          <button class="gsc-metric-toggle ads-metric-toggle" data-metric="conversions" aria-pressed="true">
+            <span class="gsc-metric-dot" data-metric="conversions"></span>
+            <span class="gsc-metric-info"><span class="gsc-metric-name">Conv</span>
+              <span class="gsc-metric-stats"><span class="gsc-chart-total" id="ads-total-conversions"></span><span class="gsc-chart-change" id="ads-change-conversions"></span></span></span>
+          </button>
+        </div>
+        <div class="gsc-chart-svg" id="ads-chart-combined"></div>
+      </section>
+
+      <!-- Cross-filter bar (ad group / keyword / search term) -->
+      <section class="field-section hidden" id="ads-filter-section">
+        <div class="gsc-query-filter-bar" id="ads-filter-bar">
+          <span class="gsc-query-filter-label">Filtered to <span id="ads-filter-type"></span>:</span>
+          <span class="gsc-query-filter-text" id="ads-filter-text"></span>
+          <button class="gsc-query-filter-clear" id="btn-ads-clear-filter" title="Clear filter">✕</button>
+        </div>
+      </section>
+
       <section class="field-section" id="ads-campaigns-section">
         <div class="field-header"><span class="field-label">ADS POINTING HERE</span></div>
         <div id="ads-tree"></div>

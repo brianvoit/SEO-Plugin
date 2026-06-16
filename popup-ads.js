@@ -5,6 +5,10 @@
 
 let adsSelectedRange = 30;
 let _adsHost = null;
+let _adsData = null;                                   // last adsGetPageData response
+let _adsFilter = null;                                 // { type:'adGroup'|'keyword'|'searchTerm', ... } | null
+let _adsFilled = [];                                   // chart timeseries currently displayed
+let adsActiveMetrics = { impressions: true, clicks: true, cost: true, conversions: true };
 
 const ADS_TOKEN_HELP = 'https://developers.google.com/google-ads/api/docs/get-started/dev-token';
 
@@ -62,19 +66,75 @@ function adsTermChips(text, organicSet) {
   return wrap.childNodes.length ? wrap : null;
 }
 
-// ─── Campaign → ad group tree (metrics aggregated per ad group) ─────────────────
+// ─── Cross-filter helpers ───────────────────────────────────────────────────
+// Selecting an ad group / keyword / search term filters the chart and the other
+// two lists. Matching is client-side off the association fields the background
+// returns (adGroupId on everything; criterionId on keywords; triggering keyword
+// text on search terms).
 
-function renderAdsTree(ads, campaigns, currency) {
+function adsFilterLabel() {
+  if (!_adsFilter) return '';
+  return _adsFilter.label || _adsFilter.text || '';
+}
+
+function adsAdGroupVisible(adGroupId) {
+  const f = _adsFilter;
+  if (!f) return true;
+  return f.adGroupId ? adGroupId === f.adGroupId : true;
+}
+function adsKeywordVisible(kw) {
+  const f = _adsFilter;
+  if (!f) return true;
+  if (f.type === 'keyword')    return kw.criterionId === f.criterionId;
+  if (f.type === 'searchTerm') return kw.adGroupId === f.adGroupId && (kw.text || '').toLowerCase() === (f.keyword || '').toLowerCase();
+  return kw.adGroupId === f.adGroupId;   // adGroup filter
+}
+function adsTermVisible(t) {
+  const f = _adsFilter;
+  if (!f) return true;
+  if (f.type === 'searchTerm') return t.text === f.text && t.adGroupId === f.adGroupId;
+  if (f.type === 'keyword')    return t.adGroupId === f.adGroupId && (t.keyword || '').toLowerCase() === (f.text || '').toLowerCase();
+  return t.adGroupId === f.adGroupId;    // adGroup filter
+}
+
+function setAdsFilter(filter) {
+  // Toggle off if the same thing is clicked again
+  const same = _adsFilter && filter && _adsFilter.type === filter.type &&
+    (_adsFilter.criterionId || _adsFilter.text) === (filter.criterionId || filter.text) &&
+    _adsFilter.adGroupId === filter.adGroupId;
+  _adsFilter = same ? null : filter;
+  renderAdsAll();
+  refreshAdsChart();
+}
+
+// ─── Ads-pointing-here table (one row per ad group) ─────────────────────────────
+
+const ADS_AG_GRID = '1fr 56px 50px 64px 48px';
+
+function renderAdsTree() {
   const root = document.getElementById('ads-tree');
   root.replaceChildren();
-  const isByCampaign = new Map(campaigns.map(c => [c.id, c]));
+  const ads = (_adsData.ads || []).filter(a => adsAdGroupVisible(a.adGroupId));
+  const isByCampaign = new Map((_adsData.campaigns || []).map(c => [c.id, c]));
+  const currency = _adsData.currency;
 
-  // Sum each ad group's ads into one line — no per-ad rows
+  // header
+  const header = document.createElement('div');
+  header.className = 'ads-row ads-row--ag ads-row--header';
+  ['Ad group', 'Impr', 'Clicks', 'Cost', 'Conv'].forEach((c, i) => {
+    const cell = document.createElement('span');
+    cell.className = i === 0 ? 'ads-cell-term' : 'ads-cell-num';
+    cell.textContent = c;
+    header.appendChild(cell);
+  });
+  root.appendChild(header);
+
+  // aggregate ads → campaign → ad group
   const byCampaign = new Map();
   ads.forEach(a => {
     if (!byCampaign.has(a.campaignId)) byCampaign.set(a.campaignId, { name: a.campaign, groups: new Map() });
     const groups = byCampaign.get(a.campaignId).groups;
-    if (!groups.has(a.adGroupId)) groups.set(a.adGroupId, { name: a.adGroup, impressions: 0, clicks: 0, cost: 0, conversions: 0 });
+    if (!groups.has(a.adGroupId)) groups.set(a.adGroupId, { id: a.adGroupId, name: a.adGroup, impressions: 0, clicks: 0, cost: 0, conversions: 0 });
     const g = groups.get(a.adGroupId);
     g.impressions += a.impressions; g.clicks += a.clicks; g.cost += a.cost; g.conversions += a.conversions;
   });
@@ -99,20 +159,22 @@ function renderAdsTree(ads, campaigns, currency) {
     root.appendChild(cRow);
 
     camp.groups.forEach(g => {
-      const gRow = document.createElement('div');
-      gRow.className = 'ads-group-row';
-      const arrow = document.createElement('span');
-      arrow.className = 'ads-group-arrow';
-      arrow.textContent = '→';
+      const row = document.createElement('div');
+      row.className = 'ads-row ads-row--ag ads-row--click' +
+        (_adsFilter && _adsFilter.type === 'adGroup' && _adsFilter.adGroupId === g.id ? ' ads-row--active' : '');
       const name = document.createElement('span');
-      name.className = 'ads-group-name';
+      name.className = 'ads-cell-term ads-term-text';
       name.textContent = g.name;
       name.title = g.name;
-      const metrics = document.createElement('span');
-      metrics.className = 'ads-group-metrics';
-      metrics.textContent = `${adsNum(g.impressions)} impr · ${adsNum(g.clicks)} clk · ${adsCost(g.cost, currency)} · ${adsConv(g.conversions)} conv`;
-      gRow.append(arrow, name, metrics);
-      root.appendChild(gRow);
+      row.appendChild(name);
+      [adsNum(g.impressions), adsNum(g.clicks), adsCost(g.cost, currency), adsConv(g.conversions)].forEach(v => {
+        const cell = document.createElement('span');
+        cell.className = 'ads-cell-num';
+        cell.textContent = v;
+        row.appendChild(cell);
+      });
+      row.addEventListener('click', () => setAdsFilter({ type: 'adGroup', adGroupId: g.id, label: g.name }));
+      root.appendChild(row);
     });
   });
 }
@@ -168,7 +230,8 @@ function buildAdsMetricTable(container, rows, { withQs = false } = {}) {
     });
     container.appendChild(header);
 
-    const sorted = [...rows].sort((a, b) => {
+    const visible = rows.filter(r => withQs ? adsKeywordVisible(r) : adsTermVisible(r));
+    const sorted = visible.sort((a, b) => {
       if (sort.column === 'text') {
         const av = (a.text || '').toLowerCase(), bv = (b.text || '').toLowerCase();
         return sort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
@@ -180,7 +243,10 @@ function buildAdsMetricTable(container, rows, { withQs = false } = {}) {
 
     sorted.forEach(r => {
       const row = document.createElement('div');
-      row.className = 'ads-row' + (withQs ? ' ads-row--kw' : '');
+      const isActive = _adsFilter && (withQs
+        ? (_adsFilter.type === 'keyword' && _adsFilter.criterionId === r.criterionId)
+        : (_adsFilter.type === 'searchTerm' && _adsFilter.text === r.text && _adsFilter.adGroupId === r.adGroupId));
+      row.className = 'ads-row ads-row--click' + (withQs ? ' ads-row--kw' : '') + (isActive ? ' ads-row--active' : '');
 
       // term + chips on one line
       const term = document.createElement('span');
@@ -207,11 +273,160 @@ function buildAdsMetricTable(container, rows, { withQs = false } = {}) {
         cell.textContent = v;
         row.appendChild(cell);
       });
+
+      row.addEventListener('click', () => {
+        if (withQs) setAdsFilter({ type: 'keyword', text: r.text, matchType: r.matchType, adGroupId: r.adGroupId, criterionId: r.criterionId, label: adsFormatKeyword(r.text, r.matchType) });
+        else setAdsFilter({ type: 'searchTerm', text: r.text, adGroupId: r.adGroupId, keyword: r.keyword, label: r.text });
+      });
       container.appendChild(row);
     });
   };
 
   render();
+}
+
+// ─── Top chart + scorecards (same engine as GA/GSC) ────────────────────────────
+
+// buildCombinedChart / attachChartHover metric config. Cost gets a $ axis; the
+// per-metric colours come from CSS [data-metric="…"] (impressions/clicks via the
+// shared vars, cost→--chart-position, conversions→--chart-conv).
+const ADS_METRICS = {
+  impressions: { label: 'Impressions', format: v => adsNum(v) },
+  clicks:      { label: 'Clicks',      format: v => adsNum(v) },
+  cost:        { label: 'Cost',        format: v => adsCost(v, _adsData && _adsData.currency),
+                 axisFormat: v => '$' + chartAxisNum(v) },
+  conversions: { label: 'Conversions', format: v => adsConv(v) }
+};
+const ADS_METRIC_ORDER = ['impressions', 'clicks', 'cost', 'conversions'];
+
+// Empty day shape for gaps in the series
+function adsEmptyDay(date) { return { date, impressions: 0, clicks: 0, cost: 0, conversions: 0 }; }
+
+function adsSumTs(ts) {
+  return ts.reduce((a, d) => ({
+    impressions: a.impressions + d.impressions, clicks: a.clicks + d.clicks,
+    cost: a.cost + d.cost, conversions: a.conversions + d.conversions
+  }), { impressions: 0, clicks: 0, cost: 0, conversions: 0 });
+}
+
+// Client-side fill over the active look-back (mirrors the background filler) for
+// the ad-group case, which we aggregate from tsRows without a re-query.
+function adsFillClient(byDate) {
+  const end = new Date(); end.setUTCDate(end.getUTCDate() - 1);
+  const out = [];
+  for (let i = adsSelectedRange - 1; i >= 0; i--) {
+    const d = new Date(end); d.setUTCDate(d.getUTCDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    out.push(byDate[key] || adsEmptyDay(key));
+  }
+  return out;
+}
+
+function renderAdsScorecards(totals, previousTotals) {
+  const t = totals || adsEmptyDay(null);
+  const p = previousTotals || {};
+  document.getElementById('ads-total-impressions').textContent = adsNum(t.impressions);
+  document.getElementById('ads-total-clicks').textContent = adsNum(t.clicks);
+  document.getElementById('ads-total-cost').textContent = adsCost(t.cost, _adsData && _adsData.currency);
+  document.getElementById('ads-total-conversions').textContent = adsConv(t.conversions);
+  // No prior-period baseline when a filter is active → blank the deltas
+  const hasPrev = previousTotals != null;
+  renderGscChange('ads-change-impressions', hasPrev ? t.impressions : null, hasPrev ? p.impressions : null);
+  renderGscChange('ads-change-clicks',      hasPrev ? t.clicks : null,      hasPrev ? p.clicks : null);
+  renderGscChange('ads-change-cost',        hasPrev ? t.cost : null,        hasPrev ? p.cost : null);
+  renderGscChange('ads-change-conversions', hasPrev ? t.conversions : null, hasPrev ? p.conversions : null);
+}
+
+function renderAdsChart() {
+  const container = document.getElementById('ads-chart-combined');
+  if (!container) return;
+  if (!_adsFilled.length) { container.replaceChildren(); return; }
+  const width = container.clientWidth || 320;
+  const built = buildCombinedChart(_adsFilled, adsActiveMetrics, { width, metrics: ADS_METRICS });
+  container.replaceChildren(svgFromString(built.svg));
+  attachChartHover(container.querySelector('svg'), _adsFilled, adsActiveMetrics, built);
+}
+
+// Recompute the displayed series + scorecards for the current filter, then draw.
+async function refreshAdsChart() {
+  if (!_adsData) return;
+  const f = _adsFilter;
+  let ts, totals, prev;
+
+  if (!f) {
+    ts = _adsData.timeseries || []; totals = _adsData.totals; prev = _adsData.previousTotals;
+  } else if (f.type === 'adGroup') {
+    const byDate = {};
+    (_adsData.tsRows || []).filter(r => r.adGroupId === f.adGroupId).forEach(r => {
+      if (!byDate[r.date]) byDate[r.date] = adsEmptyDay(r.date);
+      byDate[r.date].impressions += r.impressions; byDate[r.date].clicks += r.clicks;
+      byDate[r.date].cost += r.cost; byDate[r.date].conversions += r.conversions;
+    });
+    ts = adsFillClient(byDate); totals = adsSumTs(ts); prev = null;
+  } else {
+    const scope = f.type === 'keyword'
+      ? { type: 'keyword', criterionId: f.criterionId, adGroupId: f.adGroupId }
+      : { type: 'searchTerm', text: f.text };
+    try {
+      const tab = await getActiveTab();
+      const res = await browser.runtime.sendMessage({ action: 'adsGetChartData', pageUrl: tab.url, range: adsSelectedRange, scope });
+      if (res && res.timeseries) { ts = res.timeseries; totals = res.totals; prev = null; }
+    } catch { /* fall through to the default below */ }
+    if (!ts) { ts = _adsData.timeseries || []; totals = _adsData.totals; prev = _adsData.previousTotals; }
+  }
+
+  _adsFilled = ts || [];
+  renderAdsScorecards(totals, prev);
+  renderAdsChart();
+}
+
+// Re-render the lists + filter bar for the current filter (no chart re-query).
+function renderAdsAll() {
+  if (!_adsData) return;
+  const section = document.getElementById('ads-filter-section');
+  if (_adsFilter) {
+    section.classList.remove('hidden');
+    document.getElementById('ads-filter-type').textContent =
+      _adsFilter.type === 'adGroup' ? 'ad group' : _adsFilter.type === 'keyword' ? 'keyword' : 'search term';
+    document.getElementById('ads-filter-text').textContent = adsFilterLabel();
+  } else {
+    section.classList.add('hidden');
+  }
+
+  renderAdsTree();
+  const kt = document.getElementById('ads-keywords-table'); kt._currency = _adsData.currency;
+  buildAdsMetricTable(kt, _adsData.keywords || [], { withQs: true });
+  const tt = document.getElementById('ads-terms-table'); tt._currency = _adsData.currency;
+  buildAdsMetricTable(tt, _adsData.searchTerms || []);
+}
+
+// Metric scorecards toggle their series in/out of the chart
+document.querySelectorAll('#ads-metric-toggles .ads-metric-toggle').forEach(card => {
+  card.addEventListener('click', () => {
+    const m = card.dataset.metric;
+    const on = !adsActiveMetrics[m];
+    // Keep at least one metric on
+    if (!on && ADS_METRIC_ORDER.filter(k => adsActiveMetrics[k]).length === 1) return;
+    adsActiveMetrics[m] = on;
+    card.setAttribute('aria-pressed', String(on));
+    browser.storage.local.set({ adsActiveMetrics });
+    renderAdsChart();
+  });
+});
+
+document.getElementById('btn-ads-clear-filter').addEventListener('click', () => {
+  _adsFilter = null;
+  renderAdsAll();
+  refreshAdsChart();
+});
+
+// Keep the chart sized to its container (popup width / settings collapse)
+if (window.ResizeObserver) {
+  let raf = null;
+  new ResizeObserver(() => {
+    if (raf) return;
+    raf = requestAnimationFrame(() => { raf = null; renderAdsChart(); });
+  }).observe(document.getElementById('ads-chart-combined'));
 }
 
 // ─── Panel + states ──────────────────────────────────────────────────────────
@@ -251,15 +466,20 @@ function renderAdsPanel(response) {
   setAdsRangeUI(adsSelectedRange);
   const hasAds = (response.ads || []).length > 0;
   document.getElementById('ads-none').classList.toggle('hidden', hasAds);
-  ['ads-campaigns-section', 'ads-keywords-section', 'ads-terms-section'].forEach(id =>
+  ['ads-chart-section', 'ads-campaigns-section', 'ads-keywords-section', 'ads-terms-section'].forEach(id =>
     document.getElementById(id).classList.toggle('hidden', !hasAds));
+  document.getElementById('ads-filter-section').classList.add('hidden');
 
   if (hasAds) {
-    renderAdsTree(response.ads, response.campaigns || [], response.currency);
-    const kt = document.getElementById('ads-keywords-table'); kt._currency = response.currency;
-    buildAdsMetricTable(kt, response.keywords || [], { withQs: true });
-    const tt = document.getElementById('ads-terms-table'); tt._currency = response.currency;
-    buildAdsMetricTable(tt, response.searchTerms || []);
+    _adsData = response;
+    _adsFilter = null;
+    _adsFilled = response.timeseries || [];
+    renderAdsScorecards(response.totals, response.previousTotals);
+    renderAdsChart();
+    renderAdsAll();
+  } else {
+    _adsData = null;
+    _adsFilter = null;
   }
   document.getElementById('ads-fetched-meta').textContent =
     `Account ${response.account} · ${response.path} · Updated ${gscRelativeTime(response.fetchedAt)}`;
@@ -483,8 +703,15 @@ document.querySelectorAll('#ads-range-group .mode-option').forEach(btn => {
 });
 
 function loadAdsPrefs() {
-  return browser.storage.local.get('adsSelectedRange').then(({ adsSelectedRange: stored }) => {
+  return browser.storage.local.get(['adsSelectedRange', 'adsActiveMetrics']).then(({ adsSelectedRange: stored, adsActiveMetrics: metrics }) => {
     adsSelectedRange = stored || 30;
     setAdsRangeUI(adsSelectedRange);
+    if (metrics && typeof metrics === 'object') {
+      ADS_METRIC_ORDER.forEach(m => { adsActiveMetrics[m] = metrics[m] !== false; });
+      if (!ADS_METRIC_ORDER.some(m => adsActiveMetrics[m])) adsActiveMetrics.impressions = true;
+    }
+    document.querySelectorAll('#ads-metric-toggles .ads-metric-toggle').forEach(card => {
+      card.setAttribute('aria-pressed', String(adsActiveMetrics[card.dataset.metric] !== false));
+    });
   });
 }

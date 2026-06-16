@@ -1453,7 +1453,30 @@ async function adsSetAccount({ host, account }) {
 function adsDateRange(range) {
   const end = new Date(); end.setUTCDate(end.getUTCDate() - 1);
   const start = new Date(end); start.setUTCDate(start.getUTCDate() - (range - 1));
-  return { startDate: gscFormatDate(start), endDate: gscFormatDate(end) };
+  const prevEnd = new Date(start); prevEnd.setUTCDate(prevEnd.getUTCDate() - 1);
+  const prevStart = new Date(prevEnd); prevStart.setUTCDate(prevStart.getUTCDate() - (range - 1));
+  return {
+    startDate: gscFormatDate(start), endDate: gscFormatDate(end),
+    prevStartDate: gscFormatDate(prevStart), prevEndDate: gscFormatDate(prevEnd)
+  };
+}
+
+// Fill a per-day timeseries across the range (zeroes for missing days), ordered
+function adsFillTimeseries(byDate, range) {
+  const end = new Date(); end.setUTCDate(end.getUTCDate() - 1);
+  const out = [];
+  for (let i = range - 1; i >= 0; i--) {
+    const d = new Date(end); d.setUTCDate(d.getUTCDate() - i);
+    const key = gscFormatDate(d);
+    out.push(byDate[key] || { date: key, impressions: 0, clicks: 0, cost: 0, conversions: 0 });
+  }
+  return out;
+}
+
+function adsSumMetrics(rows) {
+  const t = { impressions: 0, clicks: 0, cost: 0, conversions: 0 };
+  rows.forEach(r => { const m = adsMetrics(r.metrics); t.impressions += m.impressions; t.clicks += m.clicks; t.cost += m.cost; t.conversions += m.conversions; });
+  return t;
 }
 
 function adsMetrics(m) {
@@ -1500,8 +1523,9 @@ async function adsGetPageData({ pageUrl, range, forceRefresh }) {
     return { connected: true, ...cached, fromCache: true };
   }
 
-  const { startDate, endDate } = adsDateRange(range);
+  const { startDate, endDate, prevStartDate, prevEndDate } = adsDateRange(range);
   const dateWhere = `segments.date BETWEEN '${startDate}' AND '${endDate}'`;
+  const prevWhere = `segments.date BETWEEN '${prevStartDate}' AND '${prevEndDate}'`;
 
   // 1) Ads + their final URLs/metrics, filtered client-side to this page
   const adRes = await adsSearch(accessToken, customerId,
@@ -1529,7 +1553,7 @@ async function adsGetPageData({ pageUrl, range, forceRefresh }) {
   });
 
   if (!ads.length) {
-    const entry = { fetchedAt: Date.now(), account: customerId, range, path, ads: [], campaigns: [], keywords: [], searchTerms: [], currency: '' };
+    const entry = { fetchedAt: Date.now(), account: customerId, range, path, ads: [], campaigns: [], keywords: [], searchTerms: [], timeseries: [], totals: null, previousTotals: null, currency: '' };
     cache[cacheKey] = entry; await gscPruneCache(cache); await browser.storage.local.set({ adsCache: cache });
     return { connected: true, ...entry, fromCache: false };
   }
@@ -1537,21 +1561,28 @@ async function adsGetPageData({ pageUrl, range, forceRefresh }) {
   const agList = `(${[...adGroupIds].join(',')})`;
   const campList = `(${[...campaignIds].join(',')})`;
 
-  // 2) Campaign impression share, 3) keywords (+QS), 4) search terms — scoped to serving ad groups
-  const [campRes, kwRes, stRes, custRes] = await Promise.all([
+  // 2) campaign IS, 3) keywords (+QS, ids), 4) search terms (+triggering keyword),
+  // 5) daily timeseries per ad group, 6) previous-period totals, + currency
+  const [campRes, kwRes, stRes, tsRes, prevRes, custRes] = await Promise.all([
     adsSearch(accessToken, customerId,
       `SELECT campaign.id, campaign.name, metrics.search_impression_share,
               metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share
        FROM campaign WHERE ${dateWhere} AND campaign.id IN ${campList}`),
     adsSearch(accessToken, customerId,
-      `SELECT ad_group.id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type,
-              ad_group_criterion.quality_info.quality_score,
+      `SELECT ad_group.id, ad_group_criterion.criterion_id, ad_group_criterion.keyword.text,
+              ad_group_criterion.keyword.match_type, ad_group_criterion.quality_info.quality_score,
               metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
        FROM keyword_view WHERE ${dateWhere} AND ad_group.id IN ${agList}`),
     adsSearch(accessToken, customerId,
-      `SELECT search_term_view.search_term, ad_group.id,
+      `SELECT search_term_view.search_term, ad_group.id, segments.keyword.info.text,
               metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
        FROM search_term_view WHERE ${dateWhere} AND ad_group.id IN ${agList}`),
+    adsSearch(accessToken, customerId,
+      `SELECT segments.date, ad_group.id, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
+       FROM ad_group WHERE ${dateWhere} AND ad_group.id IN ${agList}`),
+    adsSearch(accessToken, customerId,
+      `SELECT metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
+       FROM ad_group WHERE ${prevWhere} AND ad_group.id IN ${agList}`),
     adsSearch(accessToken, customerId, 'SELECT customer.currency_code FROM customer LIMIT 1')
   ]);
 
@@ -1565,17 +1596,73 @@ async function adsGetPageData({ pageUrl, range, forceRefresh }) {
     text: r.adGroupCriterion?.keyword?.text || '',
     matchType: r.adGroupCriterion?.keyword?.matchType || '',
     qualityScore: r.adGroupCriterion?.qualityInfo?.qualityScore ?? null,
+    adGroupId: String(r.adGroup?.id || ''),
+    criterionId: String(r.adGroupCriterion?.criterionId || ''),
     ...adsMetrics(r.metrics)
   }));
   const searchTerms = (stRes.rows || []).map(r => ({
     text: r.searchTermView?.searchTerm || '',
+    adGroupId: String(r.adGroup?.id || ''),
+    keyword: r.segments?.keyword?.info?.text || '',
     ...adsMetrics(r.metrics)
   }));
+
+  // Per-ad-group daily rows → keep adGroupId so the popup can filter the chart
+  // to one ad group client-side; the default chart sums all serving ad groups.
+  const tsRows = (tsRes.rows || []).map(r => ({
+    date: r.segments?.date, adGroupId: String(r.adGroup?.id || ''), ...adsMetrics(r.metrics)
+  }));
+  const byDate = {};
+  tsRows.forEach(r => {
+    if (!byDate[r.date]) byDate[r.date] = { date: r.date, impressions: 0, clicks: 0, cost: 0, conversions: 0 };
+    byDate[r.date].impressions += r.impressions; byDate[r.date].clicks += r.clicks;
+    byDate[r.date].cost += r.cost; byDate[r.date].conversions += r.conversions;
+  });
+  const timeseries = adsFillTimeseries(byDate, range);
+  const totals = adsSumMetrics(tsRes.rows || []);
+  const previousTotals = adsSumMetrics(prevRes.rows || []);
   const currency = custRes.rows?.[0]?.customer?.currencyCode || '';
 
-  const entry = { fetchedAt: Date.now(), account: customerId, range, path, ads, campaigns, keywords, searchTerms, currency };
+  const entry = { fetchedAt: Date.now(), account: customerId, range, path, ads, campaigns, keywords, searchTerms, tsRows, timeseries, totals, previousTotals, currency };
   cache[cacheKey] = entry; await gscPruneCache(cache); await browser.storage.local.set({ adsCache: cache });
   return { connected: true, ...entry, fromCache: false };
+}
+
+// Scoped daily timeseries for the chart when a keyword or search term is
+// selected (ad-group scope is handled client-side from tsRows).
+async function adsGetChartData({ pageUrl, range, scope }) {
+  const tokenResult = await adsGetAccessToken();
+  if (tokenResult.error) return { error: tokenResult.error };
+  const accessToken = tokenResult.accessToken;
+  const customerId = await adsGetAccount(gscPageHost(pageUrl));
+  if (!customerId) return { error: 'NO_ACCOUNT' };
+
+  const { startDate, endDate } = adsDateRange(range);
+  const dateWhere = `segments.date BETWEEN '${startDate}' AND '${endDate}'`;
+  const esc = s => String(s).replace(/'/g, "\\'");
+
+  let query;
+  if (scope && scope.type === 'keyword' && scope.criterionId && scope.adGroupId) {
+    query = `SELECT segments.date, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
+             FROM keyword_view WHERE ${dateWhere} AND ad_group.id = ${scope.adGroupId}
+             AND ad_group_criterion.criterion_id = ${scope.criterionId}`;
+  } else if (scope && scope.type === 'searchTerm' && scope.text) {
+    query = `SELECT segments.date, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
+             FROM search_term_view WHERE ${dateWhere} AND search_term_view.search_term = '${esc(scope.text)}'`;
+  } else {
+    return { error: 'BAD_SCOPE' };
+  }
+
+  const res = await adsSearch(accessToken, customerId, query);
+  if (res.error) return { error: res.error, detail: res.detail };
+  const byDate = {};
+  (res.rows || []).forEach(r => {
+    const d = r.segments?.date; if (!d) return;
+    const m = adsMetrics(r.metrics);
+    if (!byDate[d]) byDate[d] = { date: d, impressions: 0, clicks: 0, cost: 0, conversions: 0 };
+    byDate[d].impressions += m.impressions; byDate[d].clicks += m.clicks; byDate[d].cost += m.cost; byDate[d].conversions += m.conversions;
+  });
+  return { timeseries: adsFillTimeseries(byDate, range), totals: adsSumMetrics(res.rows || []) };
 }
 
 // ─── Google Search Console: message handlers ────────────────────────────────
@@ -1603,6 +1690,7 @@ browser.runtime.onMessage.addListener((message) => {
     case 'adsResolveAccount':  return adsResolveAccount(message);
     case 'adsSetAccount':      return adsSetAccount(message);
     case 'adsGetPageData':     return adsGetPageData(message);
+    case 'adsGetChartData':    return adsGetChartData(message);
     case 'getRedirectInfo':    return getRedirectInfo(message);
     case 'getTargetTab':       return getTargetTab();
     case 'openPopout':         return openPopoutWindow();

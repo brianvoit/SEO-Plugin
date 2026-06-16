@@ -121,16 +121,16 @@ function buildCombinedChart(filled, activeMetrics, { width = 320, height = 130, 
   const active = order.filter(m => activeMetrics[m]);
 
   // ── Axis placement ────────────────────────────────────────────────────────
-  // Each metric is on its own scale, so each gets its own Y axis. Metrics
-  // flagged axisRight go right; otherwise the last active one does, so:
-  //   1 metric  → left · 2 metrics → 1 left, 1 right · 3 metrics → 2 left, 1 right
+  // Each metric is on its own scale, so each gets its own Y axis, balanced with
+  // at most two axes per side:
+  //   1 → L · 2 → 1L/1R · 3 → 2L/1R · 4 → 2L/2R
   let leftMetrics = [], rightMetrics = [];
   if (active.length <= 1) {
     leftMetrics = active.slice();
   } else {
-    rightMetrics = active.filter(m => metrics[m].axisRight);
-    if (!rightMetrics.length) rightMetrics = [active[active.length - 1]];
-    leftMetrics = active.filter(m => !rightMetrics.includes(m));
+    const leftCount = Math.min(2, Math.ceil(active.length / 2));
+    leftMetrics = active.slice(0, leftCount);
+    rightMetrics = active.slice(leftCount, leftCount + 2);
   }
 
   const AXIS_W = 26;

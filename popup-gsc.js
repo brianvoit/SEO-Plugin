@@ -930,8 +930,9 @@ async function refreshGscPropertyInfo() {
   }
 
   matching.forEach(siteUrl => {
+    const isActive = siteUrl === res.siteUrl;
     const opt = document.createElement('button');
-    opt.className = 'gsc-property-option' + (siteUrl === res.siteUrl ? ' gsc-property-option--active' : '');
+    opt.className = 'gsc-property-option' + (isActive ? ' gsc-property-option--active' : '');
     opt.dataset.site = siteUrl;
     const radio = document.createElement('span');
     radio.className = 'gsc-property-radio';
@@ -940,7 +941,20 @@ async function refreshGscPropertyInfo() {
     text.textContent = siteUrl;
     opt.append(radio, text);
     opt.addEventListener('click', () => selectGscProperty(siteUrl));
-    allEl.appendChild(opt);
+
+    // The linked (active) property gets a trash to unlink this domain
+    if (isActive) {
+      const row = document.createElement('div');
+      row.className = 'gsc-property-row';
+      row.appendChild(opt);
+      row.appendChild(propertyTrashButton('Unlink this domain from this property', async () => {
+        await browser.runtime.sendMessage({ action: 'gscSetProperty', host: _gscPropHost, siteUrl: null });
+        refreshGscPropertyInfo();
+      }));
+      allEl.appendChild(row);
+    } else {
+      allEl.appendChild(opt);
+    }
   });
 }
 
@@ -991,7 +1005,9 @@ document.getElementById('btn-gsc-connect').addEventListener('click', async () =>
   }
 });
 
-document.getElementById('btn-gsc-disconnect').addEventListener('click', async () => {
+// The "Connected" chip doubles as the disconnect control (hover → red Disconnect)
+document.getElementById('gsc-status-badge').addEventListener('click', async (e) => {
+  if (!e.currentTarget.classList.contains('gsc-status-badge--connected')) return;
   await browser.runtime.sendMessage({ action: 'gscDisconnect' });
   await refreshGscSettingsStatus();
 });

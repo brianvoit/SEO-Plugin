@@ -351,8 +351,12 @@ async function refreshAdsAccountInfo() {
   // Collapse to the linked account (green) once chosen, like the GSC/GA boxes
   const sel = res.account && res.accounts.find(a => a.id === res.account);
   if (sel) {
-    renderSelectedRow(allEl, `${sel.name} · #${sel.id}`, () =>
-      renderAdsAccountOptions(allEl, res.accounts, res.account, null));
+    renderSelectedRow(allEl, `${sel.name} · #${sel.id}`,
+      () => renderAdsAccountOptions(allEl, res.accounts, res.account, null),
+      async () => {
+        await browser.runtime.sendMessage({ action: 'adsSetAccount', host: _adsHost, account: null });
+        refreshAdsAccountInfo();
+      });
     return;
   }
   renderAdsAccountOptions(allEl, res.accounts, res.account, null);
@@ -378,7 +382,9 @@ document.getElementById('btn-ads-connect').addEventListener('click', async () =>
   }
 });
 
-document.getElementById('btn-ads-disconnect').addEventListener('click', async () => {
+// The "Connected" chip doubles as the disconnect control (hover → red Disconnect)
+document.getElementById('ads-status-badge').addEventListener('click', async (e) => {
+  if (!e.currentTarget.classList.contains('gsc-status-badge--connected')) return;
   await browser.runtime.sendMessage({ action: 'adsDisconnect' });
   await refreshAdsSettingsStatus();
 });

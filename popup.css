@@ -1216,6 +1216,12 @@ body.settings-open #update-footer { margin-top: auto; }
 /* Long property lists (GA accounts can have dozens) scroll instead of growing */
 .gsc-property-all--scroll { max-height: 190px; overflow-y: auto; }
 
+/* Linked property/account row: the option fills, the trash sits far right */
+.gsc-property-row { display: flex; align-items: center; gap: 6px; }
+.gsc-property-row .gsc-property-option { flex: 1; min-width: 0; }
+.gsc-property-trash { flex-shrink: 0; }
+.gsc-property-trash:hover { color: var(--hint-red); border-color: var(--hint-red); }
+
 /* "Change" link under a collapsed, linked property/account */
 .gsc-change-btn {
   margin-top: 6px;
@@ -1497,9 +1503,22 @@ body.settings-open #update-footer { margin-top: auto; }
   color: var(--text-muted);
 }
 
-.gsc-status-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: .05em; }
-.gsc-status-badge--connected    { background: var(--hint-green); color: #fff; }
-.gsc-status-badge--disconnected { background: var(--bg-section); color: var(--text-muted); border: 1px solid var(--border); }
+.gsc-status-badge {
+  font-size: 10px; font-weight: 700; padding: 2px 10px; border-radius: 10px;
+  text-transform: uppercase; letter-spacing: .05em;
+  font-family: inherit; line-height: 1.5; border: 1px solid transparent;
+  min-width: 94px; text-align: center; cursor: default; background: none;
+}
+.gsc-status-badge--connected    { background: var(--hint-green); color: #fff; cursor: pointer; position: relative; }
+.gsc-status-badge--disconnected { background: var(--bg-section); color: var(--text-muted); border-color: var(--border); }
+/* Connected chip → hover reveals a red "Disconnect" affordance */
+.gsc-status-badge--connected:hover { background: var(--bg); border-color: var(--hint-red); color: transparent; }
+.gsc-status-badge--connected:hover::after {
+  content: 'Disconnect';
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--hint-red);
+}
 
 /* Metric toggles */
 .gsc-metric-toggles { display: flex; gap: 6px; margin-bottom: 10px; }

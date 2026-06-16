@@ -338,8 +338,12 @@ async function refreshGaPropertyInfo() {
   const selected = res.property || res.detectedProperty;
   const sel = selected && res.properties.find(p => p.property === selected);
   if (sel) {
-    renderSelectedRow(allEl, `${sel.displayName} · ${sel.property.replace('properties/', '#')}`, () =>
-      renderGaPropertyOptions(allEl, res.properties, selected, null, { detectedProperty: res.detectedProperty, detectedId: res.detectedId }));
+    renderSelectedRow(allEl, `${sel.displayName} · ${sel.property.replace('properties/', '#')}`,
+      () => renderGaPropertyOptions(allEl, res.properties, selected, null, { detectedProperty: res.detectedProperty, detectedId: res.detectedId }),
+      async () => {
+        await browser.runtime.sendMessage({ action: 'gaSetProperty', host: _gaHost, property: null });
+        refreshGaPropertyInfo();
+      });
     return;
   }
 
@@ -348,9 +352,11 @@ async function refreshGaPropertyInfo() {
 }
 
 // Collapsed single-row view of the linked account/property (mirrors the GSC
-// connected box). Clicking "Change" re-renders the full searchable picker.
-function renderSelectedRow(container, label, onChange) {
+// connected box). "Change" re-opens the picker; the trash unlinks this domain.
+function renderSelectedRow(container, label, onChange, onTrash) {
   container.replaceChildren();
+  const row = document.createElement('div');
+  row.className = 'gsc-property-row';
   const opt = document.createElement('div');
   opt.className = 'gsc-property-option gsc-property-option--active';
   const radio = document.createElement('span');
@@ -359,7 +365,9 @@ function renderSelectedRow(container, label, onChange) {
   text.className = 'gsc-property-option-text';
   text.textContent = label;
   opt.append(radio, text);
-  container.appendChild(opt);
+  row.appendChild(opt);
+  if (onTrash) row.appendChild(propertyTrashButton('Unlink this domain', onTrash));
+  container.appendChild(row);
 
   const change = document.createElement('button');
   change.className = 'gsc-change-btn';
@@ -391,7 +399,9 @@ document.getElementById('btn-ga-connect').addEventListener('click', async () => 
   }
 });
 
-document.getElementById('btn-ga-disconnect').addEventListener('click', async () => {
+// The "Connected" chip doubles as the disconnect control (hover → red Disconnect)
+document.getElementById('ga-status-badge').addEventListener('click', async (e) => {
+  if (!e.currentTarget.classList.contains('gsc-status-badge--connected')) return;
   await browser.runtime.sendMessage({ action: 'gaDisconnect' });
   await refreshGaSettingsStatus();
 });

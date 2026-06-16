@@ -163,3 +163,14 @@ async function getActiveTab() {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   return tab;
 }
+
+// Small trash button used to unlink a domain from its chosen property/account
+// (clears the per-domain override; the Google account stays connected).
+function propertyTrashButton(title, onClick) {
+  const btn = document.createElement('button');
+  btn.className = 'gsc-property-trash icon-btn';
+  btn.title = title || 'Unlink this domain';
+  btn.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11"/><path d="M6 4V2.8a.8.8 0 0 1 .8-.8h2.4a.8.8 0 0 1 .8.8V4"/><path d="M3.6 4l.6 8.5a1 1 0 0 0 1 .9h5.6a1 1 0 0 0 1-.9L12.4 4"/><line x1="6.6" y1="6.4" x2="6.8" y2="11"/><line x1="9.4" y1="6.4" x2="9.2" y2="11"/></svg>'));
+  btn.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
+  return btn;
+}

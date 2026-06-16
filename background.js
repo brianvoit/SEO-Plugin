@@ -1309,7 +1309,9 @@ async function dnsResolve({ host }) {
 // API Center, approved by Google for production data), and — for MCC setups —
 // the manager account's login-customer-id. Customer IDs are 10 digits, no dashes.
 
-const GA_ADS_API = 'https://googleads.googleapis.com/v17';
+// Bump as Google sunsets versions (~1yr each). A 404 on every call usually
+// means this version is no longer served.
+const GA_ADS_API = 'https://googleads.googleapis.com/v21';
 const ADS_ACCOUNTS_STALE_MS = 7 * 24 * 60 * 60 * 1000;
 const ADS_STALE_MS = 6 * 60 * 60 * 1000;
 const ADS_DEBOUNCE_MS = 60 * 1000;

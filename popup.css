@@ -1216,6 +1216,18 @@ body.settings-open #update-footer { margin-top: auto; }
 /* Long property lists (GA accounts can have dozens) scroll instead of growing */
 .gsc-property-all--scroll { max-height: 190px; overflow-y: auto; }
 
+/* "Change" link under a collapsed, linked property/account */
+.gsc-change-btn {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.gsc-change-btn:hover { text-decoration: underline; }
+
 /* GA property picker: account grouping header */
 .ga-property-account {
   font-size: 9px;

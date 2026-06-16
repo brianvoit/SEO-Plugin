@@ -333,8 +333,39 @@ async function refreshGaPropertyInfo() {
     return;
   }
 
+  // Once a property is linked, collapse to just that one (green), like the GSC
+  // box — the full searchable list returns via "Change".
+  const selected = res.property || res.detectedProperty;
+  const sel = selected && res.properties.find(p => p.property === selected);
+  if (sel) {
+    renderSelectedRow(allEl, `${sel.displayName} · ${sel.property.replace('properties/', '#')}`, () =>
+      renderGaPropertyOptions(allEl, res.properties, selected, null, { detectedProperty: res.detectedProperty, detectedId: res.detectedId }));
+    return;
+  }
+
   renderGaPropertyOptions(allEl, res.properties, res.property, null,
     { detectedProperty: res.detectedProperty, detectedId: res.detectedId });
+}
+
+// Collapsed single-row view of the linked account/property (mirrors the GSC
+// connected box). Clicking "Change" re-renders the full searchable picker.
+function renderSelectedRow(container, label, onChange) {
+  container.replaceChildren();
+  const opt = document.createElement('div');
+  opt.className = 'gsc-property-option gsc-property-option--active';
+  const radio = document.createElement('span');
+  radio.className = 'gsc-property-radio';
+  const text = document.createElement('span');
+  text.className = 'gsc-property-option-text';
+  text.textContent = label;
+  opt.append(radio, text);
+  container.appendChild(opt);
+
+  const change = document.createElement('button');
+  change.className = 'gsc-change-btn';
+  change.textContent = 'Change';
+  change.addEventListener('click', onChange);
+  container.appendChild(change);
 }
 
 document.getElementById('btn-ga-connect').addEventListener('click', async () => {

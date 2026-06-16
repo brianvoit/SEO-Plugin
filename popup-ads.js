@@ -315,7 +315,7 @@ async function refreshAdsSettingsStatus() {
     setup.classList.add('hidden');
     info.classList.remove('hidden');
     browser.storage.local.get(['adsDeveloperToken', 'adsManagerId']).then(({ adsDeveloperToken, adsManagerId }) => {
-      document.getElementById('ads-dev-token').value = adsDeveloperToken || '';
+      setAdsTokenState(!!adsDeveloperToken);
       document.getElementById('ads-manager-id').value = adsManagerId || '';
     });
     refreshAdsAccountInfo();
@@ -348,6 +348,13 @@ async function refreshAdsAccountInfo() {
     matchEl.className = 'gsc-property-match gsc-property-match--none';
     return;
   }
+  // Collapse to the linked account (green) once chosen, like the GSC/GA boxes
+  const sel = res.account && res.accounts.find(a => a.id === res.account);
+  if (sel) {
+    renderSelectedRow(allEl, `${sel.name} · #${sel.id}`, () =>
+      renderAdsAccountOptions(allEl, res.accounts, res.account, null));
+    return;
+  }
   renderAdsAccountOptions(allEl, res.accounts, res.account, null);
 }
 
@@ -376,12 +383,45 @@ document.getElementById('btn-ads-disconnect').addEventListener('click', async ()
   await refreshAdsSettingsStatus();
 });
 
+// Developer token field: masked "saved" + trash once stored, editable + reveal
+// eye when empty — mirrors the Claude API key (popup-settings.js setKeyState).
+function setAdsTokenState(hasToken) {
+  const input = document.getElementById('ads-dev-token');
+  document.getElementById('btn-ads-token-vis').classList.toggle('hidden', hasToken);
+  document.getElementById('btn-ads-token-clear').classList.toggle('hidden', !hasToken);
+  input.type = 'password';
+  input.value = '';
+  input.readOnly = hasToken;
+  input.placeholder = hasToken ? '••••••••••••  saved' : 'Google Ads developer token';
+  document.getElementById('ads-eye-open').classList.remove('hidden');
+  document.getElementById('ads-eye-closed').classList.add('hidden');
+}
+
+document.getElementById('btn-ads-token-vis').addEventListener('click', () => {
+  const input = document.getElementById('ads-dev-token');
+  const isHidden = input.type === 'password';
+  input.type = isHidden ? 'text' : 'password';
+  document.getElementById('ads-eye-open').classList.toggle('hidden', isHidden);
+  document.getElementById('ads-eye-closed').classList.toggle('hidden', !isHidden);
+});
+
+document.getElementById('btn-ads-token-clear').addEventListener('click', async () => {
+  await browser.storage.local.remove(['adsDeveloperToken', 'adsAccounts']);
+  setAdsTokenState(false);
+  refreshAdsAccountInfo();
+});
+
 document.getElementById('btn-ads-save-config').addEventListener('click', async () => {
-  const adsDeveloperToken = document.getElementById('ads-dev-token').value.trim();
+  const tokenInput = document.getElementById('ads-dev-token');
   const adsManagerId = document.getElementById('ads-manager-id').value.trim();
+  const update = { adsManagerId };
+  // Only overwrite the token when the user actually typed a new one
+  const typed = !tokenInput.readOnly ? tokenInput.value.trim() : '';
+  if (!tokenInput.readOnly) update.adsDeveloperToken = typed;
   // Manager / account list depend on these, so drop the cached accounts
-  await browser.storage.local.set({ adsDeveloperToken, adsManagerId });
+  await browser.storage.local.set(update);
   await browser.storage.local.remove('adsAccounts');
+  if (!tokenInput.readOnly && typed) setAdsTokenState(true);
   const saved = document.getElementById('ads-config-saved');
   saved.classList.remove('hidden');
   setTimeout(() => saved.classList.add('hidden'), 2000);

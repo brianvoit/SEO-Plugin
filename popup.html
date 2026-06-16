@@ -273,7 +273,22 @@
       <div id="ads-connected-info" class="hidden">
         <label class="wp-field">
           <span class="wp-field-label">Developer token</span>
-          <input type="password" id="ads-dev-token" class="wp-input" placeholder="Google Ads developer token" autocomplete="off" spellcheck="false" />
+          <div class="api-key-row">
+            <input type="password" id="ads-dev-token" class="api-key-input" placeholder="Google Ads developer token" autocomplete="off" spellcheck="false" />
+            <button id="btn-ads-token-vis" class="icon-btn" title="Show / hide token">
+              <svg id="ads-eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2"/>
+              </svg>
+              <svg id="ads-eye-closed" class="hidden" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M13.4 13.4 2.6 2.6M10.7 10.8A4.9 4.9 0 0 1 8 11.5c-4.5 0-7-3.5-7-3.5a12 12 0 0 1 3.3-3.3M6.1 4.6A5 5 0 0 1 8 4.5c4.5 0 7 3.5 7 3.5a12 12 0 0 1-1.9 2.4"/><path d="M6.3 6.4a2 2 0 0 0 2.7 2.8"/>
+              </svg>
+            </button>
+            <button id="btn-ads-token-clear" class="icon-btn hidden" title="Clear token — you'll need to re-enter it">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2.5 4h11"/><path d="M6 4V2.8a.8.8 0 0 1 .8-.8h2.4a.8.8 0 0 1 .8.8V4"/><path d="M3.6 4l.6 8.5a1 1 0 0 0 1 .9h5.6a1 1 0 0 0 1-.9L12.4 4"/><line x1="6.6" y1="6.4" x2="6.8" y2="11"/><line x1="9.4" y1="6.4" x2="9.2" y2="11"/>
+              </svg>
+            </button>
+          </div>
         </label>
         <div class="field-hint"><span class="ads-link" id="ads-token-link-2">How to get a developer token →</span> (needs Google approval for live data)</div>
         <label class="wp-field">
@@ -288,7 +303,6 @@
         <div class="gsc-property-box" id="ads-account-box">
           <span class="wp-field-label" style="display:block;margin-bottom:6px">Account for this domain</span>
           <span class="gsc-property-match hidden" id="ads-account-match"></span>
-          <input type="text" id="ads-account-search" class="ga-property-search" placeholder="Search accounts…" autocomplete="off" spellcheck="false" />
           <div class="gsc-property-all gsc-property-all--scroll" id="ads-account-all"></div>
         </div>
         <button id="btn-ads-disconnect" class="settings-back-btn">Disconnect</button>
@@ -617,7 +631,6 @@
 
     <!-- No account chosen for this domain -->
     <div id="ads-no-account" class="field-section hidden">
-      <input type="text" id="ads-tab-account-search" class="ga-property-search" placeholder="Search accounts…" autocomplete="off" spellcheck="false" />
       <div id="ads-account-picker" class="gsc-property-all gsc-property-all--scroll"></div>
       <div id="ads-account-picker-empty" class="field-hint hint-muted hidden">No Google Ads accounts available on the connected login.</div>
     </div>

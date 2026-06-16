@@ -1603,6 +1603,7 @@ browser.runtime.onMessage.addListener((message) => {
     case 'adsGetPageData':     return adsGetPageData(message);
     case 'getRedirectInfo':    return getRedirectInfo(message);
     case 'getTargetTab':       return getTargetTab();
+    case 'openPopout':         return openPopoutWindow();
     case 'getDomainAge':       return getDomainAge(message);
     case 'dnsResolve':         return dnsResolve(message);
     default: return undefined;

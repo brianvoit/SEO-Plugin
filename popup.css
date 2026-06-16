@@ -1222,18 +1222,6 @@ body.settings-open #update-footer { margin-top: auto; }
 .gsc-property-trash { flex-shrink: 0; }
 .gsc-property-trash:hover { color: var(--hint-red); border-color: var(--hint-red); }
 
-/* "Change" link under a collapsed, linked property/account */
-.gsc-change-btn {
-  margin-top: 6px;
-  font-size: 11px;
-  color: var(--accent);
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-}
-.gsc-change-btn:hover { text-decoration: underline; }
-
 /* GA property picker: account grouping header */
 .ga-property-account {
   font-size: 9px;

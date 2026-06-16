@@ -352,10 +352,9 @@ async function refreshAdsAccountInfo() {
   const sel = res.account && res.accounts.find(a => a.id === res.account);
   if (sel) {
     renderSelectedRow(allEl, `${sel.name} · #${sel.id}`,
-      () => renderAdsAccountOptions(allEl, res.accounts, res.account, null),
       async () => {
         await browser.runtime.sendMessage({ action: 'adsSetAccount', host: _adsHost, account: null });
-        refreshAdsAccountInfo();
+        renderAdsAccountOptions(allEl, res.accounts, null, null);
       });
     return;
   }

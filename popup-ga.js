@@ -334,15 +334,14 @@ async function refreshGaPropertyInfo() {
   }
 
   // Once a property is linked, collapse to just that one (green), like the GSC
-  // box — the full searchable list returns via "Change".
+  // box. The trash unlinks this domain and brings back the searchable picker.
   const selected = res.property || res.detectedProperty;
   const sel = selected && res.properties.find(p => p.property === selected);
   if (sel) {
     renderSelectedRow(allEl, `${sel.displayName} · ${sel.property.replace('properties/', '#')}`,
-      () => renderGaPropertyOptions(allEl, res.properties, selected, null, { detectedProperty: res.detectedProperty, detectedId: res.detectedId }),
       async () => {
         await browser.runtime.sendMessage({ action: 'gaSetProperty', host: _gaHost, property: null });
-        refreshGaPropertyInfo();
+        renderGaPropertyOptions(allEl, res.properties, null, null, { detectedProperty: res.detectedProperty, detectedId: res.detectedId });
       });
     return;
   }
@@ -352,8 +351,8 @@ async function refreshGaPropertyInfo() {
 }
 
 // Collapsed single-row view of the linked account/property (mirrors the GSC
-// connected box). "Change" re-opens the picker; the trash unlinks this domain.
-function renderSelectedRow(container, label, onChange, onTrash) {
+// connected box). The trash unlinks this domain and brings the picker back.
+function renderSelectedRow(container, label, onTrash) {
   container.replaceChildren();
   const row = document.createElement('div');
   row.className = 'gsc-property-row';
@@ -368,12 +367,6 @@ function renderSelectedRow(container, label, onChange, onTrash) {
   row.appendChild(opt);
   if (onTrash) row.appendChild(propertyTrashButton('Unlink this domain', onTrash));
   container.appendChild(row);
-
-  const change = document.createElement('button');
-  change.className = 'gsc-change-btn';
-  change.textContent = 'Change';
-  change.addEventListener('click', onChange);
-  container.appendChild(change);
 }
 
 document.getElementById('btn-ga-connect').addEventListener('click', async () => {

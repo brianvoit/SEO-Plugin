@@ -62,20 +62,21 @@ function adsTermChips(text, organicSet) {
   return wrap.childNodes.length ? wrap : null;
 }
 
-// ─── Campaign → ad group → ad tree ──────────────────────────────────────────────
+// ─── Campaign → ad group tree (metrics aggregated per ad group) ─────────────────
 
 function renderAdsTree(ads, campaigns, currency) {
   const root = document.getElementById('ads-tree');
   root.replaceChildren();
   const isByCampaign = new Map(campaigns.map(c => [c.id, c]));
 
-  // group ads: campaignId → adGroupId → [ads]
+  // Sum each ad group's ads into one line — no per-ad rows
   const byCampaign = new Map();
   ads.forEach(a => {
     if (!byCampaign.has(a.campaignId)) byCampaign.set(a.campaignId, { name: a.campaign, groups: new Map() });
     const groups = byCampaign.get(a.campaignId).groups;
-    if (!groups.has(a.adGroupId)) groups.set(a.adGroupId, { name: a.adGroup, ads: [] });
-    groups.get(a.adGroupId).ads.push(a);
+    if (!groups.has(a.adGroupId)) groups.set(a.adGroupId, { name: a.adGroup, impressions: 0, clicks: 0, cost: 0, conversions: 0 });
+    const g = groups.get(a.adGroupId);
+    g.impressions += a.impressions; g.clicks += a.clicks; g.cost += a.cost; g.conversions += a.conversions;
   });
 
   byCampaign.forEach((camp, campId) => {
@@ -97,88 +98,120 @@ function renderAdsTree(ads, campaigns, currency) {
     }
     root.appendChild(cRow);
 
-    camp.groups.forEach(group => {
+    camp.groups.forEach(g => {
       const gRow = document.createElement('div');
-      gRow.className = 'ads-group';
-      gRow.textContent = group.name;
+      gRow.className = 'ads-group-row';
+      const arrow = document.createElement('span');
+      arrow.className = 'ads-group-arrow';
+      arrow.textContent = '→';
+      const name = document.createElement('span');
+      name.className = 'ads-group-name';
+      name.textContent = g.name;
+      name.title = g.name;
+      const metrics = document.createElement('span');
+      metrics.className = 'ads-group-metrics';
+      metrics.textContent = `${adsNum(g.impressions)} impr · ${adsNum(g.clicks)} clk · ${adsCost(g.cost, currency)} · ${adsConv(g.conversions)} conv`;
+      gRow.append(arrow, name, metrics);
       root.appendChild(gRow);
-
-      group.ads.forEach(ad => {
-        const aRow = document.createElement('div');
-        aRow.className = 'ads-ad';
-        const head = document.createElement('div');
-        head.className = 'ads-ad-head';
-        head.textContent = `${ad.type || 'Ad'}${ad.adName ? ' · ' + ad.adName : ''} · #${ad.adId}`;
-        const metrics = document.createElement('div');
-        metrics.className = 'ads-ad-metrics';
-        metrics.textContent = `${adsNum(ad.impressions)} impr · ${adsNum(ad.clicks)} clk · ${adsCost(ad.cost, currency)} · ${adsConv(ad.conversions)} conv`;
-        aRow.append(head, metrics);
-        root.appendChild(aRow);
-      });
     });
   });
 }
 
-// ─── Keyword + search-term tables ───────────────────────────────────────────────
+// ─── Keyword + search-term tables (sortable, default Impr desc) ────────────────
+
+// Match type as punctuation on the keyword: broad = none, "phrase", [exact]
+function adsFormatKeyword(text, matchType) {
+  const mt = (matchType || '').toUpperCase();
+  if (mt === 'EXACT')  return `[${text}]`;
+  if (mt === 'PHRASE') return `"${text}"`;
+  return text;
+}
+
+const ADS_KW_COLS = [
+  { key: 'text', label: 'Keyword', term: true },
+  { key: 'qualityScore', label: 'QS' },
+  { key: 'impressions', label: 'Impr' },
+  { key: 'clicks', label: 'Clicks' },
+  { key: 'cost', label: 'Cost' },
+  { key: 'conversions', label: 'Conv' }
+];
+const ADS_TERM_COLS = [
+  { key: 'text', label: 'Search term', term: true },
+  { key: 'impressions', label: 'Impr' },
+  { key: 'clicks', label: 'Clicks' },
+  { key: 'cost', label: 'Cost' },
+  { key: 'conversions', label: 'Conv' }
+];
 
 function buildAdsMetricTable(container, rows, { withQs = false } = {}) {
-  container.replaceChildren();
+  const cols = withQs ? ADS_KW_COLS : ADS_TERM_COLS;
+  if (!container._sort) container._sort = { column: 'impressions', dir: 'desc' };
+  const sort = container._sort;
   const organic = adsOrganicSet();
 
-  const header = document.createElement('div');
-  header.className = 'ads-row ads-row--header' + (withQs ? ' ads-row--kw' : '');
-  const cols = withQs ? ['Keyword', 'QS', 'Impr', 'Clicks', 'Cost', 'Conv'] : ['Search term', 'Impr', 'Clicks', 'Cost', 'Conv'];
-  cols.forEach((c, i) => {
-    const cell = document.createElement('span');
-    cell.className = i === 0 ? 'ads-cell-term' : 'ads-cell-num';
-    cell.textContent = c;
-    header.appendChild(cell);
-  });
-  container.appendChild(header);
+  const render = () => {
+    container.replaceChildren();
 
-  rows.forEach(r => {
-    const row = document.createElement('div');
-    row.className = 'ads-row' + (withQs ? ' ads-row--kw' : '');
-
-    const term = document.createElement('span');
-    term.className = 'ads-cell-term';
-    const label = document.createElement('span');
-    label.className = 'ads-term-text';
-    label.textContent = r.text || '(none)';
-    label.title = r.text || '';
-    term.appendChild(label);
-    if (r.matchType) {
-      const mt = document.createElement('span');
-      mt.className = 'ads-match';
-      mt.textContent = r.matchType.toLowerCase();
-      term.appendChild(mt);
-    }
-    const chips = adsTermChips(r.text, organic);
-    if (chips) term.appendChild(chips);
-    row.appendChild(term);
-
-    if (withQs) {
-      const qs = document.createElement('span');
-      qs.className = 'ads-cell-num';
-      if (r.qualityScore != null) {
-        const badge = document.createElement('span');
-        badge.className = 'ads-qs ' + (r.qualityScore >= 7 ? 'ads-qs--good' : r.qualityScore >= 4 ? 'ads-qs--ok' : 'ads-qs--bad');
-        badge.textContent = r.qualityScore;
-        qs.appendChild(badge);
-      } else {
-        qs.textContent = '—';
-      }
-      row.appendChild(qs);
-    }
-
-    [adsNum(r.impressions), adsNum(r.clicks), adsCost(r.cost, container._currency), adsConv(r.conversions)].forEach(v => {
+    const header = document.createElement('div');
+    header.className = 'ads-row ads-row--header' + (withQs ? ' ads-row--kw' : '');
+    cols.forEach(c => {
       const cell = document.createElement('span');
-      cell.className = 'ads-cell-num';
-      cell.textContent = v;
-      row.appendChild(cell);
+      cell.className = (c.term ? 'ads-cell-term' : 'ads-cell-num') + ' ads-sort';
+      const active = sort.column === c.key;
+      cell.textContent = c.label + (active ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
+      cell.addEventListener('click', () => {
+        if (sort.column === c.key) sort.dir = sort.dir === 'asc' ? 'desc' : 'asc';
+        else { sort.column = c.key; sort.dir = c.term ? 'asc' : 'desc'; }
+        render();
+      });
+      header.appendChild(cell);
     });
-    container.appendChild(row);
-  });
+    container.appendChild(header);
+
+    const sorted = [...rows].sort((a, b) => {
+      if (sort.column === 'text') {
+        const av = (a.text || '').toLowerCase(), bv = (b.text || '').toLowerCase();
+        return sort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+      }
+      const av = a[sort.column] == null ? -Infinity : a[sort.column];
+      const bv = b[sort.column] == null ? -Infinity : b[sort.column];
+      return sort.dir === 'asc' ? av - bv : bv - av;
+    });
+
+    sorted.forEach(r => {
+      const row = document.createElement('div');
+      row.className = 'ads-row' + (withQs ? ' ads-row--kw' : '');
+
+      // term + chips on one line
+      const term = document.createElement('span');
+      term.className = 'ads-cell-term';
+      const label = document.createElement('span');
+      label.className = 'ads-term-text';
+      label.textContent = withQs ? adsFormatKeyword(r.text, r.matchType) : (r.text || '(none)');
+      label.title = r.text || '';
+      term.appendChild(label);
+      const chips = adsTermChips(r.text, organic);
+      if (chips) term.appendChild(chips);
+      row.appendChild(term);
+
+      if (withQs) {
+        const qs = document.createElement('span');
+        qs.className = 'ads-cell-num';
+        qs.textContent = r.qualityScore != null ? r.qualityScore : '—';
+        row.appendChild(qs);
+      }
+
+      [adsNum(r.impressions), adsNum(r.clicks), adsCost(r.cost, container._currency), adsConv(r.conversions)].forEach(v => {
+        const cell = document.createElement('span');
+        cell.className = 'ads-cell-num';
+        cell.textContent = v;
+        row.appendChild(cell);
+      });
+      container.appendChild(row);
+    });
+  };
+
+  render();
 }
 
 // ─── Panel + states ──────────────────────────────────────────────────────────

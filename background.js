@@ -1100,7 +1100,9 @@ function gaDateRanges(range) {
   };
 }
 
-const GA_METRIC_NAMES = ['sessions', 'activeUsers', 'screenPageViews', 'entrances', 'bounceRate', 'userEngagementDuration'];
+// Note: GA4 has no "entrances" metric (unlike UA). It's computed separately
+// from a landing-page session count — see gaFetchEntrances.
+const GA_METRIC_NAMES = ['sessions', 'activeUsers', 'screenPageViews', 'bounceRate', 'userEngagementDuration'];
 
 function gaEmptyMetrics() {
   return { sessions: 0, users: 0, pageviews: 0, entrances: 0, bounceRate: 0, avgEngagement: 0 };
@@ -1109,15 +1111,49 @@ function gaEmptyMetrics() {
 function gaParseMetricRow(row) {
   const v = row?.metricValues || [];
   const sessions = Number(v[0]?.value || 0);
-  const engagementDuration = Number(v[5]?.value || 0);   // total user-engagement seconds
+  const engagementDuration = Number(v[4]?.value || 0);   // total user-engagement seconds
   return {
     sessions,
     users:      Number(v[1]?.value || 0),
     pageviews:  Number(v[2]?.value || 0),
-    entrances:  Number(v[3]?.value || 0),
-    bounceRate: Number(v[4]?.value || 0),                       // 0..1 proportion
+    bounceRate: Number(v[3]?.value || 0),                       // 0..1 proportion
     avgEngagement: sessions > 0 ? engagementDuration / sessions : 0   // avg seconds/session
   };
+}
+
+// Entrances = sessions that started (landed) on this page. GA4 has no
+// "entrances" metric, so count sessions filtered to this landing page. The
+// anchored regex avoids prefix/homepage over-matching. Best-effort: returns
+// zeros rather than failing the whole Analytics load.
+async function gaFetchEntrances(accessToken, property, path, ranges, channel) {
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const lpRegex = `^${esc(path)}(\\?.*)?$`;
+  const expressions = [
+    { filter: { fieldName: 'landingPagePlusQueryString', stringFilter: { matchType: 'FULL_REGEXP', value: lpRegex } } }
+  ];
+  if (channel) {
+    expressions.push({ filter: { fieldName: 'sessionDefaultChannelGroup', stringFilter: { matchType: 'EXACT', value: channel } } });
+  }
+  const filter = expressions.length > 1
+    ? { dimensionFilter: { andGroup: { expressions } } }
+    : { dimensionFilter: expressions[0] };
+
+  let data;
+  try {
+    data = await gaRunReport(accessToken, property, {
+      dateRanges: [{ startDate: ranges.startDate, endDate: ranges.endDate }, { startDate: ranges.prevStartDate, endDate: ranges.prevEndDate }],
+      metrics: [{ name: 'sessions' }],
+      ...filter
+    });
+  } catch { return { current: 0, previous: 0 }; }
+
+  let current = 0, previous = 0;
+  (data.rows || []).forEach(row => {
+    const which = row.dimensionValues?.[0]?.value;
+    const val = Number(row.metricValues?.[0]?.value || 0);
+    if (which === 'date_range_1') previous = val; else current = val;
+  });
+  return { current, previous };
 }
 
 async function gaGetPageData({ pageUrl, range, forceRefresh, measurementId }) {
@@ -1172,9 +1208,9 @@ async function gaGetPageData({ pageUrl, range, forceRefresh, measurementId }) {
     refRegex = `^https?://(www\\.)?${esc(refHost)}${esc(refPath)}/?([?#].*)?$`;
   } catch { /* non-URL page — next-pages stays empty */ }
 
-  let tsData, totalsData, channelsData, nextData;
+  let tsData, totalsData, channelsData, nextData, entData;
   try {
-    [tsData, totalsData, channelsData, nextData] = await Promise.all([
+    [tsData, totalsData, channelsData, nextData, entData] = await Promise.all([
       gaRunReport(accessToken, property, {
         dateRanges: [{ startDate, endDate }],
         dimensions: [{ name: 'date' }],
@@ -1203,7 +1239,8 @@ async function gaGetPageData({ pageUrl, range, forceRefresh, measurementId }) {
         dimensionFilter: { filter: { fieldName: 'pageReferrer', stringFilter: { matchType: 'FULL_REGEXP', value: refRegex, caseSensitive: false } } },
         orderBys: [{ metric: { metricName: 'screenPageViews' }, desc: true }],
         limit: 10
-      }) : Promise.resolve({ rows: [] })).catch(() => ({ rows: [] }))   // best-effort; never fail the whole load
+      }) : Promise.resolve({ rows: [] })).catch(() => ({ rows: [] })),   // best-effort; never fail the whole load
+      gaFetchEntrances(accessToken, property, path, { startDate, endDate, prevStartDate, prevEndDate })
     ]);
   } catch (err) {
     if (err.code === 'RATE_LIMITED') return { connected: true, error: 'RATE_LIMITED' };
@@ -1224,6 +1261,8 @@ async function gaGetPageData({ pageUrl, range, forceRefresh, measurementId }) {
     if (which === 'date_range_1') previousTotals = gaParseMetricRow(row);
     else totals = gaParseMetricRow(row);
   });
+  totals.entrances = entData.current;
+  previousTotals.entrances = entData.previous;
 
   const channels = (channelsData.rows || []).map(row => ({
     channel: row.dimensionValues[0].value,
@@ -1276,9 +1315,9 @@ async function gaGetChannelData({ pageUrl, range, channel }) {
     ] } }
   };
 
-  let tsData, totalsData;
+  let tsData, totalsData, entData;
   try {
-    [tsData, totalsData] = await Promise.all([
+    [tsData, totalsData, entData] = await Promise.all([
       gaRunReport(accessToken, property, {
         dateRanges: [{ startDate, endDate }],
         dimensions: [{ name: 'date' }],
@@ -1289,7 +1328,8 @@ async function gaGetChannelData({ pageUrl, range, channel }) {
       gaRunReport(accessToken, property, {
         dateRanges: [{ startDate, endDate }, { startDate: prevStartDate, endDate: prevEndDate }],
         metrics, ...filter
-      })
+      }),
+      gaFetchEntrances(accessToken, property, path, { startDate, endDate, prevStartDate, prevEndDate }, channel)
     ]);
   } catch (err) {
     if (err.code === 'RATE_LIMITED') return { connected: true, error: 'RATE_LIMITED' };
@@ -1308,6 +1348,8 @@ async function gaGetChannelData({ pageUrl, range, channel }) {
     if (which === 'date_range_1') previousTotals = gaParseMetricRow(row);
     else totals = gaParseMetricRow(row);
   });
+  totals.entrances = entData.current;
+  previousTotals.entrances = entData.previous;
 
   return { connected: true, timeseries, totals, previousTotals };
 }

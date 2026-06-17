@@ -117,6 +117,9 @@ function analyzeHeadings(headings) {
   const h1Count = headings.filter(h => h.tag === 'h1').length;
   if (h1Count === 0) noH1 = true;
 
+  // The document's heading outline should open on an H1; flag when it doesn't.
+  const wrongStart = headings.length > 0 && headings[0].tag !== 'h1';
+
   let firstH1Seen = false;
   let prevLevel = 0;
 
@@ -133,7 +136,7 @@ function analyzeHeadings(headings) {
     prevLevel = level;
   });
 
-  return { noH1, extraH1Indices, skipIndices };
+  return { noH1, wrongStart, extraH1Indices, skipIndices };
 }
 
 function renderHeadings(data) {
@@ -150,24 +153,32 @@ function renderHeadings(data) {
     return;
   }
 
-  const { noH1, extraH1Indices, skipIndices } = analyzeHeadings(data.headings);
-  const hasWarnings = noH1 || extraH1Indices.size || skipIndices.size;
+  const { noH1, wrongStart, extraH1Indices, skipIndices } = analyzeHeadings(data.headings);
+  const hasWarnings = noH1 || wrongStart || extraH1Indices.size || skipIndices.size;
 
   if (hasWarnings) warningZone.className = 'heading-warnings';
 
-  if (noH1) {
+  const addWarningBanner = (text) => {
     const banner = document.createElement('div');
     banner.className = 'heading-warning-banner';
-    banner.innerHTML = `<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2L1 14h14z"/><line x1="8" y1="7" x2="8" y2="10"/><circle cx="8" cy="12.5" r=".5" fill="currentColor" stroke="none"/></svg> No H1 found on this page`;
+    banner.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2L1 14h14z"/><line x1="8" y1="7" x2="8" y2="10"/><circle cx="8" cy="12.5" r=".5" fill="currentColor" stroke="none"/></svg>'));
+    banner.appendChild(document.createTextNode(' ' + text));
     warningZone.appendChild(banner);
+  };
+
+  if (noH1) {
+    addWarningBanner('No H1 found on this page');
+  } else if (wrongStart) {
+    addWarningBanner(`Page starts with ${data.headings[0].tag.toUpperCase()} — the first heading should be an H1`);
   }
 
   const indentPerLevel = 14;
 
   data.headings.forEach(({ tag, text }, i) => {
     const level = parseInt(tag[1], 10);
-    const isExtraH1 = extraH1Indices.has(i);
-    const isSkip    = skipIndices.has(i);
+    const isExtraH1   = extraH1Indices.has(i);
+    const isSkip      = skipIndices.has(i);
+    const isWrongStart = wrongStart && i === 0;
 
     const row = document.createElement('div');
     row.className = 'heading-row';
@@ -175,8 +186,8 @@ function renderHeadings(data) {
 
     const tagEl = document.createElement('span');
     tagEl.className = 'heading-tag';
-    if (isExtraH1) tagEl.classList.add('heading-tag--error');
-    if (isSkip)    tagEl.classList.add('heading-tag--warning');
+    if (isExtraH1 || isWrongStart) tagEl.classList.add('heading-tag--error');
+    else if (isSkip) tagEl.classList.add('heading-tag--warning');
     tagEl.textContent = tag.toUpperCase();
 
     const textEl = document.createElement('span');
@@ -186,11 +197,14 @@ function renderHeadings(data) {
     row.appendChild(tagEl);
     row.appendChild(textEl);
 
-    if (isExtraH1 || isSkip) {
+    if (isExtraH1 || isSkip || isWrongStart) {
       const badge = document.createElement('span');
-      badge.className = 'heading-issue-badge' + (isExtraH1 ? ' heading-issue-badge--error' : '');
+      const isError = isExtraH1 || isWrongStart;
+      badge.className = 'heading-issue-badge' + (isError ? ' heading-issue-badge--error' : '');
       badge.textContent = '!';
-      badge.title = isExtraH1
+      badge.title = isWrongStart
+        ? `Page starts with ${tag.toUpperCase()} — the first heading should be an H1`
+        : isExtraH1
         ? 'Multiple H1s — only one H1 is recommended per page'
         : `Skipped from H${level - 1 < 1 ? 1 : level - 1} to H${level} — avoid jumping heading levels`;
       row.appendChild(badge);

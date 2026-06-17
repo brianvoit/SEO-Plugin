@@ -570,6 +570,9 @@ async function refreshAdsSettingsStatus() {
     browser.storage.local.get(['adsDeveloperToken', 'adsManagerId']).then(({ adsDeveloperToken, adsManagerId }) => {
       setAdsTokenState(!!adsDeveloperToken);
       document.getElementById('ads-manager-id').value = adsManagerId || '';
+      // Once the developer token is stored, collapse the inputs out of the way
+      // (the Manager/MCC ID is optional — non-manager accounts don't need it)
+      setAdsConfigCollapsed(!!adsDeveloperToken);
     });
     refreshAdsAccountInfo();
   } else {
@@ -641,6 +644,15 @@ document.getElementById('ads-status-badge').addEventListener('click', async (e) 
   await refreshAdsSettingsStatus();
 });
 
+// Collapse the developer-token + Manager-ID inputs once both are saved, leaving
+// just a "saved · Edit" summary above the account picker.
+function setAdsConfigCollapsed(collapsed) {
+  document.getElementById('ads-config-fields').classList.toggle('hidden', collapsed);
+  document.getElementById('ads-config-collapsed').classList.toggle('hidden', !collapsed);
+}
+
+document.getElementById('btn-ads-edit-config').addEventListener('click', () => setAdsConfigCollapsed(false));
+
 // Developer token field: masked "saved" + trash once stored, editable + reveal
 // eye when empty — mirrors the Claude API key (popup-settings.js setKeyState).
 function setAdsTokenState(hasToken) {
@@ -683,6 +695,9 @@ document.getElementById('btn-ads-save-config').addEventListener('click', async (
   const saved = document.getElementById('ads-config-saved');
   saved.classList.remove('hidden');
   setTimeout(() => saved.classList.add('hidden'), 2000);
+  // Collapse once the developer token is stored (Manager/MCC ID is optional)
+  const { adsDeveloperToken } = await browser.storage.local.get('adsDeveloperToken');
+  if (adsDeveloperToken) setAdsConfigCollapsed(true);
   refreshAdsAccountInfo();
 });
 

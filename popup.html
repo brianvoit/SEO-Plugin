@@ -269,6 +269,7 @@
       </div>
 
       <div id="ads-connected-info" class="hidden">
+        <div id="ads-config-fields">
         <label class="wp-field">
           <span class="wp-field-label">Developer token</span>
           <div class="api-key-row">
@@ -298,6 +299,16 @@
           <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px"><polyline points="2 8 6 12 14 4"/></svg>
           Saved
         </span>
+        </div>
+
+        <div id="ads-config-collapsed" class="ads-config-collapsed hidden">
+          <span class="ads-config-collapsed-text">
+            <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px"><polyline points="2 8 6 12 14 4"/></svg>
+            Google Ads credentials saved
+          </span>
+          <button id="btn-ads-edit-config" class="ads-link">Edit</button>
+        </div>
+
         <div class="gsc-property-box" id="ads-account-box">
           <span class="wp-field-label" style="display:block;margin-bottom:6px">Account for this domain</span>
           <span class="gsc-property-match hidden" id="ads-account-match"></span>
@@ -333,43 +344,27 @@
 
     <section class="field-section">
       <div class="field-header">
-        <span class="field-label">TITLE TAG — CHARACTER TARGETS</span>
+        <span class="field-label">CHARACTER TARGETS</span>
       </div>
-      <div class="range-row">
-        <label class="range-group">
-          <span class="range-label">Min</span>
+      <div class="char-targets">
+        <div class="char-targets-head">
+          <span></span>
+          <span class="char-col-head">Min</span>
+          <span class="char-col-head">Target</span>
+          <span class="char-col-head">Max</span>
+        </div>
+        <div class="char-target-row">
+          <span class="char-target-rowlabel">Title tag</span>
           <input type="number" id="title-min" class="range-input" min="1" max="999" />
-        </label>
-        <label class="range-group">
-          <span class="range-label">Target</span>
           <input type="number" id="title-target" class="range-input" min="1" max="999" />
-        </label>
-        <label class="range-group">
-          <span class="range-label">Max</span>
           <input type="number" id="title-max" class="range-input" min="1" max="999" />
-        </label>
-        <span class="range-unit">chars</span>
-      </div>
-    </section>
-
-    <section class="field-section">
-      <div class="field-header">
-        <span class="field-label">META DESCRIPTION — CHARACTER TARGETS</span>
-      </div>
-      <div class="range-row">
-        <label class="range-group">
-          <span class="range-label">Min</span>
+        </div>
+        <div class="char-target-row">
+          <span class="char-target-rowlabel">Meta description</span>
           <input type="number" id="meta-min" class="range-input" min="1" max="999" />
-        </label>
-        <label class="range-group">
-          <span class="range-label">Target</span>
           <input type="number" id="meta-target" class="range-input" min="1" max="999" />
-        </label>
-        <label class="range-group">
-          <span class="range-label">Max</span>
           <input type="number" id="meta-max" class="range-input" min="1" max="999" />
-        </label>
-        <span class="range-unit">chars</span>
+        </div>
       </div>
       <p class="key-saved-msg hidden" id="key-saved-msg-ranges">
         <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px">
@@ -566,6 +561,12 @@
         <div class="field-hint" id="ga-fetched-meta"></div>
       </section>
 
+      <div class="gsc-query-filter-bar hidden" id="ga-channel-filter-bar">
+        <span class="gsc-query-filter-label">Channel:</span>
+        <span class="gsc-query-filter-text" id="ga-channel-filter-text"></span>
+        <button class="gsc-query-filter-clear" id="btn-ga-clear-channel-filter" title="Clear channel filter">✕</button>
+      </div>
+
       <section class="field-section">
         <div class="gsc-metric-toggles" id="ga-metric-toggles">
           <button class="gsc-metric-toggle ga-metric-toggle" data-metric="sessions" aria-pressed="true">
@@ -600,11 +601,36 @@
       </section>
 
       <section class="field-section">
+        <div class="ga-scorecards">
+          <div class="ga-scorecard">
+            <span class="ga-scorecard-name" title="Entrances — sessions that began on this page (it was the landing/entry page).">Entrances</span>
+            <span class="ga-scorecard-stats"><span class="gsc-chart-total" id="ga-total-entrances"></span><span class="gsc-chart-change" id="ga-change-entrances"></span></span>
+          </div>
+          <div class="ga-scorecard">
+            <span class="ga-scorecard-name" title="Bounce rate — share of sessions on this page that were not engaged (GA4 definition). Lower is better.">Bounce Rate</span>
+            <span class="ga-scorecard-stats"><span class="gsc-chart-total" id="ga-total-bounce"></span><span class="gsc-chart-change" id="ga-change-bounce"></span></span>
+          </div>
+          <div class="ga-scorecard">
+            <span class="ga-scorecard-name" title="Avg engagement time — GA4 user-engagement seconds ÷ sessions for this page. GA4's closest equivalent to time on page (it has no literal 'time on page').">Avg Time</span>
+            <span class="ga-scorecard-stats"><span class="gsc-chart-total" id="ga-total-avgtime"></span><span class="gsc-chart-change" id="ga-change-avgtime"></span></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="field-section">
         <div class="field-header">
           <span class="field-label">TRAFFIC CHANNELS</span>
         </div>
         <div id="ga-channels-table"></div>
         <div id="ga-channels-empty" class="field-hint hidden">No channel data for this page in the selected range.</div>
+      </section>
+
+      <section class="field-section">
+        <div class="field-header">
+          <span class="field-label" title="Top pages visitors went to next from here, based on GA4's pageReferrer (document.referrer). Approximate — misses clicks where the referrer was stripped or opened in a new tab.">TOP NEXT PAGES</span>
+        </div>
+        <div id="ga-next-pages"></div>
+        <div id="ga-next-pages-empty" class="field-hint hidden">No next-page data for this page in the selected range.</div>
       </section>
 
     </div>
@@ -880,11 +906,11 @@
     <!-- Sentiment + Intent (Claude) -->
     <section class="field-section field-section--split">
       <div class="split-half">
-        <span class="field-label">SENTIMENT</span>
+        <span class="field-label" title="Sentiment — the overall emotional tone of the page text (Positive / Negative / Neutral / Mixed), judged by Claude from the page copy.">SENTIMENT</span>
         <div class="field-meta" id="ai-sentiment">—</div>
       </div>
       <div class="split-half">
-        <span class="field-label">INTENT</span>
+        <span class="field-label" title="Search intent — what a visitor is most likely trying to do here: Informational (learn), Navigational (find a specific site), Commercial (research a purchase), or Transactional (buy/act).">INTENT</span>
         <div class="field-meta" id="ai-intent">—</div>
       </div>
     </section>
@@ -978,6 +1004,21 @@
       <div class="dates-row">
         <span class="dates-label">SSL</span>
         <span class="dates-value" id="ssl-summary">—</span>
+      </div>
+    </section>
+
+    <!-- Discovery (Google Search Console URL inspection) -->
+    <section class="field-section hidden" id="gsc-discovery">
+      <div class="field-header">
+        <span class="field-label" title="How Google discovered this URL — the sitemaps it appears in and a page Google followed a link from (from Search Console's URL Inspection).">DISCOVERY</span>
+      </div>
+      <div class="gsc-discovery-group" id="gsc-discovery-sitemaps-group">
+        <span class="gsc-discovery-label">Sitemaps</span>
+        <div id="gsc-discovery-sitemaps"></div>
+      </div>
+      <div class="gsc-discovery-group" id="gsc-discovery-referrers-group">
+        <span class="gsc-discovery-label">Referring page</span>
+        <div id="gsc-discovery-referrers"></div>
       </div>
     </section>
 

@@ -122,6 +122,13 @@ const AI_INSIGHTS_TTL_MS = 24 * 60 * 60 * 1000;
 const AI_SENTIMENT_CLASS   = { Positive: 'hint-green', Negative: 'hint-red', Mixed: 'hint-amber', Neutral: '' };
 const AI_READABILITY_CLASS = { Easy: 'hint-green', Medium: 'hint-amber', Hard: 'hint-red' };
 
+// Hover explainers for each AI-derived label (what the dimension represents)
+const AI_HINTS = {
+  sentiment:   'Sentiment — the overall emotional tone of the page text (Positive / Negative / Neutral / Mixed), judged by Claude from the page copy.',
+  intent:      'Search intent — what a visitor is most likely trying to do here: Informational (learn), Navigational (find a specific site), Commercial (research a purchase), or Transactional (buy/act).',
+  readability: 'Readability — how hard the text is to read (Easy / Medium / Hard). Audience — whether the writing targets a Technical or General reader.'
+};
+
 function setAiInsightFields(text, hint) {
   ['ai-sentiment', 'ai-intent', 'ai-readability'].forEach(id => {
     const el = document.getElementById(id);
@@ -135,12 +142,12 @@ function renderAiInsights(v) {
   const sentimentEl = document.getElementById('ai-sentiment');
   sentimentEl.textContent = v.sentiment;
   sentimentEl.className = 'field-meta ' + (AI_SENTIMENT_CLASS[v.sentiment] || '');
-  sentimentEl.title = '';
+  sentimentEl.title = AI_HINTS.sentiment;
 
   const intentEl = document.getElementById('ai-intent');
   intentEl.textContent = v.intent;
   intentEl.className = 'field-meta';
-  intentEl.title = '';
+  intentEl.title = AI_HINTS.intent;
 
   // "Easy, General" — readability colored, audience plain
   const readEl = document.getElementById('ai-readability');
@@ -150,7 +157,7 @@ function renderAiInsights(v) {
   read.textContent = v.readability;
   readEl.appendChild(read);
   readEl.appendChild(document.createTextNode(`, ${v.audience}`));
-  readEl.title = 'Readability · Audience';
+  readEl.title = AI_HINTS.readability;
 }
 
 // Accept the model's answer only if every label is from its allowed set

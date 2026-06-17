@@ -652,7 +652,9 @@ async function gscInspectUrl(accessToken, siteUrl, pageUrl, forceRefresh) {
       pageFetchState: idx.pageFetchState || '',
       lastCrawlTime: idx.lastCrawlTime || null,
       googleCanonical: idx.googleCanonical || null,
-      userCanonical: idx.userCanonical || null
+      userCanonical: idx.userCanonical || null,
+      sitemaps: idx.sitemap || [],
+      referringUrls: idx.referringUrls || []
     };
     cache[pageUrl] = { fetchedAt: Date.now(), siteUrl, result };
     await gscPruneCache(cache);
@@ -1098,14 +1100,23 @@ function gaDateRanges(range) {
   };
 }
 
-const GA_METRIC_NAMES = ['sessions', 'activeUsers', 'screenPageViews'];
+const GA_METRIC_NAMES = ['sessions', 'activeUsers', 'screenPageViews', 'entrances', 'bounceRate', 'userEngagementDuration'];
+
+function gaEmptyMetrics() {
+  return { sessions: 0, users: 0, pageviews: 0, entrances: 0, bounceRate: 0, avgEngagement: 0 };
+}
 
 function gaParseMetricRow(row) {
   const v = row?.metricValues || [];
+  const sessions = Number(v[0]?.value || 0);
+  const engagementDuration = Number(v[5]?.value || 0);   // total user-engagement seconds
   return {
-    sessions:  Number(v[0]?.value || 0),
-    users:     Number(v[1]?.value || 0),
-    pageviews: Number(v[2]?.value || 0)
+    sessions,
+    users:      Number(v[1]?.value || 0),
+    pageviews:  Number(v[2]?.value || 0),
+    entrances:  Number(v[3]?.value || 0),
+    bounceRate: Number(v[4]?.value || 0),                       // 0..1 proportion
+    avgEngagement: sessions > 0 ? engagementDuration / sessions : 0   // avg seconds/session
   };
 }
 
@@ -1148,9 +1159,22 @@ async function gaGetPageData({ pageUrl, range, forceRefresh, measurementId }) {
     dimensionFilter: { filter: { fieldName: 'pagePath', stringFilter: { matchType: 'EXACT', value: path } } }
   };
 
-  let tsData, totalsData, channelsData;
+  // "Next pages": destinations whose referrer is this page (document.referrer).
+  // GA4 has no path-exploration in the Data API, so this is the closest proxy.
+  // An anchored regex avoids the homepage ("/") and prefix over-matching that a
+  // plain CONTAINS would cause.
+  let refRegex = null;
   try {
-    [tsData, totalsData, channelsData] = await Promise.all([
+    const u = new URL(pageUrl);
+    const refHost = u.hostname.replace(/^www\./, '');
+    const refPath = u.pathname.replace(/\/+$/, '');         // ignore a trailing slash
+    const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    refRegex = `^https?://(www\\.)?${esc(refHost)}${esc(refPath)}/?([?#].*)?$`;
+  } catch { /* non-URL page — next-pages stays empty */ }
+
+  let tsData, totalsData, channelsData, nextData;
+  try {
+    [tsData, totalsData, channelsData, nextData] = await Promise.all([
       gaRunReport(accessToken, property, {
         dateRanges: [{ startDate, endDate }],
         dimensions: [{ name: 'date' }],
@@ -1171,7 +1195,15 @@ async function gaGetPageData({ pageUrl, range, forceRefresh, measurementId }) {
         ...pageFilter,
         orderBys: [{ metric: { metricName: 'sessions' }, desc: true }],
         limit: 10
-      })
+      }),
+      (refRegex ? gaRunReport(accessToken, property, {
+        dateRanges: [{ startDate, endDate }],
+        dimensions: [{ name: 'pagePath' }, { name: 'pageTitle' }],
+        metrics: [{ name: 'screenPageViews' }],
+        dimensionFilter: { filter: { fieldName: 'pageReferrer', stringFilter: { matchType: 'FULL_REGEXP', value: refRegex, caseSensitive: false } } },
+        orderBys: [{ metric: { metricName: 'screenPageViews' }, desc: true }],
+        limit: 10
+      }) : Promise.resolve({ rows: [] })).catch(() => ({ rows: [] }))   // best-effort; never fail the whole load
     ]);
   } catch (err) {
     if (err.code === 'RATE_LIMITED') return { connected: true, error: 'RATE_LIMITED' };
@@ -1185,8 +1217,8 @@ async function gaGetPageData({ pageUrl, range, forceRefresh, measurementId }) {
   }));
 
   // With two dateRanges the API adds a dateRange dimension to each row
-  let totals = { sessions: 0, users: 0, pageviews: 0 };
-  let previousTotals = { sessions: 0, users: 0, pageviews: 0 };
+  let totals = gaEmptyMetrics();
+  let previousTotals = gaEmptyMetrics();
   (totalsData.rows || []).forEach(row => {
     const which = row.dimensionValues?.[0]?.value;
     if (which === 'date_range_1') previousTotals = gaParseMetricRow(row);
@@ -1198,15 +1230,86 @@ async function gaGetPageData({ pageUrl, range, forceRefresh, measurementId }) {
     ...gaParseMetricRow(row)
   }));
 
+  // Top destinations that came from this page (exclude self), top 5
+  const nextPages = (nextData.rows || [])
+    .map(row => ({
+      path: row.dimensionValues[0].value,
+      title: row.dimensionValues[1].value,
+      pageviews: Number(row.metricValues[0].value || 0)
+    }))
+    .filter(p => p.path !== path)
+    .slice(0, 5);
+
   const { gaProperties } = await browser.storage.local.get('gaProperties');
   const propertyName = gaProperties?.properties?.find(p => p.property === property)?.displayName || property;
 
-  const entry = { fetchedAt: Date.now(), property, propertyName, range, path, timeseries, totals, previousTotals, channels };
+  const entry = { fetchedAt: Date.now(), property, propertyName, range, path, timeseries, totals, previousTotals, channels, nextPages };
   cache[cacheKey] = entry;
   await gscPruneCache(cache);
   await browser.storage.local.set({ gaCache: cache });
 
   return { connected: true, ...entry, fromCache: false };
+}
+
+// Re-run the page's traffic for a single channel (chart + scorecards filter).
+// Not cached — it's on-demand when the user clicks a channel row.
+async function gaGetChannelData({ pageUrl, range, channel }) {
+  const tokenResult = await gaGetAccessToken();
+  if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
+  if (tokenResult.error === 'REAUTH_REQUIRED') return { connected: false, reauthRequired: true };
+  if (tokenResult.error) return { connected: true, error: tokenResult.error };
+  const accessToken = tokenResult.accessToken;
+
+  const host = gscPageHost(pageUrl);
+  const property = await gaGetProperty(host);
+  if (!property) return { connected: true, error: 'NO_PROPERTY', host };
+
+  let path = '/';
+  try { path = new URL(pageUrl).pathname; } catch { /* keep root */ }
+
+  const { startDate, endDate, prevStartDate, prevEndDate } = gaDateRanges(range);
+  const metrics = GA_METRIC_NAMES.map(name => ({ name }));
+  const filter = {
+    dimensionFilter: { andGroup: { expressions: [
+      { filter: { fieldName: 'pagePath', stringFilter: { matchType: 'EXACT', value: path } } },
+      { filter: { fieldName: 'sessionDefaultChannelGroup', stringFilter: { matchType: 'EXACT', value: channel } } }
+    ] } }
+  };
+
+  let tsData, totalsData;
+  try {
+    [tsData, totalsData] = await Promise.all([
+      gaRunReport(accessToken, property, {
+        dateRanges: [{ startDate, endDate }],
+        dimensions: [{ name: 'date' }],
+        metrics, ...filter,
+        orderBys: [{ dimension: { dimensionName: 'date' } }],
+        limit: 500
+      }),
+      gaRunReport(accessToken, property, {
+        dateRanges: [{ startDate, endDate }, { startDate: prevStartDate, endDate: prevEndDate }],
+        metrics, ...filter
+      })
+    ]);
+  } catch (err) {
+    if (err.code === 'RATE_LIMITED') return { connected: true, error: 'RATE_LIMITED' };
+    return { connected: true, error: err.code || 'API_ERROR', detail: err.detail };
+  }
+
+  const timeseries = (tsData.rows || []).map(row => ({
+    date: row.dimensionValues[0].value.replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3'),
+    ...gaParseMetricRow(row)
+  }));
+
+  let totals = gaEmptyMetrics();
+  let previousTotals = gaEmptyMetrics();
+  (totalsData.rows || []).forEach(row => {
+    const which = row.dimensionValues?.[0]?.value;
+    if (which === 'date_range_1') previousTotals = gaParseMetricRow(row);
+    else totals = gaParseMetricRow(row);
+  });
+
+  return { connected: true, timeseries, totals, previousTotals };
 }
 
 // ─── Domain age (RDAP) ────────────────────────────────────────────────────────
@@ -1684,6 +1787,7 @@ browser.runtime.onMessage.addListener((message) => {
     case 'gaResolveProperty':  return gaResolveProperty(message);
     case 'gaSetProperty':      return gaSetProperty(message);
     case 'gaGetPageData':      return gaGetPageData(message);
+    case 'gaGetChannelData':   return gaGetChannelData(message);
     case 'adsGetStatus':       return adsGetStatus();
     case 'adsConnect':         return adsConnect();
     case 'adsDisconnect':      return adsDisconnect();

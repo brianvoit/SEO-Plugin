@@ -677,7 +677,39 @@ function selectGscQuery(query) {
 
 const GSC_CRAWL_FRESH_MS = 30 * 24 * 60 * 60 * 1000;
 
+// Discovery section (Overview): the sitemaps this URL appears in and a page
+// Google followed a link from, per Search Console's URL Inspection.
+function fillDiscoveryList(listId, groupId, urls) {
+  const list = document.getElementById(listId);
+  list.replaceChildren();
+  document.getElementById(groupId).classList.toggle('hidden', !urls.length);
+  urls.forEach(u => {
+    const row = document.createElement('span');
+    row.className = 'gsc-discovery-url';
+    row.textContent = u;
+    row.title = u;
+    row.addEventListener('click', () => browser.tabs.create({ url: u }));
+    list.appendChild(row);
+  });
+}
+
+function renderGscDiscovery(inspection) {
+  const section   = document.getElementById('gsc-discovery');
+  const sitemaps  = (inspection && inspection.sitemaps) || [];
+  const referrers = (inspection && inspection.referringUrls) || [];
+
+  if (!sitemaps.length && !referrers.length) {
+    section.classList.add('hidden');
+    return;
+  }
+  section.classList.remove('hidden');
+  fillDiscoveryList('gsc-discovery-sitemaps', 'gsc-discovery-sitemaps-group', sitemaps);
+  fillDiscoveryList('gsc-discovery-referrers', 'gsc-discovery-referrers-group', referrers);
+}
+
 function renderGscInspection(inspection) {
+  renderGscDiscovery(inspection);
+
   if (!inspection) {
     _idxGsc = null;
     renderIndexabilitySection();

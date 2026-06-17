@@ -7,6 +7,14 @@ let gaSelectedRange = 30;
 let gaActiveMetrics = { sessions: true, users: true, pageviews: true };
 let _gaFilled = [];
 let _gaHost = null;
+let _gaData = null;             // last full gaGetPageData response (to restore on filter clear)
+let _gaSelectedChannel = null;  // channel the chart + scorecards are filtered to
+
+function gaFmtPct(v) { return Math.round((v || 0) * 100) + '%'; }
+function gaFmtDuration(sec) {
+  sec = Math.round(sec || 0);
+  return sec >= 60 ? `${Math.floor(sec / 60)}m ${sec % 60}s` : `${sec}s`;
+}
 
 const GA_METRICS = {
   sessions:  { label: 'Sessions',  format: n => Math.round(n).toLocaleString() },
@@ -57,6 +65,16 @@ function renderGaCharts(timeseries, totals, previousTotals, range) {
   renderGscChange('ga-change-users', totals.users, previousTotals.users);
   renderGscChange('ga-change-pageviews', totals.pageviews, previousTotals.pageviews);
 
+  // Extra scorecards (display-only, not chart toggles)
+  document.getElementById('ga-total-entrances').textContent = Math.round(totals.entrances || 0).toLocaleString();
+  renderGscChange('ga-change-entrances', totals.entrances, previousTotals.entrances);
+
+  document.getElementById('ga-total-bounce').textContent = gaFmtPct(totals.bounceRate);
+  renderGscChange('ga-change-bounce', totals.bounceRate, previousTotals.bounceRate, { lowerIsBetter: true });
+
+  document.getElementById('ga-total-avgtime').textContent = gaFmtDuration(totals.avgEngagement);
+  renderGscChange('ga-change-avgtime', totals.avgEngagement, previousTotals.avgEngagement);
+
   renderGaChart();
 }
 
@@ -77,7 +95,7 @@ function renderGaChannels(channels) {
 
   const header = document.createElement('div');
   header.className = 'ga-channel-row ga-channel-row--header';
-  ['Channel', 'Sessions', 'Users', 'Share'].forEach((text, i) => {
+  ['Channel', 'Sessions', 'Users', 'Bounce', 'Avg Time', 'Share'].forEach((text, i) => {
     const cell = document.createElement('span');
     cell.className = i === 0 ? 'ga-channel-name' : 'ga-channel-num';
     cell.textContent = text;
@@ -87,7 +105,8 @@ function renderGaChannels(channels) {
 
   channels.forEach(c => {
     const row = document.createElement('div');
-    row.className = 'ga-channel-row';
+    row.className = 'ga-channel-row ga-channel-row--clickable'
+      + (c.channel === _gaSelectedChannel ? ' ga-channel-row--selected' : '');
     const name = document.createElement('span');
     name.className = 'ga-channel-name';
     name.textContent = c.channel;
@@ -98,12 +117,84 @@ function renderGaChannels(channels) {
     const users = document.createElement('span');
     users.className = 'ga-channel-num';
     users.textContent = Math.round(c.users).toLocaleString();
+    const bounce = document.createElement('span');
+    bounce.className = 'ga-channel-num';
+    bounce.textContent = gaFmtPct(c.bounceRate);
+    const avgTime = document.createElement('span');
+    avgTime.className = 'ga-channel-num';
+    avgTime.textContent = gaFmtDuration(c.avgEngagement);
     const share = document.createElement('span');
     share.className = 'ga-channel-num';
     share.textContent = ((c.sessions / totalSessions) * 100).toFixed(0) + '%';
-    row.append(name, sessions, users, share);
+    row.append(name, sessions, users, bounce, avgTime, share);
+    row.addEventListener('click', () => selectGaChannel(c.channel));
     table.appendChild(row);
   });
+}
+
+// ─── Top next pages ────────────────────────────────────────────────────────────
+
+function renderGaNextPages(pages) {
+  const list  = document.getElementById('ga-next-pages');
+  const empty = document.getElementById('ga-next-pages-empty');
+  list.replaceChildren();
+
+  if (!pages || !pages.length) {
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+
+  pages.forEach(p => {
+    const row = document.createElement('div');
+    row.className = 'ga-next-row';
+    const path = document.createElement('span');
+    path.className = 'ga-next-path';
+    path.textContent = p.path;
+    path.title = p.title ? `${p.title}\n${p.path}` : p.path;
+    const views = document.createElement('span');
+    views.className = 'ga-channel-num';
+    views.textContent = Math.round(p.pageviews).toLocaleString();
+    row.append(path, views);
+    list.appendChild(row);
+  });
+}
+
+// ─── Channel cross-filter (chart + scorecards) ──────────────────────────────────
+
+function showGaChannelFilterBar(channel) {
+  document.getElementById('ga-channel-filter-text').textContent = channel;
+  document.getElementById('ga-channel-filter-bar').classList.remove('hidden');
+}
+
+function hideGaChannelFilterBar() {
+  document.getElementById('ga-channel-filter-bar').classList.add('hidden');
+}
+
+async function applyGaChannelFilter(channel) {
+  const tab = await getActiveTab();
+  const response = await browser.runtime.sendMessage({
+    action: 'gaGetChannelData', pageUrl: tab.url, range: gaSelectedRange, channel
+  });
+  if (_gaSelectedChannel !== channel) return;            // user changed selection meanwhile
+  if (!response || !response.connected || response.error) return;
+  renderGaCharts(response.timeseries, response.totals, response.previousTotals, gaSelectedRange);
+}
+
+function selectGaChannel(channel) {
+  if (_gaSelectedChannel === channel) {                  // toggle the same row off
+    _gaSelectedChannel = null;
+    hideGaChannelFilterBar();
+    if (_gaData) {
+      renderGaChannels(_gaData.channels || []);
+      renderGaCharts(_gaData.timeseries, _gaData.totals, _gaData.previousTotals, gaSelectedRange);
+    }
+    return;
+  }
+  _gaSelectedChannel = channel;
+  showGaChannelFilterBar(channel);
+  if (_gaData) renderGaChannels(_gaData.channels || []);   // refresh the selected-row highlight
+  applyGaChannelFilter(channel);
 }
 
 // ─── Panel states ─────────────────────────────────────────────────────────────
@@ -142,9 +233,15 @@ function renderGaPanel(response) {
     return;
   }
 
+  // A fresh load drops any channel filter from the previous page/range
+  _gaData = response;
+  _gaSelectedChannel = null;
+  hideGaChannelFilterBar();
+
   setGaRangeUI(gaSelectedRange);
   renderGaCharts(response.timeseries, response.totals, response.previousTotals, gaSelectedRange);
   renderGaChannels(response.channels || []);
+  renderGaNextPages(response.nextPages || []);
   document.getElementById('ga-fetched-meta').textContent =
     `${response.propertyName} · ${response.path} · Updated ${gscRelativeTime(response.fetchedAt)}`;
   dataBox.classList.remove('hidden');
@@ -400,6 +497,10 @@ document.getElementById('ga-status-badge').addEventListener('click', async (e) =
 });
 
 document.getElementById('btn-ga-goto-settings').addEventListener('click', () => showSettings());
+
+document.getElementById('btn-ga-clear-channel-filter').addEventListener('click', () => {
+  if (_gaSelectedChannel) selectGaChannel(_gaSelectedChannel);   // toggles the active channel off
+});
 
 // ─── Range + metric toggles ───────────────────────────────────────────────────
 

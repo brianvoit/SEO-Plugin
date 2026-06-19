@@ -310,6 +310,111 @@ function getRedirectInfo({ tabId }) {
   return loadRedirect(tabId);
 }
 
+// ─── Active redirect trace ──────────────────────────────────────────────────
+// The passive trace above only shows what the browser actually did to arrive at
+// the page. This actively re-requests a URL and follows the whole chain, so the
+// canonical path (http→https, non-www→www, trailing slash, …) always shows even
+// when you're already sitting on the final URL. We fire our own background fetch
+// and read each hop off webRequest (a plain fetch with redirect:'manual' returns
+// an opaque response with no status/Location; our host permissions let
+// webRequest see every cross-origin hop instead).
+
+const TRACE_TIMEOUT_MS = 12000;
+
+// Strip www + force http so the trace starts from the most "naked" variant and
+// cascades through the site's canonical redirects.
+function nakedTraceUrl(rawUrl) {
+  const u = new URL(rawUrl);
+  const host = u.hostname.replace(/^www\./i, '');
+  return `http://${host}${u.pathname}${u.search}`;
+}
+
+// Trace the naked (http, non-www) variant first to reveal the full canonical
+// chain; if that variant can't be reached, fall back to the page's own URL.
+async function traceUrl({ pageUrl }) {
+  let httpsUrl, nakedUrl;
+  try { httpsUrl = new URL(pageUrl).href; nakedUrl = nakedTraceUrl(pageUrl); }
+  catch { return { error: 'BAD_URL', hops: [] }; }
+  if (!/^https?:/i.test(httpsUrl)) return { error: 'BAD_URL', hops: [] };
+
+  const res = await traceOnce(nakedUrl);
+  if ((!res.hops || !res.hops.length) && nakedUrl !== httpsUrl) {
+    const alt = await traceOnce(httpsUrl);
+    if (alt.hops && alt.hops.length) return alt;
+  }
+  return res;
+}
+
+function traceOnce(startUrl) {
+  return new Promise(resolve => {
+    const filter = { urls: ['*://*/*'], types: ['xmlhttprequest'] };
+    const abort = new AbortController();
+    const trace = { startUrl, requestId: null, lastTs: null, hops: [], error: null };
+    let settled = false;
+
+    const cleanup = () => {
+      browser.webRequest.onBeforeRequest.removeListener(onReq);
+      browser.webRequest.onBeforeRedirect.removeListener(onRedir);
+      browser.webRequest.onCompleted.removeListener(onDone);
+      browser.webRequest.onErrorOccurred.removeListener(onErr);
+      clearTimeout(timer);
+    };
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve({
+        startUrl,
+        hops: trace.hops,
+        finalUrl: trace.hops.length ? trace.hops[trace.hops.length - 1].url : null,
+        finalStatus: trace.hops.length ? trace.hops[trace.hops.length - 1].status : null,
+        error: trace.hops.length ? null : trace.error
+      });
+    };
+    const hopMs = ts => {
+      const ms = trace.lastTs != null ? Math.max(0, Math.round(ts - trace.lastTs)) : 0;
+      trace.lastTs = ts;
+      return ms;
+    };
+
+    // Only our own background fetch (extension origin, no tab) starts the chain
+    const onReq = d => {
+      if (trace.requestId != null) return;
+      if (d.url === startUrl && d.tabId === -1 && (d.originUrl || '').startsWith('moz-extension://')) {
+        trace.requestId = d.requestId;
+        trace.lastTs = d.timeStamp;
+      }
+    };
+    const onRedir = d => {
+      if (d.requestId !== trace.requestId) return;
+      const internal = /internal redirect/i.test(d.statusLine || '');
+      trace.hops.push({ url: d.url, status: d.statusCode, ms: hopMs(d.timeStamp), fromCache: !!d.fromCache, kind: internal ? 'internal' : null });
+      if (trace.hops.length >= REDIRECT_MAX_HOPS) { abort.abort(); finish(); }
+    };
+    const onDone = d => {
+      if (d.requestId !== trace.requestId) return;
+      trace.hops.push({ url: d.url, status: d.statusCode, ms: hopMs(d.timeStamp), fromCache: !!d.fromCache, final: true });
+      finish();
+    };
+    const onErr = d => {
+      if (d.requestId !== trace.requestId) return;
+      trace.error = d.error;
+      finish();
+    };
+
+    browser.webRequest.onBeforeRequest.addListener(onReq, filter);
+    browser.webRequest.onBeforeRedirect.addListener(onRedir, filter);
+    browser.webRequest.onCompleted.addListener(onDone, filter);
+    browser.webRequest.onErrorOccurred.addListener(onErr, filter);
+
+    const timer = setTimeout(() => { trace.error = trace.error || 'TIMEOUT'; abort.abort(); finish(); }, TRACE_TIMEOUT_MS);
+
+    fetch(startUrl, { method: 'GET', redirect: 'follow', cache: 'no-store', credentials: 'omit', signal: abort.signal })
+      .then(() => setTimeout(finish, 60))   // onCompleted normally finishes first; backstop
+      .catch(err => { if (!trace.hops.length) trace.error = trace.error || String(err && err.message || err); setTimeout(finish, 60); });
+  });
+}
+
 // ─── Google OAuth: PKCE flow shared by Search Console + Analytics ────────────
 // Both products use the same Google Cloud OAuth client (stored gscClientId /
 // gscClientSecret) but hold independent grants under their own storage key.
@@ -1887,6 +1992,7 @@ browser.runtime.onMessage.addListener((message) => {
     case 'adsGetChartData':    return adsGetChartData(message);
     case 'adsGetMoreSearchTerms': return adsGetMoreSearchTerms(message);
     case 'getRedirectInfo':    return getRedirectInfo(message);
+    case 'traceUrl':           return traceUrl(message);
     case 'getTargetTab':       return getTargetTab();
     case 'openPopout':         return openPopoutWindow();
     case 'getDomainAge':       return getDomainAge(message);

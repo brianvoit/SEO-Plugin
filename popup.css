@@ -999,7 +999,72 @@ body.settings-open #update-footer { margin-top: auto; }
   min-width: 0;
   flex: 1;
 }
+.redirect-url--link { cursor: pointer; }
+.redirect-url--link:hover { color: var(--accent); text-decoration: underline; }
 #redirect-insights { margin-top: 10px; }
+
+/* Initial / Final hop markers */
+.redirect-tag {
+  flex-shrink: 0;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 7px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.redirect-tag--final { color: var(--hint-green); border-color: var(--hint-green); }
+
+/* Active-trace header bar (traced-from + re-trace) */
+.redirect-trace-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.redirect-trace-from {
+  flex: 1;
+  min-width: 0;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.redirect-trace-from #redirect-trace-from-url {
+  color: var(--text);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+.redirect-retrace-btn {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+.redirect-retrace-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Passive "how you arrived" disclosure */
+.redirect-passive { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; }
+.redirect-passive-summary {
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  list-style: none;
+}
+.redirect-passive-summary::-webkit-details-marker { display: none; }
+.redirect-passive-summary::before { content: '▸ '; }
+.redirect-passive[open] .redirect-passive-summary::before { content: '▾ '; }
+#redirect-passive-chain { margin-top: 10px; }
+#redirect-passive-insights { margin-top: 10px; }
 
 /* ── Open Graph ───────────────────────────────────────────────────────────── */
 

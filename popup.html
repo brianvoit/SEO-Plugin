@@ -424,8 +424,17 @@
         <span class="field-label">REDIRECT TRACE</span>
         <button id="btn-redirect-export" class="save-key-btn" title="Export this trace as a .txt file">Export</button>
       </div>
+      <div id="redirect-trace-bar" class="redirect-trace-bar hidden">
+        <span class="redirect-trace-from">Traced from <span id="redirect-trace-from-url"></span></span>
+        <button id="btn-redirect-retrace" class="redirect-retrace-btn" title="Run the trace again">Re-trace</button>
+      </div>
       <div id="redirect-chain"></div>
       <div id="redirect-insights"></div>
+      <details id="redirect-passive" class="redirect-passive hidden">
+        <summary class="redirect-passive-summary">How you arrived this session</summary>
+        <div id="redirect-passive-chain"></div>
+        <div id="redirect-passive-insights"></div>
+      </details>
     </section>
   </div>
 

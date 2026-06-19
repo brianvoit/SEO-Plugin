@@ -120,7 +120,7 @@ function hopExtras(hop) {
   return parts;
 }
 
-function buildHopRow(hop, isFinal) {
+function buildHopRow(hop, isFinal, isFirst) {
   const wrap = document.createElement('div');
   wrap.className = 'redirect-hop';
 
@@ -134,18 +134,27 @@ function buildHopRow(hop, isFinal) {
 
   const type = document.createElement('span');
   type.className = 'redirect-type';
-  if (hop.kind === 'client') {
-    type.textContent = hop.metaDelay != null ? `META ${hop.metaDelay}s` : 'JS / Meta';
-  } else {
-    type.textContent = isFinal ? '' : redirectTypeLabel(hop.status);
-  }
+  if (hop.kind === 'client') type.textContent = hop.metaDelay != null ? `META ${hop.metaDelay}s` : 'JS / Meta';
+  else if (hop.kind === 'internal') type.textContent = 'HSTS';
+  else type.textContent = isFinal ? '' : redirectTypeLabel(hop.status);
   row.appendChild(type);
 
   const url = document.createElement('span');
   url.className = 'redirect-url';
   url.title = hop.url;
   url.textContent = hop.url;
+  if (/^https?:/i.test(hop.url || '')) {
+    url.classList.add('redirect-url--link');
+    url.addEventListener('click', () => browser.tabs.create({ url: hop.url }));
+  }
   row.appendChild(url);
+
+  if (isFirst || isFinal) {
+    const tag = document.createElement('span');
+    tag.className = 'redirect-tag' + (isFinal ? ' redirect-tag--final' : '');
+    tag.textContent = isFinal ? 'Final' : 'Initial';
+    row.appendChild(tag);
+  }
 
   wrap.appendChild(row);
 
@@ -161,35 +170,23 @@ function buildHopRow(hop, isFinal) {
   return wrap;
 }
 
-// The chain as displayed, including a pending meta-refresh hop the current
-// page will perform (server hops can't see meta refresh — content.js reports it)
-function tracedChain() {
-  const chain = ((_redirectInfo && _redirectInfo.chain) || []).map(h => ({ ...h }));
-  if (_redirectMeta && _redirectMeta.url) {
-    chain.push({ url: _redirectMeta.url, status: chain.length ? chain[chain.length - 1].status : 200, kind: 'client', metaDelay: _redirectMeta.delay, pending: true });
+function renderHopChain(chainEl, chain, emptyMsg) {
+  chainEl.replaceChildren();
+  if (!chain.length) {
+    if (emptyMsg) appendIndexRow(chainEl, 'warning', emptyMsg);
+    return;
   }
-  return chain;
+  chain.forEach((hop, i) =>
+    chainEl.appendChild(buildHopRow(hop, i === chain.length - 1 && !hop.pending, i === 0)));
 }
 
-function renderRedirectPanel() {
-  const chainEl    = document.getElementById('redirect-chain');
-  const insightsEl = document.getElementById('redirect-insights');
-  chainEl.replaceChildren();
+function renderChainInsights(insightsEl, chain, { totalMs = null, meta = null } = {}) {
   insightsEl.replaceChildren();
 
-  const chain = tracedChain();
-
-  if (!chain.length) {
-    appendIndexRow(chainEl, 'warning', 'No status information for this page (it may have loaded before the extension started). Reload the page to trace it.');
-  } else {
-    chain.forEach((hop, i) => chainEl.appendChild(buildHopRow(hop, i === chain.length - 1 && !hop.pending)));
-  }
-
-  // Insight rows
   const redirectCount = countRedirects(chain);
   if (redirectCount >= 1) {
     appendIndexRow(insightsEl, redirectCount > 2 ? 'warning' : 'ok',
-      `Arrived via ${redirectCount} redirect${redirectCount !== 1 ? 's' : ''}` +
+      `${redirectCount} redirect${redirectCount !== 1 ? 's' : ''} in the chain` +
       (redirectCount > 2 ? ' — long chains waste crawl budget and bleed link equity.' : '.'));
   }
 
@@ -198,27 +195,124 @@ function renderRedirectPanel() {
     appendIndexRow(insightsEl, 'error', 'Redirect loop detected — a URL repeats in the chain.');
   }
 
-  const hasTemporary = chain.some(h => [302, 303, 307].includes(h.status));
-  if (hasTemporary) {
+  if (chain.some(h => [302, 303, 307].includes(h.status) && h.kind !== 'internal')) {
     appendIndexRow(insightsEl, 'warning', 'Temporary redirect (302/307) in the chain — use 301 to pass SEO equity for permanent moves.');
   }
 
-  if (_redirectMeta) {
-    appendIndexRow(insightsEl, 'warning', `Meta-refresh redirect → ${_redirectMeta.url}${_redirectMeta.delay != null ? ` after ${_redirectMeta.delay}s` : ''} — a server 301 is better for SEO.`);
+  if (meta) {
+    appendIndexRow(insightsEl, 'warning', `Meta-refresh redirect → ${meta.url}${meta.delay != null ? ` after ${meta.delay}s` : ''} — a server 301 is better for SEO.`);
   }
 
-  const total = _redirectInfo && _redirectInfo.totalMs;
-  if (total != null) {
-    appendIndexRow(insightsEl, total > 1500 ? 'warning' : 'ok', `Total redirect+load time: ${total} ms.`);
+  if (totalMs != null) {
+    appendIndexRow(insightsEl, totalMs > 1500 ? 'warning' : 'ok', `Total redirect+load time: ${totalMs} ms.`);
   }
 }
+
+// The passive chain (what the browser actually did to arrive here), including a
+// pending meta-refresh the page itself will perform (content.js reports it).
+function tracedChain() {
+  const chain = ((_redirectInfo && _redirectInfo.chain) || []).map(h => ({ ...h }));
+  if (_redirectMeta && _redirectMeta.url) {
+    chain.push({ url: _redirectMeta.url, status: chain.length ? chain[chain.length - 1].status : 200, kind: 'client', metaDelay: _redirectMeta.delay, pending: true });
+  }
+  return chain;
+}
+
+// The actively-traced chain (re-requested by the background, follows every hop)
+function activeChain() {
+  return (_activeTrace && _activeTrace.hops) ? _activeTrace.hops.map(h => ({ ...h })) : [];
+}
+
+// What export / the export filename use: prefer the richer active trace
+function displayChain() {
+  const a = activeChain();
+  return a.length ? a : tracedChain();
+}
+
+// ─── Active trace lifecycle ──────────────────────────────────────────────────
+
+let _activeTrace = null;        // { startUrl, hops, finalUrl, error } | null
+let _activeTraceUrl = null;     // page URL the active trace was run for
+let _activeTraceLoading = false;
+
+async function ensureActiveTrace(force = false) {
+  let tab;
+  try { tab = await getActiveTab(); } catch { return; }
+  const url = tab && tab.url;
+
+  if (!url || !/^https?:/i.test(url)) {
+    if (_activeTrace || _activeTraceUrl) { _activeTrace = null; _activeTraceUrl = null; _activeTraceLoading = false; renderRedirectPanel(); }
+    return;
+  }
+  if (!force && _activeTraceUrl === url) return;   // already traced / in flight
+
+  _activeTraceUrl = url;
+  _activeTrace = null;
+  _activeTraceLoading = true;
+  renderRedirectPanel();
+
+  let res;
+  try { res = await browser.runtime.sendMessage({ action: 'traceUrl', pageUrl: url }); }
+  catch { res = { error: 'TRACE_FAILED', hops: [] }; }
+  if (_activeTraceUrl !== url) return;              // navigated away while tracing
+
+  _activeTrace = res;
+  _activeTraceLoading = false;
+  renderRedirectPanel();
+}
+
+function renderRedirectPanel() {
+  // ── Active trace (primary) ──
+  const chainEl    = document.getElementById('redirect-chain');
+  const insightsEl = document.getElementById('redirect-insights');
+  const bar        = document.getElementById('redirect-trace-bar');
+
+  if (_activeTraceLoading) {
+    bar.classList.add('hidden');
+    insightsEl.replaceChildren();
+    chainEl.replaceChildren();
+    appendIndexRow(chainEl, 'ok', 'Tracing the redirect chain…');
+  } else if (_activeTrace) {
+    if (_activeTrace.startUrl) {
+      document.getElementById('redirect-trace-from-url').textContent = _activeTrace.startUrl;
+      bar.classList.remove('hidden');
+    } else {
+      bar.classList.add('hidden');
+    }
+    const chain = activeChain();
+    renderHopChain(chainEl, chain, 'Could not trace this URL.' + (_activeTrace.error ? ` (${_activeTrace.error})` : ''));
+    renderChainInsights(insightsEl, chain, { totalMs: chain.length ? chain.reduce((s, h) => s + (h.ms || 0), 0) : null });
+  } else {
+    bar.classList.add('hidden');
+    insightsEl.replaceChildren();
+    chainEl.replaceChildren();
+    appendIndexRow(chainEl, 'warning', 'Open this tab on a web page to trace its redirects.');
+  }
+
+  // ── Passive trace (how you actually arrived this session) ──
+  const passive = document.getElementById('redirect-passive');
+  const pChain  = tracedChain();
+  if (pChain.length) {
+    passive.classList.remove('hidden');
+    renderHopChain(document.getElementById('redirect-passive-chain'), pChain, '');
+    renderChainInsights(document.getElementById('redirect-passive-insights'), pChain,
+      { totalMs: _redirectInfo && _redirectInfo.totalMs, meta: _redirectMeta });
+  } else {
+    passive.classList.add('hidden');
+  }
+
+  // Kick off (or refresh) the active trace for the current page
+  ensureActiveTrace();
+}
+
+document.getElementById('btn-redirect-retrace').addEventListener('click', () => ensureActiveTrace(true));
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
 function pad2(n) { return String(n).padStart(2, '0'); }
 
 function buildRedirectExportText() {
-  const chain = tracedChain();
+  const chain = displayChain();
   const now = new Date();
   const stamp = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
   const lines = [];
@@ -246,7 +340,7 @@ function buildRedirectExportText() {
 }
 
 async function exportRedirectTrace() {
-  const chain = tracedChain();
+  const chain = displayChain();
   let host = 'page';
   try { host = new URL(chain.length ? chain[chain.length - 1].url : (await getActiveTab()).url).hostname.replace(/\./g, '_'); } catch { /* keep default */ }
   const now = new Date();

@@ -36,6 +36,11 @@ function adsCost(n, currency) {
   return n.toFixed(2);
 }
 function adsPct(v) { return v == null ? '—' : `${Math.round(v * 100)}%`; }
+// Google Ads customer IDs are 10 digits, shown as XXX-XXX-XXXX
+function formatAdsId(id) {
+  const d = String(id).replace(/\D/g, '');
+  return d.length === 10 ? `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}` : String(id);
+}
 
 // Organic overlap: queries this page also ranks for in Search Console
 function adsOrganicSet() {
@@ -248,13 +253,21 @@ function buildAdsMetricTable(container, rows, { withQs = false } = {}) {
         : (_adsFilter.type === 'searchTerm' && _adsFilter.text === r.text && _adsFilter.adGroupId === r.adGroupId));
       row.className = 'ads-row ads-row--click' + (withQs ? ' ads-row--kw' : '') + (isActive ? ' ads-row--active' : '');
 
-      // term + chips on one line
+      // term + chips on one line; the term text itself opens a Google search
       const term = document.createElement('span');
       term.className = 'ads-cell-term';
       const label = document.createElement('span');
-      label.className = 'ads-term-text';
       label.textContent = withQs ? adsFormatKeyword(r.text, r.matchType) : (r.text || '(none)');
-      label.title = r.text || '';
+      if (r.text) {
+        label.className = 'ads-term-text ads-term-link';
+        label.title = `Search Google for “${r.text}”`;
+        label.addEventListener('click', (e) => {
+          e.stopPropagation();   // don't also trigger the row's cross-filter
+          browser.tabs.create({ url: `https://www.google.com/search?q=${encodeURIComponent(r.text)}` });
+        });
+      } else {
+        label.className = 'ads-term-text';
+      }
       term.appendChild(label);
       const chips = adsTermChips(r.text, organic);
       if (chips) term.appendChild(chips);
@@ -280,9 +293,38 @@ function buildAdsMetricTable(container, rows, { withQs = false } = {}) {
       });
       container.appendChild(row);
     });
+
+    // Search-term table loads the top 25 first; offer to pull the rest
+    if (!withQs && !_adsFilter && _adsData && _adsData.searchTermsLimited) {
+      const more = document.createElement('button');
+      more.className = 'gsc-more-queries-btn';
+      more.textContent = 'Request more';
+      more.addEventListener('click', () => requestMoreAdsSearchTerms(more));
+      container.appendChild(more);
+    }
   };
 
   render();
+}
+
+// Pull the full search-term list (beyond the initial top 25) and re-render
+async function requestMoreAdsSearchTerms(btn) {
+  btn.disabled = true;
+  btn.textContent = 'Loading…';
+  try {
+    const tab = await getActiveTab();
+    const res = await browser.runtime.sendMessage({ action: 'adsGetMoreSearchTerms', pageUrl: tab.url, range: adsSelectedRange });
+    if (res && res.searchTerms) {
+      _adsData.searchTerms = res.searchTerms;
+      _adsData.searchTermsLimited = res.searchTermsLimited;
+      const tt = document.getElementById('ads-terms-table');
+      tt._currency = _adsData.currency;
+      buildAdsMetricTable(tt, _adsData.searchTerms);
+      return;
+    }
+  } catch { /* fall through to re-enable */ }
+  btn.disabled = false;
+  btn.textContent = 'Request more';
 }
 
 // ─── Top chart + scorecards (same engine as GA/GSC) ────────────────────────────
@@ -517,8 +559,12 @@ function renderAdsAccountOptions(container, accounts, selected, onSelect) {
       radio.className = 'gsc-property-radio';
       const text = document.createElement('span');
       text.className = 'gsc-property-option-text';
-      text.textContent = `${acc.name} · #${acc.id}`;
+      text.textContent = acc.name;
       opt.append(radio, text);
+      const idEl = document.createElement('span');
+      idEl.className = 'gsc-property-id';
+      idEl.textContent = formatAdsId(acc.id);
+      opt.appendChild(idEl);
       opt.addEventListener('click', async () => {
         container.querySelectorAll('.gsc-property-option').forEach(el =>
           el.classList.toggle('gsc-property-option--active', el === opt));
@@ -607,11 +653,11 @@ async function refreshAdsAccountInfo() {
   // Collapse to the linked account (green) once chosen, like the GSC/GA boxes
   const sel = res.account && res.accounts.find(a => a.id === res.account);
   if (sel) {
-    renderSelectedRow(allEl, `${sel.name} · #${sel.id}`,
+    renderSelectedRow(allEl, sel.name,
       async () => {
         await browser.runtime.sendMessage({ action: 'adsSetAccount', host: _adsHost, account: null });
         renderAdsAccountOptions(allEl, res.accounts, null, null);
-      });
+      }, formatAdsId(sel.id));
     return;
   }
   renderAdsAccountOptions(allEl, res.accounts, res.account, null);
@@ -641,6 +687,7 @@ document.getElementById('btn-ads-connect').addEventListener('click', async () =>
 document.getElementById('ads-status-badge').addEventListener('click', async (e) => {
   if (!e.currentTarget.classList.contains('gsc-status-badge--connected')) return;
   await browser.runtime.sendMessage({ action: 'adsDisconnect' });
+  setAdsTokenState(false);   // return the token field to its editable state
   await refreshAdsSettingsStatus();
 });
 
@@ -662,7 +709,7 @@ function setAdsTokenState(hasToken) {
   input.type = 'password';
   input.value = '';
   input.readOnly = hasToken;
-  input.placeholder = hasToken ? '••••••••••••  saved' : 'Google Ads developer token';
+  input.placeholder = hasToken ? '••••••••••••' : 'Google Ads developer token';
   document.getElementById('ads-eye-open').classList.remove('hidden');
   document.getElementById('ads-eye-closed').classList.add('hidden');
 }
@@ -692,9 +739,6 @@ document.getElementById('btn-ads-save-config').addEventListener('click', async (
   await browser.storage.local.set(update);
   await browser.storage.local.remove('adsAccounts');
   if (!tokenInput.readOnly && typed) setAdsTokenState(true);
-  const saved = document.getElementById('ads-config-saved');
-  saved.classList.remove('hidden');
-  setTimeout(() => saved.classList.add('hidden'), 2000);
   // Collapse once the developer token is stored (Manager/MCC ID is optional)
   const { adsDeveloperToken } = await browser.storage.local.get('adsDeveloperToken');
   if (adsDeveloperToken) setAdsConfigCollapsed(true);

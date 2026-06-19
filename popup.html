@@ -142,42 +142,6 @@
 
     <section class="field-section">
       <div class="field-header">
-        <span class="field-label">WORDPRESS SITES</span>
-        <div class="field-header-actions">
-          <button class="info-tip" type="button" title="Use a WordPress Application Password (Users → Profile → Application Passwords) — never your account password. Lets the alt-text generator save directly to that site's Media Library.">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7.5" x2="8" y2="11"/><circle cx="8" cy="5" r="0.55" fill="currentColor" stroke="none"/>
-            </svg>
-          </button>
-          <button id="btn-add-wp-site" class="save-key-btn">+ Domain</button>
-        </div>
-      </div>
-      <div id="wp-sites-empty" class="field-hint hidden">No sites added yet.</div>
-      <div id="wp-sites-list" class="wp-sites-list"></div>
-
-      <div id="wp-site-form" class="wp-site-form hidden">
-        <label class="wp-field">
-          <span class="wp-field-label">Site URL</span>
-          <input type="text" id="wp-site-url" class="wp-input" placeholder="https://example.com" autocomplete="off" spellcheck="false" />
-        </label>
-        <label class="wp-field">
-          <span class="wp-field-label">Username</span>
-          <input type="text" id="wp-site-username" class="wp-input" placeholder="admin" autocomplete="off" spellcheck="false" />
-        </label>
-        <label class="wp-field">
-          <span class="wp-field-label">Application Password</span>
-          <input type="password" id="wp-site-app-password" class="wp-input" placeholder="xxxx xxxx xxxx xxxx xxxx xxxx" autocomplete="off" spellcheck="false" />
-        </label>
-        <div class="wp-form-actions">
-          <button id="btn-cancel-wp-site" class="settings-back-btn">Cancel</button>
-          <button id="btn-save-wp-site" class="save-key-btn">Save Site</button>
-        </div>
-      </div>
-
-    </section>
-
-    <section class="field-section">
-      <div class="field-header">
         <span class="field-label">GOOGLE SEARCH CONSOLE</span>
         <div class="field-header-actions">
           <button class="info-tip hidden" id="gsc-connected-tip" type="button" title="">
@@ -295,10 +259,6 @@
           <input type="text" id="ads-manager-id" class="wp-input" placeholder="123-456-7890" autocomplete="off" spellcheck="false" />
         </label>
         <button id="btn-ads-save-config" class="save-key-btn">Save</button>
-        <span class="key-saved-msg hidden" id="ads-config-saved">
-          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px"><polyline points="2 8 6 12 14 4"/></svg>
-          Saved
-        </span>
         </div>
 
         <div id="ads-config-collapsed" class="ads-config-collapsed hidden">
@@ -319,27 +279,38 @@
 
     <section class="field-section">
       <div class="field-header">
-        <span class="field-label">BRANDED TERMS</span>
-        <button id="btn-add-brand-domain" class="save-key-btn">+ Terms</button>
-      </div>
-      <div id="brand-domains-empty" class="field-hint hidden">No branded terms configured yet.</div>
-      <div id="brand-domains-list" class="wp-sites-list"></div>
-
-      <div id="brand-domain-form" class="wp-site-form hidden">
-        <label class="wp-field">
-          <span class="wp-field-label">Domain</span>
-          <input type="text" id="brand-domain-host" class="wp-input" placeholder="example.com" autocomplete="off" spellcheck="false" />
-        </label>
-        <label class="wp-field">
-          <span class="wp-field-label">Branded Terms (regex, case-insensitive)</span>
-          <input type="text" id="brand-domain-pattern" class="wp-input" placeholder="brand|brandname|bn|other" autocomplete="off" spellcheck="false" />
-        </label>
-        <div id="brand-domain-error" class="field-hint hint-red hidden"></div>
-        <div class="wp-form-actions">
-          <button id="btn-cancel-brand-domain" class="settings-back-btn">Cancel</button>
-          <button id="btn-save-brand-domain" class="save-key-btn">Save</button>
+        <span class="field-label">WORDPRESS SITES</span>
+        <div class="field-header-actions">
+          <button class="info-tip" type="button" title="Use a WordPress Application Password (Users → Profile → Application Passwords) — never your account password. Lets the alt-text generator save directly to that site's Media Library.">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7.5" x2="8" y2="11"/><circle cx="8" cy="5" r="0.55" fill="currentColor" stroke="none"/>
+            </svg>
+          </button>
+          <button id="btn-add-wp-site" class="save-key-btn">+ Domain</button>
         </div>
       </div>
+      <div id="wp-sites-empty" class="field-hint hidden">No sites added yet.</div>
+      <div id="wp-sites-list" class="wp-sites-list"></div>
+
+      <div id="wp-site-form" class="wp-site-form hidden">
+        <label class="wp-field">
+          <span class="wp-field-label">Site URL</span>
+          <input type="text" id="wp-site-url" class="wp-input" placeholder="https://example.com" autocomplete="off" spellcheck="false" />
+        </label>
+        <label class="wp-field">
+          <span class="wp-field-label">Username</span>
+          <input type="text" id="wp-site-username" class="wp-input" placeholder="admin" autocomplete="off" spellcheck="false" />
+        </label>
+        <label class="wp-field">
+          <span class="wp-field-label">Application Password</span>
+          <input type="password" id="wp-site-app-password" class="wp-input" placeholder="xxxx xxxx xxxx xxxx xxxx xxxx" autocomplete="off" spellcheck="false" />
+        </label>
+        <div class="wp-form-actions">
+          <button id="btn-cancel-wp-site" class="settings-back-btn">Cancel</button>
+          <button id="btn-save-wp-site" class="save-key-btn">Save Site</button>
+        </div>
+      </div>
+
     </section>
 
     <section class="field-section">
@@ -372,6 +343,31 @@
         </svg>
         Ranges saved
       </p>
+    </section>
+
+    <section class="field-section">
+      <div class="field-header">
+        <span class="field-label">BRANDED TERMS</span>
+        <button id="btn-add-brand-domain" class="save-key-btn">+ Terms</button>
+      </div>
+      <div id="brand-domains-empty" class="field-hint hidden">No branded terms configured yet.</div>
+      <div id="brand-domains-list" class="wp-sites-list"></div>
+
+      <div id="brand-domain-form" class="wp-site-form hidden">
+        <label class="wp-field">
+          <span class="wp-field-label">Domain</span>
+          <input type="text" id="brand-domain-host" class="wp-input" placeholder="example.com" autocomplete="off" spellcheck="false" />
+        </label>
+        <label class="wp-field">
+          <span class="wp-field-label">Branded Terms (regex, case-insensitive)</span>
+          <input type="text" id="brand-domain-pattern" class="wp-input" placeholder="brand|brandname|bn|other" autocomplete="off" spellcheck="false" />
+        </label>
+        <div id="brand-domain-error" class="field-hint hint-red hidden"></div>
+        <div class="wp-form-actions">
+          <button id="btn-cancel-brand-domain" class="settings-back-btn">Cancel</button>
+          <button id="btn-save-brand-domain" class="save-key-btn">Save</button>
+        </div>
+      </div>
     </section>
 
   </div>

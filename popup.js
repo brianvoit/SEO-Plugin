@@ -39,13 +39,24 @@ if (IS_SIDEBAR || IS_WINDOW) {
     }, 400);
   };
 
-  browser.tabs.onActivated.addListener(scheduleFollowRefresh);
+  // The redirect trace is deliberately independent of follow-active-tab: the
+  // status pill and trace should ALWAYS reflect the tab you're actually on, so
+  // you never miss a redirect chain. When following is on, loadData() already
+  // refreshes it, so this only does the work when following is off.
+  const refreshRedirectIndependent = () => {
+    if (followEnabled) return;
+    getActiveTab()
+      .then(tab => { if (tab) renderRedirectStatus(tab.id, null); })
+      .catch(() => {});
+  };
+
+  browser.tabs.onActivated.addListener(() => { scheduleFollowRefresh(); refreshRedirectIndependent(); });
   browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (tab.active && changeInfo.status === 'complete') scheduleFollowRefresh();
+    if (tab.active && changeInfo.status === 'complete') { scheduleFollowRefresh(); refreshRedirectIndependent(); }
   });
   // Pop-out: switching focus between browser windows changes the target tab
   browser.windows.onFocusChanged.addListener(windowId => {
-    if (IS_WINDOW && windowId !== browser.windows.WINDOW_ID_NONE) scheduleFollowRefresh();
+    if (IS_WINDOW && windowId !== browser.windows.WINDOW_ID_NONE) { scheduleFollowRefresh(); refreshRedirectIndependent(); }
   });
 }
 

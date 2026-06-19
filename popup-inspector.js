@@ -232,10 +232,11 @@ function renderCanonical(data) {
     chip.className = 'canonical-chip ' + (selfRef ? 'canonical-chip--ok' : 'canonical-chip--warn');
   } else {
     el.textContent = 'None';
-    el.className = 'field-value is-none';
-    el.title = '';
+    el.className = 'field-value is-missing';
+    el.title = 'No canonical tag found on this page';
     store.canonical = '';
-    chip.className = 'canonical-chip hidden';
+    chip.textContent = 'Missing';
+    chip.className = 'canonical-chip canonical-chip--err';
   }
 }
 

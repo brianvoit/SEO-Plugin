@@ -39,16 +39,29 @@ jobs:
             --approval-timeout=1800000 \
             --ignore-files=".github/**" ".gitignore" ".git/**"
 
+      # AMO names the signed file after the add-on's internal id (e.g.
+      # 4f3e…-1.31.xpi). Rename it to something recognizable on the release page.
+      - name: Rename signed XPI
+        id: xpi
+        run: |
+          VERSION=$(jq -r '.version' manifest.json)
+          SRC=$(ls web-ext-artifacts/*.xpi | head -n1)
+          DEST="web-ext-artifacts/seo-inspector-v${VERSION}.xpi"
+          mv "$SRC" "$DEST"
+          echo "name=seo-inspector-v${VERSION}.xpi" >> "$GITHUB_OUTPUT"
+          echo "path=$DEST" >> "$GITHUB_OUTPUT"
+          echo "Renamed $(basename "$SRC") -> $(basename "$DEST")"
+
       - name: Upload XPI as artifact
         uses: actions/upload-artifact@v7
         with:
           name: seo-inspector-signed
-          path: web-ext-artifacts/*.xpi
+          path: ${{ steps.xpi.outputs.path }}
           retention-days: 90
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
-          files: web-ext-artifacts/*.xpi
+          files: ${{ steps.xpi.outputs.path }}
           generate_release_notes: true

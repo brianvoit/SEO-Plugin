@@ -1460,6 +1460,8 @@ const GA_ADS_API = 'https://googleads.googleapis.com/v21';
 const ADS_ACCOUNTS_STALE_MS = 7 * 24 * 60 * 60 * 1000;
 const ADS_STALE_MS = 6 * 60 * 60 * 1000;
 const ADS_DEBOUNCE_MS = 60 * 1000;
+const ADS_SEARCH_TERM_LIMIT = 25;        // initial top-N search terms; "Request More" pulls the rest
+const ADS_SEARCH_TERM_MAX = 200;
 
 function adsDigits(id) { return String(id || '').replace(/\D/g, ''); }
 
@@ -1721,7 +1723,8 @@ async function adsGetPageData({ pageUrl, range, forceRefresh }) {
     adsSearch(accessToken, customerId,
       `SELECT search_term_view.search_term, ad_group.id, segments.keyword.info.text,
               metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
-       FROM search_term_view WHERE ${dateWhere} AND ad_group.id IN ${agList}`),
+       FROM search_term_view WHERE ${dateWhere} AND ad_group.id IN ${agList}
+       ORDER BY metrics.impressions DESC LIMIT ${ADS_SEARCH_TERM_LIMIT}`),
     adsSearch(accessToken, customerId,
       `SELECT segments.date, ad_group.id, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
        FROM ad_group WHERE ${dateWhere} AND ad_group.id IN ${agList}`),
@@ -1768,9 +1771,54 @@ async function adsGetPageData({ pageUrl, range, forceRefresh }) {
   const previousTotals = adsSumMetrics(prevRes.rows || []);
   const currency = custRes.rows?.[0]?.customer?.currencyCode || '';
 
-  const entry = { fetchedAt: Date.now(), account: customerId, range, path, ads, campaigns, keywords, searchTerms, tsRows, timeseries, totals, previousTotals, currency };
+  // True when the search-term query hit the cap — the popup offers "Request More"
+  const searchTermsLimited = (stRes.rows || []).length >= ADS_SEARCH_TERM_LIMIT;
+
+  const entry = { fetchedAt: Date.now(), account: customerId, range, path, ads, campaigns, keywords, searchTerms, searchTermsLimited, tsRows, timeseries, totals, previousTotals, currency };
   cache[cacheKey] = entry; await gscPruneCache(cache); await browser.storage.local.set({ adsCache: cache });
   return { connected: true, ...entry, fromCache: false };
+}
+
+// "Request More" search terms: re-query the page's serving ad groups for the
+// full top-N list (the initial page fetch caps at ADS_SEARCH_TERM_LIMIT).
+async function adsGetMoreSearchTerms({ pageUrl, range }) {
+  const tokenResult = await adsGetAccessToken();
+  if (tokenResult.error) return { error: tokenResult.error };
+  const accessToken = tokenResult.accessToken;
+  const host = gscPageHost(pageUrl);
+  const customerId = await adsGetAccount(host);
+  if (!customerId) return { error: 'NO_ACCOUNT' };
+
+  // Serving ad-group ids for this page come from the cached page data
+  let path = '/';
+  try { path = new URL(pageUrl).pathname; } catch { /* root */ }
+  const { adsCache } = await browser.storage.local.get('adsCache');
+  const cached = (adsCache || {})[`${host}::${path}::${range}`];
+  const adGroupIds = [...new Set((cached?.ads || []).map(a => a.adGroupId).filter(Boolean))];
+  if (!adGroupIds.length) return { error: 'NO_ACCOUNT' };
+
+  const { startDate, endDate } = adsDateRange(range);
+  const res = await adsSearch(accessToken, customerId,
+    `SELECT search_term_view.search_term, ad_group.id, segments.keyword.info.text,
+            metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
+     FROM search_term_view WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'
+     AND ad_group.id IN (${adGroupIds.join(',')})
+     ORDER BY metrics.impressions DESC LIMIT ${ADS_SEARCH_TERM_MAX}`);
+  if (res.error) return { error: res.error, detail: res.detail };
+  const searchTerms = (res.rows || []).map(r => ({
+    text: r.searchTermView?.searchTerm || '',
+    adGroupId: String(r.adGroup?.id || ''),
+    keyword: r.segments?.keyword?.info?.text || '',
+    ...adsMetrics(r.metrics)
+  }));
+
+  // Update the cache so the expanded set survives a re-render
+  if (cached) {
+    cached.searchTerms = searchTerms;
+    cached.searchTermsLimited = searchTerms.length >= ADS_SEARCH_TERM_MAX;
+    await browser.storage.local.set({ adsCache });
+  }
+  return { searchTerms, searchTermsLimited: searchTerms.length >= ADS_SEARCH_TERM_MAX };
 }
 
 // Scoped daily timeseries for the chart when a keyword or search term is
@@ -1837,6 +1885,7 @@ browser.runtime.onMessage.addListener((message) => {
     case 'adsSetAccount':      return adsSetAccount(message);
     case 'adsGetPageData':     return adsGetPageData(message);
     case 'adsGetChartData':    return adsGetChartData(message);
+    case 'adsGetMoreSearchTerms': return adsGetMoreSearchTerms(message);
     case 'getRedirectInfo':    return getRedirectInfo(message);
     case 'getTargetTab':       return getTargetTab();
     case 'openPopout':         return openPopoutWindow();

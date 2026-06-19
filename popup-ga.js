@@ -151,13 +151,28 @@ function renderGaNextPages(pages) {
     const path = document.createElement('span');
     path.className = 'ga-next-path';
     path.textContent = p.path;
-    path.title = p.title ? `${p.title}\n${p.path}` : p.path;
+    const url = gaNextPageUrl(p.path);
+    if (url) {
+      path.classList.add('ga-next-link');
+      path.title = (p.title ? `${p.title}\n` : '') + `Open ${url}`;
+      path.addEventListener('click', () => browser.tabs.create({ url }));
+    } else {
+      path.title = p.title ? `${p.title}\n${p.path}` : p.path;
+    }
     const views = document.createElement('span');
     views.className = 'ga-channel-num';
     views.textContent = Math.round(p.pageviews).toLocaleString();
     row.append(path, views);
     list.appendChild(row);
   });
+}
+
+// Build an absolute URL for a GA4 page path on the current host
+function gaNextPageUrl(path) {
+  if (!path) return null;
+  if (/^https?:\/\//i.test(path)) return path;
+  if (!_gaHost) return null;
+  return `https://${_gaHost}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
 // ─── Channel cross-filter (chart + scorecards) ──────────────────────────────────
@@ -312,7 +327,7 @@ function renderGaPropertyOptions(container, properties, selected, onSelect, opts
       radio.className = 'gsc-property-radio';
       const text = document.createElement('span');
       text.className = 'gsc-property-option-text';
-      text.textContent = `${p.displayName} · ${p.property.replace('properties/', '#')}`;
+      text.textContent = p.displayName;
       opt.append(radio, text);
 
       if (p.property === detected) {
@@ -322,6 +337,11 @@ function renderGaPropertyOptions(container, properties, selected, onSelect, opts
         chip.title = opts.detectedId ? `Detected ${opts.detectedId} on this page` : 'Detected on this page';
         opt.appendChild(chip);
       }
+
+      const idEl = document.createElement('span');
+      idEl.className = 'gsc-property-id';
+      idEl.textContent = p.property.replace('properties/', '#');
+      opt.appendChild(idEl);
 
       opt.addEventListener('click', async () => {
         container.querySelectorAll('.gsc-property-option').forEach(el =>
@@ -435,11 +455,11 @@ async function refreshGaPropertyInfo() {
   const selected = res.property || res.detectedProperty;
   const sel = selected && res.properties.find(p => p.property === selected);
   if (sel) {
-    renderSelectedRow(allEl, `${sel.displayName} · ${sel.property.replace('properties/', '#')}`,
+    renderSelectedRow(allEl, sel.displayName,
       async () => {
         await browser.runtime.sendMessage({ action: 'gaSetProperty', host: _gaHost, property: null });
         renderGaPropertyOptions(allEl, res.properties, null, null, { detectedProperty: res.detectedProperty, detectedId: res.detectedId });
-      });
+      }, sel.property.replace('properties/', '#'));
     return;
   }
 
@@ -449,7 +469,7 @@ async function refreshGaPropertyInfo() {
 
 // Collapsed single-row view of the linked account/property (mirrors the GSC
 // connected box). The trash unlinks this domain and brings the picker back.
-function renderSelectedRow(container, label, onTrash) {
+function renderSelectedRow(container, label, onTrash, id) {
   container.replaceChildren();
   const row = document.createElement('div');
   row.className = 'gsc-property-row';
@@ -461,6 +481,12 @@ function renderSelectedRow(container, label, onTrash) {
   text.className = 'gsc-property-option-text';
   text.textContent = label;
   opt.append(radio, text);
+  if (id) {
+    const idEl = document.createElement('span');
+    idEl.className = 'gsc-property-id';
+    idEl.textContent = id;
+    opt.appendChild(idEl);
+  }
   row.appendChild(opt);
   if (onTrash) row.appendChild(propertyTrashButton('Unlink this domain', onTrash));
   container.appendChild(row);

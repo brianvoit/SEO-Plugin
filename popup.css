@@ -1239,10 +1239,23 @@ body.settings-open #update-footer { margin-top: auto; }
   position: relative;
 }
 .gsc-property-option-text {
+  flex: 1;
+  min-width: 0;
   font-size: 11px;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   color: var(--text);
   word-break: break-all;
+}
+/* Account/property number, right-aligned at the end of the row */
+.gsc-property-id {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-left: 10px;
+  font-size: 11px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 /* Associated/selected property reads green (a confirmed connection) */
 .gsc-property-option--active {
@@ -1354,6 +1367,8 @@ body.settings-open #update-footer { margin-top: auto; }
 /* term + chips share one line, wrapping only when cramped */
 .ads-cell-term { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .ads-term-text { color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ads-term-link { cursor: pointer; }
+.ads-term-link:hover { color: var(--accent); text-decoration: underline; }
 .ads-cell-num {
   text-align: right;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
@@ -1429,6 +1444,8 @@ body.settings-open #update-footer { margin-top: auto; }
 }
 .canonical-chip--ok   { color: var(--hint-green); border-color: var(--hint-green); }
 .canonical-chip--warn { color: var(--hint-amber); border-color: var(--hint-amber); }
+.canonical-chip--err  { color: var(--hint-red);   border-color: var(--hint-red); }
+.field-value.is-missing { color: var(--hint-red); font-weight: 600; }
 
 .field-value--link { cursor: pointer; }
 .field-value--link:hover { color: var(--accent); text-decoration: underline; }
@@ -1567,6 +1584,8 @@ body.settings-open #update-footer { margin-top: auto; }
 }
 .ga-next-row:last-child { border-bottom: none; }
 .ga-next-path { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ga-next-link { cursor: pointer; }
+.ga-next-link:hover { color: var(--accent); text-decoration: underline; }
 
 .gsc-status-badge {
   font-size: 10px; font-weight: 700; padding: 2px 10px; border-radius: 10px;

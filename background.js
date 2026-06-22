@@ -2120,6 +2120,21 @@ async function webceoGetRankings({ pageUrl, historyDepth = 2, forceRefresh = fal
   return { connected: true, ...entry, fromCache: false };
 }
 
+// Add tracked keyword(s) to this domain's project (Search tab "+ Track" chip).
+async function webceoAddKeywords({ pageUrl, keywords }) {
+  const list = (Array.isArray(keywords) ? keywords : [keywords]).map(k => String(k || '').trim()).filter(Boolean);
+  if (!list.length) return { error: 'NO_KEYWORDS' };
+  const resolved = await webceoResolveProject({ pageUrl });
+  if (!resolved.connected) return { connected: false };
+  if (resolved.error) return { connected: true, error: resolved.error, detail: resolved.detail };
+  if (!resolved.project) return { connected: true, error: 'NO_PROJECT' };
+
+  const res = await webceoCall('add_rankings_keywords', { project: resolved.project, keywords: list });
+  if (res.error) return { connected: true, error: res.error, detail: res.detail };
+  await browser.storage.local.remove('webceoCache');   // rankings now stale
+  return { connected: true, ok: true, added: list, project: resolved.project };
+}
+
 function webceoSaveConfig({ apiKey, baseUrl }) {
   const update = {};
   if (apiKey !== undefined) update.webceoApiKey = apiKey;
@@ -2174,6 +2189,7 @@ browser.runtime.onMessage.addListener((message) => {
     case 'webceoResolveProject': return webceoResolveProject(message);
     case 'webceoSetProject':     return webceoSetProject(message);
     case 'webceoGetRankings':    return webceoGetRankings(message);
+    case 'webceoAddKeywords':    return webceoAddKeywords(message);
     default: return undefined;
   }
 });

@@ -23,30 +23,90 @@ function webceoErrorMessage(error, detail) {
 
 // ─── Formatting ─────────────────────────────────────────────────────────────
 
-function webceoPos(p) { return p == null ? '—' : String(p); }
+function webceoRanked(p) { return p != null && p > 0; }   // 0/null = not in tracked results
+function webceoPos(p) { return webceoRanked(p) ? String(p) : '—'; }
 function webceoVol(v) { return v == null ? '—' : Math.round(v).toLocaleString(); }
 
-// Position change: lower is better, so previous − current (positive = improved)
+// Position change cell: lower is better, so previous − current (positive = up)
 function webceoChangeEl(current, previous) {
   const el = document.createElement('span');
   el.className = 'ranking-change';
-  if (current == null || previous == null) { el.textContent = previous == null && current != null ? 'new' : ''; return el; }
-  const delta = previous - current;
-  if (delta === 0) { el.textContent = '–'; return el; }
-  el.textContent = `${delta > 0 ? '▲' : '▼'} ${Math.abs(delta)}`;
+  const c = webceoRanked(current) ? current : null;
+  const p = webceoRanked(previous) ? previous : null;
+  if (c == null) return el;                                  // not ranked → blank
+  if (p == null) { el.textContent = 'new'; el.classList.add('ranking-change--up'); return el; }
+  const delta = p - c;
+  if (delta === 0) return el;
+  el.textContent = `${delta > 0 ? '▲' : '▼'}${Math.abs(delta)}`;
   el.classList.add(delta > 0 ? 'ranking-change--up' : 'ranking-change--down');
   return el;
 }
 
-function webceoMobileChip(mobile) {
-  if (!mobile) return null;
-  const chip = document.createElement('span');
-  chip.className = 'ranking-se-chip';
-  chip.textContent = mobile === 2 ? 'tablet' : 'mobile';
-  return chip;
+// Engine identity (search engine + device) for the pivoted columns
+function webceoEngineKey(r) {
+  const se = (r.se || '').trim() || 'SE';
+  return r.mobile ? `${se} ${r.mobile === 2 ? 'tablet' : 'mobile'}` : se;
+}
+function webceoEngineLabel(eng) { return eng.replace(/\b\w/g, c => c.toUpperCase()); }
+
+// ─── Chart: avg position over scans (click a row to focus one keyword) ───────
+
+let _webceoSelectedKeyword = null;
+
+const RANKING_METRICS = {
+  position: { label: 'Avg position', invertY: true, format: v => (Math.round(v * 10) / 10).toString() }
+};
+
+// Average ranked position per scan date across the rows in scope
+function webceoChartSeries(selectedKeyword) {
+  const byDate = {};
+  ((_webceoData && _webceoData.rows) || []).forEach(r => {
+    if (selectedKeyword && r.keyword !== selectedKeyword) return;
+    (r.history || []).forEach(pt => {
+      if (!webceoRanked(pt.pos)) return;
+      if (!byDate[pt.date]) byDate[pt.date] = { date: pt.date, sum: 0, n: 0 };
+      byDate[pt.date].sum += pt.pos; byDate[pt.date].n++;
+    });
+  });
+  return Object.keys(byDate).sort().map(d => ({ date: d, position: byDate[d].sum / byDate[d].n }));
 }
 
-// ─── Tab: rankings table ─────────────────────────────────────────────────────
+function renderRankingChart() {
+  const container = document.getElementById('ranking-chart');
+  if (!container) return;
+  document.getElementById('ranking-chart-label').textContent =
+    _webceoSelectedKeyword ? `“${_webceoSelectedKeyword}”` : 'AVERAGE POSITION';
+  document.getElementById('btn-ranking-chart-clear').classList.toggle('hidden', !_webceoSelectedKeyword);
+
+  const series = webceoChartSeries(_webceoSelectedKeyword);
+  if (series.length < 2) {
+    const hint = document.createElement('div');
+    hint.className = 'field-hint';
+    hint.textContent = series.length === 1
+      ? 'Only one scan so far — the trend appears after the next scan.'
+      : 'No ranked positions to chart yet.';
+    container.replaceChildren(hint);
+    return;
+  }
+  const width = container.clientWidth || 320;
+  const built = buildCombinedChart(series, { position: true }, { width, metrics: RANKING_METRICS });
+  container.replaceChildren(svgFromString(built.svg));
+  attachChartHover(container.querySelector('svg'), series, { position: true }, built);
+}
+
+if (window.ResizeObserver) {
+  let raf = null;
+  new ResizeObserver(() => { if (raf) return; raf = requestAnimationFrame(() => { raf = null; renderRankingChart(); }); })
+    .observe(document.getElementById('ranking-chart'));
+}
+
+document.getElementById('btn-ranking-chart-clear').addEventListener('click', () => {
+  _webceoSelectedKeyword = null;
+  renderRankingChart();
+  renderRankingTable();
+});
+
+// ─── Tab: rankings table (pivoted — one column per search engine) ────────────
 
 function setWebceoDepthUI(depth) {
   document.querySelectorAll('#ranking-depth-group .mode-option').forEach(btn =>
@@ -64,118 +124,130 @@ function webceoUrlIsThisPage(url) {
   } catch { return false; }
 }
 
-const RANKING_GRID = '1fr 70px 44px 44px 56px';
+// Group flat rows (keyword × engine) into one row per keyword, engines as columns
+function webceoPivot(rows) {
+  const map = new Map();
+  const engineSet = new Set();
+  rows.forEach(r => {
+    const eng = webceoEngineKey(r);
+    engineSet.add(eng);
+    if (!map.has(r.keyword)) map.set(r.keyword, { keyword: r.keyword, volume: null, starred: false, engines: {} });
+    const g = map.get(r.keyword);
+    if (r.volume != null) g.volume = Math.max(g.volume == null ? 0 : g.volume, r.volume);
+    if (r.starred) g.starred = true;
+    g.engines[eng] = { position: r.position, previous: r.previous, url: r.url };
+  });
+  return { keywords: [...map.values()], engines: [...engineSet].sort() };
+}
 
-function buildRankingTable(container, rows) {
+function webceoKeywordOnPage(kw) {
+  return Object.values(kw.engines).some(e => webceoUrlIsThisPage(e.url));
+}
+
+let _rankSort = { column: 'volume', dir: 'desc' };
+
+function renderRankingTable() {
+  const container = document.getElementById('ranking-table');
   container.replaceChildren();
-  if (!container._sort) container._sort = { column: 'position', dir: 'asc' };
-  const sort = container._sort;
+  const { keywords, engines } = webceoPivot((_webceoData && _webceoData.rows) || []);
+  const grid = `1fr ${engines.map(() => '58px').join(' ')} 52px`;
 
-  const cols = [
-    { key: 'keyword', label: 'Keyword', term: true },
-    { key: 'se', label: 'Engine' },
-    { key: 'position', label: 'Pos' },
-    { key: 'change', label: 'Δ' },
-    { key: 'volume', label: 'Vol' }
-  ];
-
-  const render = () => {
-    container.replaceChildren();
-
-    const header = document.createElement('div');
-    header.className = 'ranking-row ranking-row--header';
-    cols.forEach(c => {
-      const cell = document.createElement('span');
-      cell.className = (c.term ? 'ranking-cell-term' : 'ranking-cell-num') + ' ads-sort';
-      const active = sort.column === c.key;
-      cell.textContent = c.label + (active ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
-      cell.addEventListener('click', () => {
-        if (sort.column === c.key) sort.dir = sort.dir === 'asc' ? 'desc' : 'asc';
-        else { sort.column = c.key; sort.dir = c.key === 'keyword' ? 'asc' : (c.key === 'position' ? 'asc' : 'desc'); }
-        render();
-      });
-      header.appendChild(cell);
+  const header = document.createElement('div');
+  header.className = 'ranking-row ranking-row--header';
+  header.style.gridTemplateColumns = grid;
+  const cols = [{ key: 'keyword', label: 'Keyword', term: true }]
+    .concat(engines.map(e => ({ key: 'eng:' + e, label: webceoEngineLabel(e) })))
+    .concat([{ key: 'volume', label: 'Vol' }]);
+  cols.forEach(c => {
+    const cell = document.createElement('span');
+    cell.className = (c.term ? 'ranking-cell-term' : 'ranking-cell-num') + ' ads-sort';
+    const active = _rankSort.column === c.key;
+    cell.textContent = c.label + (active ? (_rankSort.dir === 'asc' ? ' ▲' : ' ▼') : '');
+    cell.addEventListener('click', () => {
+      if (_rankSort.column === c.key) _rankSort.dir = _rankSort.dir === 'asc' ? 'desc' : 'asc';
+      else { _rankSort.column = c.key; _rankSort.dir = c.key === 'keyword' ? 'asc' : (c.key.startsWith('eng:') ? 'asc' : 'desc'); }
+      renderRankingTable();
     });
-    container.appendChild(header);
+    header.appendChild(cell);
+  });
+  container.appendChild(header);
 
-    const visible = rows.filter(r => !_webceoOnPageOnly || webceoUrlIsThisPage(r.url));
-    const sorted = visible.slice().sort((a, b) => {
-      if (sort.column === 'keyword' || sort.column === 'se') {
-        const av = (a[sort.column] || '').toLowerCase(), bv = (b[sort.column] || '').toLowerCase();
-        return sort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
-      }
-      // numeric: position (null = worst), change (prev-cur), volume
-      const val = r => {
-        if (sort.column === 'change') return (r.previous != null && r.position != null) ? (r.previous - r.position) : -Infinity;
-        const v = r[sort.column];
-        if (v == null) return sort.column === 'position' ? Infinity : -Infinity;   // unranked sorts last by position
-        return v;
-      };
-      const av = val(a), bv = val(b);
-      return sort.dir === 'asc' ? av - bv : bv - av;
-    });
-
-    if (!sorted.length) {
-      document.getElementById('ranking-empty').classList.remove('hidden');
-      return;
+  const engPos = (k, eng) => { const e = k.engines[eng]; return (e && webceoRanked(e.position)) ? e.position : null; };
+  const visible = keywords.filter(k => !_webceoOnPageOnly || webceoKeywordOnPage(k));
+  visible.sort((a, b) => {
+    if (_rankSort.column === 'keyword') {
+      const r = (a.keyword || '').toLowerCase().localeCompare((b.keyword || '').toLowerCase());
+      return _rankSort.dir === 'asc' ? r : -r;
     }
-    document.getElementById('ranking-empty').classList.add('hidden');
+    const val = k => {
+      if (_rankSort.column === 'volume') return k.volume == null ? -Infinity : k.volume;
+      const p = engPos(k, _rankSort.column.slice(4));
+      return p == null ? Infinity : p;          // unranked sorts last when asc by position
+    };
+    const av = val(a), bv = val(b);
+    return _rankSort.dir === 'asc' ? av - bv : bv - av;
+  });
 
-    sorted.forEach(r => {
-      const row = document.createElement('div');
-      row.className = 'ranking-row';
-      if (webceoUrlIsThisPage(r.url)) row.classList.add('ranking-row--onpage');
+  if (!visible.length) { document.getElementById('ranking-empty').classList.remove('hidden'); return; }
+  document.getElementById('ranking-empty').classList.add('hidden');
 
-      // keyword (opens a Google search) + on-page marker
-      const term = document.createElement('span');
-      term.className = 'ranking-cell-term';
-      const kw = document.createElement('span');
-      kw.className = 'ranking-keyword ads-term-link';
-      kw.textContent = r.keyword;
-      kw.title = `Search Google for “${r.keyword}”` + (r.url ? `\nRanking URL: ${r.url}` : '');
-      kw.addEventListener('click', () => browser.tabs.create({ url: `https://www.google.com/search?q=${encodeURIComponent(r.keyword)}` }));
-      term.appendChild(kw);
-      if (r.starred) { const s = document.createElement('span'); s.className = 'ranking-star'; s.textContent = '★'; term.appendChild(s); }
-      row.appendChild(term);
+  visible.forEach(k => {
+    const row = document.createElement('div');
+    row.className = 'ranking-row ranking-row--click';
+    row.style.gridTemplateColumns = grid;
+    if (webceoKeywordOnPage(k)) row.classList.add('ranking-row--onpage');
+    if (_webceoSelectedKeyword === k.keyword) row.classList.add('ranking-row--selected');
 
-      // engine (+ location title, mobile chip)
-      const se = document.createElement('span');
-      se.className = 'ranking-cell-num ranking-se';
-      se.textContent = r.se || '—';
-      if (r.location) se.title = r.location;
-      const mc = webceoMobileChip(r.mobile);
-      if (mc) se.appendChild(mc);
-      row.appendChild(se);
+    // keyword (text opens a Google search; the row selects the chart)
+    const term = document.createElement('span');
+    term.className = 'ranking-cell-term';
+    const kw = document.createElement('span');
+    kw.className = 'ranking-keyword ads-term-link';
+    kw.textContent = k.keyword;
+    kw.title = `Search Google for “${k.keyword}”`;
+    kw.addEventListener('click', (e) => { e.stopPropagation(); browser.tabs.create({ url: `https://www.google.com/search?q=${encodeURIComponent(k.keyword)}` }); });
+    term.appendChild(kw);
+    if (k.starred) { const s = document.createElement('span'); s.className = 'ranking-star'; s.textContent = '★'; term.appendChild(s); }
+    row.appendChild(term);
 
-      const pos = document.createElement('span');
-      pos.className = 'ranking-cell-num ranking-pos';
-      pos.textContent = webceoPos(r.position);
-      row.appendChild(pos);
-
-      const change = webceoChangeEl(r.position, r.previous);
-      change.classList.add('ranking-cell-num');
-      row.appendChild(change);
-
-      const vol = document.createElement('span');
-      vol.className = 'ranking-cell-num';
-      vol.textContent = webceoVol(r.volume);
-      row.appendChild(vol);
-
-      container.appendChild(row);
+    engines.forEach(eng => {
+      const cell = document.createElement('span');
+      cell.className = 'ranking-cell-num ranking-engine-cell';
+      const e = k.engines[eng];
+      if (e && webceoRanked(e.position)) {
+        const pos = document.createElement('span');
+        pos.className = 'ranking-pos';
+        pos.textContent = e.position;
+        cell.appendChild(pos);
+        const ch = webceoChangeEl(e.position, e.previous);
+        if (ch.textContent) cell.appendChild(ch);
+      } else {
+        cell.textContent = '—';
+      }
+      row.appendChild(cell);
     });
-  };
 
-  render();
+    const vol = document.createElement('span');
+    vol.className = 'ranking-cell-num';
+    vol.textContent = webceoVol(k.volume);
+    row.appendChild(vol);
+
+    row.addEventListener('click', () => selectRankingKeyword(k.keyword));
+    container.appendChild(row);
+  });
+}
+
+function selectRankingKeyword(keyword) {
+  _webceoSelectedKeyword = (_webceoSelectedKeyword === keyword) ? null : keyword;
+  renderRankingTable();
+  renderRankingChart();
 }
 
 function renderWebceoPanel(response) {
   const ids = ['ranking-no-key', 'ranking-no-project', 'ranking-error', 'ranking-data'];
   ids.forEach(id => document.getElementById(id).classList.add('hidden'));
 
-  if (!response || !response.connected) {
-    document.getElementById('ranking-no-key').classList.remove('hidden');
-    return;
-  }
+  if (!response || !response.connected) { document.getElementById('ranking-no-key').classList.remove('hidden'); return; }
   if (response.error === 'NO_PROJECT') {
     if (response.host) _webceoHost = response.host;
     loadWebceoProjectPicker(document.getElementById('ranking-project-picker'));
@@ -189,11 +261,14 @@ function renderWebceoPanel(response) {
   }
 
   _webceoData = response;
+  _webceoSelectedKeyword = null;
   setWebceoDepthUI(webceoSelectedDepth);
   document.getElementById('ranking-onpage-only').checked = _webceoOnPageOnly;
+  const kwCount = new Set((response.rows || []).map(r => r.keyword)).size;
   document.getElementById('ranking-meta').textContent =
-    `${response.projectName || response.domain || ''} · ${(response.rows || []).length} keyword rows · Updated ${gscRelativeTime(response.fetchedAt)}`;
-  buildRankingTable(document.getElementById('ranking-table'), response.rows || []);
+    `${response.projectName || response.domain || ''} · ${kwCount} keywords · Updated ${gscRelativeTime(response.fetchedAt)}`;
+  renderRankingChart();
+  renderRankingTable();
   document.getElementById('ranking-data').classList.remove('hidden');
 }
 
@@ -218,7 +293,7 @@ document.querySelectorAll('#ranking-depth-group .mode-option').forEach(btn => {
 
 document.getElementById('ranking-onpage-only').addEventListener('change', (e) => {
   _webceoOnPageOnly = e.target.checked;
-  if (_webceoData) buildRankingTable(document.getElementById('ranking-table'), _webceoData.rows || []);
+  if (_webceoData) renderRankingTable();
 });
 
 document.getElementById('btn-ranking-goto-settings').addEventListener('click', () => showSettings());
@@ -378,6 +453,29 @@ document.getElementById('btn-webceo-save-config').addEventListener('click', asyn
   if (!keyInput.readOnly && update.apiKey) setWebceoKeyState(true);
   refreshWebceoSettingsStatus();
 });
+
+// Called from the Search tab's "+ Track" chip: add a GSC query as a tracked
+// keyword in this domain's Web CEO project.
+async function trackQueryInWebceo(keyword, chip) {
+  if (chip) { chip.disabled = true; chip.textContent = '…'; }
+  let res;
+  try {
+    const tab = await getActiveTab();
+    res = await browser.runtime.sendMessage({ action: 'webceoAddKeywords', pageUrl: tab.url, keywords: [keyword] });
+  } catch { res = { error: 'NETWORK' }; }
+  if (!chip) return;
+  if (res && res.ok) {
+    chip.textContent = '✓ Tracked';
+    chip.disabled = true;
+    chip.classList.add('gsc-track-chip--done');
+  } else {
+    chip.textContent = '+ Track';
+    chip.disabled = false;
+    chip.title = (!res || !res.connected) ? 'Add a Web CEO API key in Settings' : webceoErrorMessage(res.error, res.detail);
+    chip.classList.add('gsc-track-chip--err');
+    setTimeout(() => chip.classList.remove('gsc-track-chip--err'), 2500);
+  }
+}
 
 function loadWebceoPrefs() {
   return browser.storage.local.get(['webceoSelectedDepth']).then(({ webceoSelectedDepth: stored }) => {

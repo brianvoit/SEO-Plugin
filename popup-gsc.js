@@ -485,6 +485,19 @@ function buildQueryDataRow(q, locations, branded, selected) {
     });
     wrap.appendChild(chipsEl);
   }
+
+  // "+ Track" — adds this query as a tracked keyword in the Web CEO project
+  // (appears on row hover). Wired to popup-webceo.js's trackQueryInWebceo.
+  const trackChip = document.createElement('button');
+  trackChip.className = 'gsc-track-chip';
+  trackChip.textContent = '+ Track';
+  trackChip.title = 'Track this keyword in your Web CEO project';
+  trackChip.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (typeof trackQueryInWebceo === 'function') trackQueryInWebceo(q.query, trackChip);
+  });
+  wrap.appendChild(trackChip);
+
   main.appendChild(wrap);
 
   GSC_QUERY_COLUMNS.forEach(col => {

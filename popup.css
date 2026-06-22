@@ -1838,8 +1838,9 @@ body.settings-open #update-footer { margin-top: auto; }
 .gsc-query-chips { display: flex; flex-shrink: 0; gap: 3px; margin-left: auto; }
 /* "+ Track" chip — adds the query to the Web CEO project; shown on row hover */
 .gsc-track-chip {
+  display: none;            /* only takes layout space when shown (on hover) */
   flex-shrink: 0;
-  margin-left: auto;
+  margin-left: 6px;
   font-size: 9px;
   font-weight: 700;
   padding: 1px 6px;
@@ -1849,13 +1850,13 @@ body.settings-open #update-footer { margin-top: auto; }
   background: transparent;
   cursor: pointer;
   white-space: nowrap;
-  opacity: 0;
-  transition: opacity .1s, background .1s, color .1s;
+  transition: background .1s, color .1s;
 }
-.gsc-query-row:hover .gsc-track-chip { opacity: 1; }
+.gsc-query-row:hover .gsc-track-chip { display: inline-block; }
 .gsc-track-chip:hover { background: var(--accent); color: #fff; }
-.gsc-track-chip--done { opacity: 1; border-color: var(--hint-green); color: var(--hint-green); cursor: default; }
-.gsc-track-chip--err  { opacity: 1; border-color: var(--hint-red);   color: var(--hint-red); }
+/* the result stays visible even after the pointer leaves the row */
+.gsc-track-chip--done { display: inline-block; border-color: var(--hint-green); color: var(--hint-green); cursor: default; }
+.gsc-track-chip--err  { display: inline-block; border-color: var(--hint-red);   color: var(--hint-red); }
 .gsc-chip {
   font-size: 9px;
   font-weight: 700;

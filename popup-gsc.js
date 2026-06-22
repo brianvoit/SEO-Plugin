@@ -468,6 +468,19 @@ function buildQueryDataRow(q, locations, branded, selected) {
   textEl.textContent = q.query;
   wrap.appendChild(textEl);
 
+  // "+ Track" sits immediately after the query word (shown on row hover) — adds
+  // the query as a tracked keyword in the Web CEO project (trackQueryInWebceo).
+  const trackChip = document.createElement('button');
+  trackChip.className = 'gsc-track-chip';
+  trackChip.textContent = '+ Track';
+  trackChip.title = 'Track this keyword in your Web CEO project';
+  trackChip.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (typeof trackQueryInWebceo === 'function') trackQueryInWebceo(q.query, trackChip);
+  });
+  wrap.appendChild(trackChip);
+
+  // Location chips (Brand / Title / Desc / H1–H5) stay aligned to the row's right
   if (branded || locations.length) {
     const chipsEl = document.createElement('span');
     chipsEl.className = 'gsc-query-chips';
@@ -485,18 +498,6 @@ function buildQueryDataRow(q, locations, branded, selected) {
     });
     wrap.appendChild(chipsEl);
   }
-
-  // "+ Track" — adds this query as a tracked keyword in the Web CEO project
-  // (appears on row hover). Wired to popup-webceo.js's trackQueryInWebceo.
-  const trackChip = document.createElement('button');
-  trackChip.className = 'gsc-track-chip';
-  trackChip.textContent = '+ Track';
-  trackChip.title = 'Track this keyword in your Web CEO project';
-  trackChip.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (typeof trackQueryInWebceo === 'function') trackQueryInWebceo(q.query, trackChip);
-  });
-  wrap.appendChild(trackChip);
 
   main.appendChild(wrap);
 

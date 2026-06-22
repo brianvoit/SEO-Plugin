@@ -112,4 +112,4 @@ document.getElementById('btn-check-update').addEventListener('click', checkForUp
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
-Promise.all([loadGscPrefs(), loadGaPrefs(), loadAdsPrefs()]).then(() => loadData());
+Promise.all([loadGscPrefs(), loadGaPrefs(), loadAdsPrefs(), loadWebceoPrefs()]).then(() => loadData());

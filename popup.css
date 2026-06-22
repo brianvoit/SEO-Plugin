@@ -88,8 +88,8 @@ header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 4px;
-  padding: 10px 6px;
+  gap: 3px;
+  padding: 10px 5px;
   background: var(--header-bg);
   border-bottom: 1px solid var(--border);
   position: sticky;
@@ -104,7 +104,7 @@ header {
 }
 
 .tab-btn {
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 700;
   letter-spacing: 0;
   text-transform: uppercase;
@@ -112,7 +112,7 @@ header {
   background: none;
   border: none;
   border-radius: 5px;
-  padding: 5px 4px;
+  padding: 5px 3px;
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
   white-space: nowrap;
@@ -1442,6 +1442,48 @@ body.settings-open #update-footer { margin-top: auto; }
 .ads-row--header .ads-cell-num,
 .ads-row--header .ads-cell-term { font-family: inherit; }
 .ads-organic-pill { background: var(--hint-green); }
+
+/* ── Ranking (Web CEO) tab ─────────────────────────────────────────────────── */
+.field-sub { font-size: 11px; color: var(--text-muted); margin: 2px 0 10px; }
+.ranking-onpage-toggle {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10.5px; color: var(--text-muted); cursor: pointer; user-select: none;
+}
+.ranking-onpage-toggle input { margin: 0; }
+
+.ranking-row {
+  display: grid;
+  grid-template-columns: 1fr 70px 44px 44px 56px;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 11.5px;
+}
+.ranking-row:last-child { border-bottom: none; }
+.ranking-row--header {
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--text-muted);
+}
+.ranking-row--onpage { background: color-mix(in srgb, var(--hint-green) 8%, transparent); border-radius: 5px; }
+.ranking-cell-term { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ranking-keyword { color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ranking-star { color: var(--hint-amber); flex-shrink: 0; font-size: 10px; }
+.ranking-cell-num {
+  text-align: right;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--text-muted);
+}
+.ranking-row--header .ranking-cell-num,
+.ranking-row--header .ranking-cell-term { font-family: inherit; }
+.ranking-se { display: flex; align-items: center; justify-content: flex-end; gap: 4px; overflow: hidden; }
+.ranking-se-chip {
+  font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+  padding: 0 4px; border-radius: 6px; color: var(--accent); border: 1px solid var(--accent);
+}
+.ranking-pos { color: var(--text); font-weight: 600; }
+.ranking-change--up   { color: var(--hint-green); }
+.ranking-change--down { color: var(--hint-red); }
 
 /* "Request more" queries button (Search tab) */
 .gsc-more-queries-btn {

@@ -697,6 +697,7 @@ async function loadData(expandMeta = false, forceRefreshGsc = false) {
     // GA and DNS load lazily per tab; refresh only the one that's visible
     if (activeTab === 'analytics' && typeof loadGaData === 'function') loadGaData(forceRefreshGsc);
     if (activeTab === 'ads' && typeof loadAdsData === 'function') loadAdsData(forceRefreshGsc);
+    if (activeTab === 'ranking' && typeof loadWebceoData === 'function') loadWebceoData(false);
     if (activeTab === 'dns' && typeof loadDnsData === 'function') loadDnsData();
     renderRedirectStatus(tab.id, data);
     loadDomainAge(tab);

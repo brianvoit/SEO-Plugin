@@ -11,6 +11,7 @@ const twPanel       = document.getElementById('tw-panel');
 const searchTab     = document.getElementById('search-tab');
 const analyticsTab  = document.getElementById('analytics-tab');
 const adsTab        = document.getElementById('ads-tab');
+const rankingTab    = document.getElementById('ranking-tab');
 const dnsTab        = document.getElementById('dns-tab');
 const redirectTab   = document.getElementById('redirect-tab');
 const statusBadge   = document.getElementById('btn-status');
@@ -43,6 +44,7 @@ function showActiveTab() {
   searchTab.classList.toggle('hidden', activeTab !== 'search');
   analyticsTab.classList.toggle('hidden', activeTab !== 'analytics');
   adsTab.classList.toggle('hidden', activeTab !== 'ads');
+  rankingTab.classList.toggle('hidden', activeTab !== 'ranking');
   dnsTab.classList.toggle('hidden', activeTab !== 'dns');
   redirectTab.classList.toggle('hidden', activeTab !== 'redirect');
   if (activeTab === 'redirect') renderRedirectPanel();
@@ -54,6 +56,7 @@ function enterDetailPanel() {
   searchTab.classList.add('hidden');
   analyticsTab.classList.add('hidden');
   adsTab.classList.add('hidden');
+  rankingTab.classList.add('hidden');
   dnsTab.classList.add('hidden');
   redirectTab.classList.add('hidden');
   updateFooter.classList.add('hidden');
@@ -117,6 +120,7 @@ function showSettings() {
   });
   refreshGaSettingsStatus();
   refreshAdsSettingsStatus();
+  refreshWebceoSettingsStatus();
   loadBrandedTerms();
 }
 
@@ -153,6 +157,7 @@ document.querySelectorAll('#main-tabs [data-tab]').forEach(btn => {
     // GA and DNS data load lazily, on first look at the tab (caches keep it cheap)
     if (tab === 'analytics' && typeof loadGaData === 'function') loadGaData(false);
     if (tab === 'ads' && typeof loadAdsData === 'function') loadAdsData(false);
+    if (tab === 'ranking' && typeof loadWebceoData === 'function') loadWebceoData(false);
     if (tab === 'dns' && typeof loadDnsData === 'function') loadDnsData();
   });
 });

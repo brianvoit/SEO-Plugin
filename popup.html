@@ -13,6 +13,7 @@
       <button class="tab-btn" data-tab="search">Search</button>
       <button class="tab-btn" data-tab="analytics">Analytics</button>
       <button class="tab-btn" data-tab="ads">Ads</button>
+      <button class="tab-btn" data-tab="ranking">Ranking</button>
       <button class="tab-btn" data-tab="dns">DNS</button>
       <button id="btn-status" class="status-badge hidden" data-tab="redirect" title="Page status / redirect trace">
         <span class="status-code" id="status-code"></span>
@@ -274,6 +275,47 @@
           <span class="gsc-property-match hidden" id="ads-account-match"></span>
           <div class="gsc-property-all gsc-property-all--scroll" id="ads-account-all"></div>
         </div>
+      </div>
+    </section>
+
+    <section class="field-section">
+      <div class="field-header">
+        <span class="field-label">WEB CEO</span>
+        <div class="field-header-actions">
+          <button type="button" id="webceo-status-badge" class="gsc-status-badge"></button>
+        </div>
+      </div>
+
+      <label class="wp-field">
+        <span class="wp-field-label">API Key</span>
+        <div class="api-key-row">
+          <input type="password" id="webceo-api-key" class="api-key-input" placeholder="Web CEO API key" autocomplete="off" spellcheck="false" />
+          <button id="btn-webceo-key-vis" class="icon-btn" title="Show / hide key">
+            <svg id="webceo-eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2"/>
+            </svg>
+            <svg id="webceo-eye-closed" class="hidden" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M13.4 13.4 2.6 2.6M10.7 10.8A4.9 4.9 0 0 1 8 11.5c-4.5 0-7-3.5-7-3.5a12 12 0 0 1 3.3-3.3M6.1 4.6A5 5 0 0 1 8 4.5c4.5 0 7 3.5 7 3.5a12 12 0 0 1-1.9 2.4"/><path d="M6.3 6.4a2 2 0 0 0 2.7 2.8"/>
+            </svg>
+          </button>
+          <button id="btn-webceo-key-clear" class="icon-btn hidden" title="Clear key — you'll need to re-enter it">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2.5 4h11"/><path d="M6 4V2.8a.8.8 0 0 1 .8-.8h2.4a.8.8 0 0 1 .8.8V4"/><path d="M3.6 4l.6 8.5a1 1 0 0 0 1 .9h5.6a1 1 0 0 0 1-.9L12.4 4"/><line x1="6.6" y1="6.4" x2="6.8" y2="11"/><line x1="9.4" y1="6.4" x2="9.2" y2="11"/>
+            </svg>
+          </button>
+        </div>
+      </label>
+      <div class="field-hint">Available to Agency Unlimited accounts — generate it under My Account → API.</div>
+      <label class="wp-field">
+        <span class="wp-field-label">API Base URL</span>
+        <input type="text" id="webceo-base-url" class="wp-input" placeholder="https://seo.plaudit.com/api/" autocomplete="off" spellcheck="false" />
+      </label>
+      <button id="btn-webceo-save-config" class="save-key-btn">Save</button>
+
+      <div class="gsc-property-box" id="webceo-project-box">
+        <span class="wp-field-label" style="display:block;margin-bottom:6px">Project for this domain</span>
+        <span class="gsc-property-match hidden" id="webceo-project-match"></span>
+        <div class="gsc-property-all gsc-property-all--scroll" id="webceo-project-all"></div>
       </div>
     </section>
 
@@ -739,6 +781,49 @@
 
   </div>
 
+  <!-- Ranking (WebCEO) tab -->
+  <div id="ranking-tab" class="hidden">
+
+    <!-- No API key -->
+    <div id="ranking-no-key" class="field-section hidden">
+      <div class="field-hint">Add your Web CEO API key in Settings to see keyword rankings for this site.</div>
+      <button id="btn-ranking-goto-settings" class="save-key-btn" style="margin-top:8px">Open Settings</button>
+    </div>
+
+    <!-- No project for this domain -->
+    <div id="ranking-no-project" class="field-section hidden">
+      <div class="field-hint" id="ranking-no-project-text">No Web CEO project matches this domain. Pick one in Settings.</div>
+      <div id="ranking-project-picker" class="gsc-property-all gsc-property-all--scroll" style="margin-top:8px"></div>
+    </div>
+
+    <!-- Error -->
+    <div id="ranking-error" class="field-section hidden">
+      <div class="field-hint hint-red" id="ranking-error-text"></div>
+    </div>
+
+    <!-- Data -->
+    <div id="ranking-data" class="hidden">
+      <div class="mode-row">
+        <div class="mode-segmented" id="ranking-depth-group" role="tablist">
+          <button class="mode-option is-active" data-depth="2">Latest</button>
+          <button class="mode-option" data-depth="5">5 scans</button>
+          <button class="mode-option" data-depth="10">10 scans</button>
+          <button class="mode-option" data-depth="20">20 scans</button>
+        </div>
+      </div>
+      <div class="field-sub" id="ranking-meta"></div>
+
+      <section class="field-section">
+        <div class="field-header">
+          <span class="field-label">KEYWORD RANKINGS</span>
+          <label class="ranking-onpage-toggle"><input type="checkbox" id="ranking-onpage-only" /> This page only</label>
+        </div>
+        <div id="ranking-table"></div>
+        <div id="ranking-empty" class="field-hint hidden">No ranking data for this project yet.</div>
+      </section>
+    </div>
+  </div>
+
   <!-- DNS tab -->
   <div id="dns-tab" class="hidden">
 
@@ -1044,6 +1129,7 @@
   <script src="popup-gsc.js"></script>
   <script src="popup-ga.js"></script>
   <script src="popup-ads.js"></script>
+  <script src="popup-webceo.js"></script>
   <script src="popup-redirects.js"></script>
   <script src="popup-dns.js"></script>
   <script src="popup.js"></script>

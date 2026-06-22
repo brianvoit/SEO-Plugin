@@ -1963,6 +1963,177 @@ async function adsGetChartData({ pageUrl, range, scope }) {
   return { timeseries: adsFillTimeseries(byDate, range), totals: adsSumMetrics(res.rows || []) };
 }
 
+// ─── WebCEO (rank tracking, whitelabel-friendly) ─────────────────────────────
+// Single-endpoint JSON API: POST {method, key, id, data} to the configured base
+// URL; the response is an array whose first element carries result/errormsg/data.
+// Auth is a plain API key (Agency Unlimited). Base URL defaults to the user's
+// whitelabel host but is overridable in Settings.
+
+const WEBCEO_API_DEFAULT = 'https://seo.plaudit.com/api/';
+const WEBCEO_PROJECTS_STALE_MS = 7 * 24 * 60 * 60 * 1000;
+const WEBCEO_STALE_MS = 6 * 60 * 60 * 1000;
+
+async function webceoConfig() {
+  const { webceoApiKey, webceoBaseUrl } = await browser.storage.local.get(['webceoApiKey', 'webceoBaseUrl']);
+  return { apiKey: webceoApiKey || '', baseUrl: (webceoBaseUrl || WEBCEO_API_DEFAULT).trim() };
+}
+
+// One API call. Returns { data } on success or { error, detail } on failure.
+async function webceoCall(method, data, { apiKey, baseUrl } = {}) {
+  if (apiKey === undefined) { const cfg = await webceoConfig(); apiKey = cfg.apiKey; baseUrl = cfg.baseUrl; }
+  if (!apiKey) return { error: 'NO_API_KEY' };
+  const body = { method, key: apiKey, id: method };
+  if (data !== undefined) body.data = data;
+  let res;
+  try {
+    res = await fetch(baseUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  } catch (e) {
+    return { error: 'NETWORK', detail: String(e && e.message || e) };
+  }
+  if (res.status === 401 || res.status === 403) return { error: 'BAD_KEY' };
+  if (res.status === 429) return { error: 'RATE_LIMITED' };
+  let json;
+  try { json = await res.json(); } catch { return { error: 'API_ERROR', detail: `HTTP ${res.status}` }; }
+  const entry = Array.isArray(json) ? json[0] : json;
+  if (!entry) return { error: 'API_ERROR', detail: 'Empty response' };
+  if (entry.result && entry.result !== 0) {
+    if (entry.result === 10) return { error: 'BAD_KEY', detail: entry.errormsg };   // unknown command / bad auth
+    return { error: 'API_ERROR', detail: entry.errormsg || `result ${entry.result}` };
+  }
+  return { data: entry.data };
+}
+
+function webceoGetStatus() {
+  return webceoConfig().then(({ apiKey, baseUrl }) => ({ connected: !!apiKey, baseUrl }));
+}
+
+// Projects (get_projects), cached 7d. Returns [{ project, name, domain, suspended }].
+async function webceoListProjects(forceRefresh = false) {
+  const { webceoProjects } = await browser.storage.local.get('webceoProjects');
+  if (!forceRefresh && webceoProjects && (Date.now() - webceoProjects.fetchedAt < WEBCEO_PROJECTS_STALE_MS)) {
+    return { projects: webceoProjects.list };
+  }
+  const res = await webceoCall('get_projects');
+  if (res.error) return { error: res.error, detail: res.detail };
+  const list = (res.data || [])
+    .filter(p => !p.suspended)
+    .map(p => ({ project: p.project, name: p.name || p.domain, domain: (p.domain || '').replace(/^www\./i, '').toLowerCase() }));
+  await browser.storage.local.set({ webceoProjects: { fetchedAt: Date.now(), list } });
+  return { projects: list };
+}
+
+async function webceoGetProject(host) {
+  if (!host) return null;
+  const { webceoProjectOverrides } = await browser.storage.local.get('webceoProjectOverrides');
+  return (webceoProjectOverrides && webceoProjectOverrides[host]) || null;
+}
+
+// Resolve the project for a page: an explicit per-domain override, else the
+// project whose domain matches the page host.
+async function webceoResolveProject({ pageUrl }) {
+  const { apiKey } = await webceoConfig();
+  if (!apiKey) return { connected: false };
+  const listed = await webceoListProjects();
+  if (listed.error) return { connected: true, error: listed.error, detail: listed.detail };
+
+  const host = gscPageHost(pageUrl);
+  const chosen = await webceoGetProject(host);
+  let project = chosen && listed.projects.find(p => p.project === chosen) ? chosen : null;
+  if (!project && host) {
+    const match = listed.projects.find(p => p.domain === host);
+    if (match) project = match.project;
+  }
+  return { connected: true, host, project, projects: listed.projects };
+}
+
+async function webceoSetProject({ host, project }) {
+  if (!host) return { ok: false };
+  const { webceoProjectOverrides } = await browser.storage.local.get('webceoProjectOverrides');
+  const overrides = webceoProjectOverrides || {};
+  if (project) overrides[host] = project; else delete overrides[host];
+  await browser.storage.local.set({ webceoProjectOverrides: overrides });
+  await browser.storage.local.remove('webceoCache');
+  return { ok: true };
+}
+
+// Flatten get_rankings (grouped=0) into one row per keyword × search engine, with
+// the current position, the change vs the previous scan, volume and ranking URL.
+function webceoFlattenRankings(rankingData) {
+  const rows = [];
+  (rankingData || []).forEach(kwEntry => {
+    const volume = kwEntry.global_searches != null ? kwEntry.global_searches
+      : (kwEntry.local_searches && kwEntry.local_searches[0] && kwEntry.local_searches[0].searches_number) || null;
+    (kwEntry.positions || []).forEach(p => {
+      // Most recent scanned entries first
+      const scans = (p.scan_history || []).filter(s => s.scanned !== 0)
+        .slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      const current = scans[0] || null;
+      const previous = scans[1] || null;
+      rows.push({
+        keyword: kwEntry.kw,
+        starred: kwEntry.starred === 1,
+        volume,
+        se: p.se || '',
+        location: p.location || '',
+        country: p.country || '',
+        mobile: p.mobile || 0,
+        position: current && current.pos != null ? current.pos : null,
+        previous: previous && previous.pos != null ? previous.pos : null,
+        date: current ? current.date : null,
+        url: current ? current.url : null,
+        history: scans.slice(0, 12).reverse().map(s => ({ date: s.date, pos: s.pos })) // oldest→newest for a sparkline
+      });
+    });
+  });
+  return rows;
+}
+
+async function webceoGetRankings({ pageUrl, historyDepth = 2, forceRefresh = false }) {
+  const { apiKey } = await webceoConfig();
+  if (!apiKey) return { connected: false };
+  const host = gscPageHost(pageUrl);
+  const project = await webceoResolveProject({ pageUrl });
+  if (project.error) return { connected: true, error: project.error, detail: project.detail };
+  if (!project.project) return { connected: true, error: 'NO_PROJECT', host, projects: project.projects };
+
+  const depth = Math.max(2, Math.min(parseInt(historyDepth, 10) || 2, 60));
+  const cacheKey = `${host}::${project.project}::${depth}`;
+  const { webceoCache } = await browser.storage.local.get('webceoCache');
+  const cache = webceoCache || {};
+  const cached = cache[cacheKey];
+  if (!forceRefresh && cached && (Date.now() - cached.fetchedAt < WEBCEO_STALE_MS)) {
+    return { connected: true, ...cached, fromCache: true };
+  }
+
+  const res = await webceoCall('get_rankings', { project: project.project, grouped: 0, history_depth: depth });
+  if (res.error) return { connected: true, error: res.error, detail: res.detail };
+
+  const rows = webceoFlattenRankings(res.data && res.data.ranking_data);
+  const projInfo = project.projects.find(p => p.project === project.project);
+  const entry = {
+    fetchedAt: Date.now(), host, project: project.project,
+    projectName: projInfo ? projInfo.name : '', domain: res.data ? res.data.domain : (projInfo && projInfo.domain),
+    rows, depth
+  };
+  cache[cacheKey] = entry;
+  await browser.storage.local.set({ webceoCache: cache });
+  return { connected: true, ...entry, fromCache: false };
+}
+
+function webceoSaveConfig({ apiKey, baseUrl }) {
+  const update = {};
+  if (apiKey !== undefined) update.webceoApiKey = apiKey;
+  if (baseUrl !== undefined) update.webceoBaseUrl = baseUrl;
+  return browser.storage.local.set(update)
+    .then(() => browser.storage.local.remove(['webceoProjects', 'webceoCache']))
+    .then(() => ({ ok: true }));
+}
+
+function webceoDisconnect() {
+  return browser.storage.local.remove(['webceoApiKey', 'webceoProjects', 'webceoCache', 'webceoProjectOverrides'])
+    .then(() => ({ ok: true }));
+}
+
 // ─── Google Search Console: message handlers ────────────────────────────────
 
 browser.runtime.onMessage.addListener((message) => {
@@ -1997,6 +2168,12 @@ browser.runtime.onMessage.addListener((message) => {
     case 'openPopout':         return openPopoutWindow();
     case 'getDomainAge':       return getDomainAge(message);
     case 'dnsResolve':         return dnsResolve(message);
+    case 'webceoGetStatus':      return webceoGetStatus();
+    case 'webceoSaveConfig':     return webceoSaveConfig(message);
+    case 'webceoDisconnect':     return webceoDisconnect();
+    case 'webceoResolveProject': return webceoResolveProject(message);
+    case 'webceoSetProject':     return webceoSetProject(message);
+    case 'webceoGetRankings':    return webceoGetRankings(message);
     default: return undefined;
   }
 });

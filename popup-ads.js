@@ -92,7 +92,9 @@ function adsIsBidKeyword(term) {
 
 // Loads the page's ad keywords once so other tabs can flag "Ad" terms
 async function ensureAdsKeywordSet(onReady) {
-  if (_adsKeywordSet || _adsKeywordLoading) { if (onReady && _adsKeywordSet) onReady(); return; }
+  // Already loaded or in flight → do nothing (avoids re-render recursion: the
+  // callback re-renders, which would call this loader, which would call back…).
+  if (_adsKeywordSet || _adsKeywordLoading) return;
   _adsKeywordLoading = true;
   try {
     const tab = await getActiveTab();

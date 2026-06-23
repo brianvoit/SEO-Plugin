@@ -34,7 +34,10 @@ function markWebceoTracked(term) {
   if (_webceoTrackedSet) _webceoTrackedSet.add((term || '').toLowerCase().trim());
 }
 async function ensureWebceoTracked(onReady) {
-  if (_webceoTrackedSet || _webceoTrackedLoading) { if (onReady && _webceoTrackedSet) onReady(); return; }
+  // Already loaded or in flight → do nothing (the caller's render already has the
+  // data, or the in-flight load's callback will re-render). Calling onReady here
+  // would recurse with renders that re-invoke this loader.
+  if (_webceoTrackedSet || _webceoTrackedLoading) return;
   _webceoTrackedLoading = true;
   try {
     const tab = await getActiveTab();

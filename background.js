@@ -2135,6 +2135,17 @@ async function webceoAddKeywords({ pageUrl, keywords }) {
   return { connected: true, ok: true, added: list, project: resolved.project };
 }
 
+// The project's tracked keyword list (get_rankings_keywords) — used to flag
+// already-tracked terms on the Search/Ads tabs.
+async function webceoGetTrackedKeywords({ pageUrl }) {
+  const resolved = await webceoResolveProject({ pageUrl });
+  if (!resolved.connected || resolved.error || !resolved.project) return { keywords: [] };
+  const res = await webceoCall('get_rankings_keywords', { project: resolved.project });
+  if (res.error) return { keywords: [], error: res.error };
+  const kws = (res.data && res.data.keywords) || [];
+  return { keywords: kws.map(k => (typeof k === 'string' ? k : (k.keyword || k.kw || k.text || ''))).filter(Boolean) };
+}
+
 function webceoSaveConfig({ apiKey, baseUrl }) {
   const update = {};
   if (apiKey !== undefined) update.webceoApiKey = apiKey;
@@ -2190,6 +2201,7 @@ browser.runtime.onMessage.addListener((message) => {
     case 'webceoSetProject':     return webceoSetProject(message);
     case 'webceoGetRankings':    return webceoGetRankings(message);
     case 'webceoAddKeywords':    return webceoAddKeywords(message);
+    case 'webceoGetTrackedKeywords': return webceoGetTrackedKeywords(message);
     default: return undefined;
   }
 });

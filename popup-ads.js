@@ -28,12 +28,14 @@ function adsErrorMessage(error, detail) {
 
 function adsNum(n) { return Math.round(n).toLocaleString(); }
 function adsConv(n) { return (Math.round(n * 10) / 10).toLocaleString(); }
+// Cost is rounded UP to the nearest whole unit (no decimals)
 function adsCost(n, currency) {
+  const v = Math.ceil(n || 0);
   if (currency) {
-    try { return new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 2 }).format(n); }
+    try { return new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 0 }).format(v); }
     catch { /* fall through */ }
   }
-  return n.toFixed(2);
+  return '$' + v.toLocaleString();
 }
 function adsPct(v) { return v == null ? '—' : `${Math.round(v * 100)}%`; }
 // Google Ads customer IDs are 10 digits, shown as XXX-XXX-XXXX
@@ -51,7 +53,8 @@ function adsOrganicSet() {
   return set;
 }
 
-// Chips for a keyword/search term: on-page locations + an Organic pill
+// Chips for a keyword/search term: on-page locations, an Organic pill, and a
+// "Tracked" pill when the term is tracked in the Web CEO project.
 function adsTermChips(text, organicSet) {
   const wrap = document.createElement('span');
   wrap.className = 'gsc-query-chips';
@@ -62,6 +65,13 @@ function adsTermChips(text, organicSet) {
     pill.title = 'This page also ranks for this term organically (Search Console)';
     wrap.appendChild(pill);
   }
+  if (typeof webceoIsTracked === 'function' && webceoIsTracked(text)) {
+    const pill = document.createElement('span');
+    pill.className = 'gsc-branded-pill ads-tracked-pill';
+    pill.textContent = 'Tracked';
+    pill.title = 'Tracked in your Web CEO project';
+    wrap.appendChild(pill);
+  }
   (typeof gscQueryLocations === 'function' ? gscQueryLocations(text, pageData) : []).forEach(loc => {
     const chip = document.createElement('span');
     chip.className = 'gsc-chip';
@@ -69,6 +79,30 @@ function adsTermChips(text, organicSet) {
     wrap.appendChild(chip);
   });
   return wrap.childNodes.length ? wrap : null;
+}
+
+// ─── Cross-tab signals: ad keyword set (for "Ad" chips elsewhere) ─────────────
+
+let _adsKeywordSet = null;          // lowercased ad keyword texts, or null (unloaded)
+let _adsKeywordLoading = false;
+
+function adsIsBidKeyword(term) {
+  return !!(_adsKeywordSet && _adsKeywordSet.has((term || '').toLowerCase().trim()));
+}
+
+// Loads the page's ad keywords once so other tabs can flag "Ad" terms
+async function ensureAdsKeywordSet(onReady) {
+  if (_adsKeywordSet || _adsKeywordLoading) { if (onReady && _adsKeywordSet) onReady(); return; }
+  _adsKeywordLoading = true;
+  try {
+    const tab = await getActiveTab();
+    const res = await browser.runtime.sendMessage({ action: 'adsGetPageData', pageUrl: tab.url, range: adsSelectedRange });
+    const set = new Set();
+    if (res && res.keywords) res.keywords.forEach(k => { if (k.text) set.add(k.text.toLowerCase().trim()); });
+    _adsKeywordSet = set;
+  } catch { _adsKeywordSet = new Set(); }
+  _adsKeywordLoading = false;
+  if (onReady) onReady();
 }
 
 // ─── Cross-filter helpers ───────────────────────────────────────────────────
@@ -128,7 +162,8 @@ function renderAdsTree() {
   header.className = 'ads-row ads-row--ag ads-row--header';
   ['Ad group', 'Impr', 'Clicks', 'Cost', 'Conv'].forEach((c, i) => {
     const cell = document.createElement('span');
-    cell.className = i === 0 ? 'ads-cell-term' : 'ads-cell-num';
+    // Impr stays right-aligned; Clicks/Cost/Conv are centered
+    cell.className = i === 0 ? 'ads-cell-term' : ('ads-cell-num' + (i >= 2 ? ' ads-cell-num--c' : ''));
     cell.textContent = c;
     header.appendChild(cell);
   });
@@ -172,9 +207,9 @@ function renderAdsTree() {
       name.textContent = g.name;
       name.title = g.name;
       row.appendChild(name);
-      [adsNum(g.impressions), adsNum(g.clicks), adsCost(g.cost, currency), adsConv(g.conversions)].forEach(v => {
+      [adsNum(g.impressions), adsNum(g.clicks), adsCost(g.cost, currency), adsConv(g.conversions)].forEach((v, i) => {
         const cell = document.createElement('span');
-        cell.className = 'ads-cell-num';
+        cell.className = 'ads-cell-num' + (i >= 1 ? ' ads-cell-num--c' : '');   // Impr right, rest centered
         cell.textContent = v;
         row.appendChild(cell);
       });
@@ -223,7 +258,8 @@ function buildAdsMetricTable(container, rows, { withQs = false } = {}) {
     header.className = 'ads-row ads-row--header' + (withQs ? ' ads-row--kw' : '');
     cols.forEach(c => {
       const cell = document.createElement('span');
-      cell.className = (c.term ? 'ads-cell-term' : 'ads-cell-num') + ' ads-sort';
+      const centered = ['clicks', 'cost', 'conversions'].includes(c.key);
+      cell.className = (c.term ? 'ads-cell-term' : ('ads-cell-num' + (centered ? ' ads-cell-num--c' : ''))) + ' ads-sort';
       const active = sort.column === c.key;
       cell.textContent = c.label + (active ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
       cell.addEventListener('click', () => {
@@ -280,9 +316,9 @@ function buildAdsMetricTable(container, rows, { withQs = false } = {}) {
         row.appendChild(qs);
       }
 
-      [adsNum(r.impressions), adsNum(r.clicks), adsCost(r.cost, container._currency), adsConv(r.conversions)].forEach(v => {
+      [adsNum(r.impressions), adsNum(r.clicks), adsCost(r.cost, container._currency), adsConv(r.conversions)].forEach((v, i) => {
         const cell = document.createElement('span');
-        cell.className = 'ads-cell-num';
+        cell.className = 'ads-cell-num' + (i >= 1 ? ' ads-cell-num--c' : '');   // Impr right, rest centered
         cell.textContent = v;
         row.appendChild(cell);
       });
@@ -519,6 +555,8 @@ function renderAdsPanel(response) {
     renderAdsScorecards(response.totals, response.previousTotals);
     renderAdsChart();
     renderAdsAll();
+    // Web CEO "Tracked" pills appear once the tracked-keyword set has loaded
+    if (typeof ensureWebceoTracked === 'function') ensureWebceoTracked(() => renderAdsAll());
   } else {
     _adsData = null;
     _adsFilter = null;

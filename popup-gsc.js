@@ -454,8 +454,8 @@ function buildQueryDataRow(q, locations, branded, selected) {
   } else {
     const addBtn = document.createElement('button');
     addBtn.className = 'gsc-query-add';
-    addBtn.title = 'Add to branded list';
-    addBtn.setAttribute('aria-label', 'Add to branded list');
+    addBtn.title = 'Mark as brand';
+    addBtn.setAttribute('aria-label', 'Mark as brand');
     addBtn.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="6.4"/><line x1="8" y1="5.2" x2="8" y2="10.8"/><line x1="5.2" y1="8" x2="10.8" y2="8"/></svg>'));
     main.appendChild(addBtn);
   }
@@ -468,20 +468,30 @@ function buildQueryDataRow(q, locations, branded, selected) {
   textEl.textContent = q.query;
   wrap.appendChild(textEl);
 
-  // "+ Track" sits immediately after the query word (shown on row hover) — adds
-  // the query as a tracked keyword in the Web CEO project (trackQueryInWebceo).
+  // Track chip, immediately after the query word. Already-tracked terms show a
+  // static "Tracked" pill (always visible); the rest show "+ Track" on hover.
+  const tracked = typeof webceoIsTracked === 'function' && webceoIsTracked(q.query);
   const trackChip = document.createElement('button');
-  trackChip.className = 'gsc-track-chip';
-  trackChip.textContent = '+ Track';
-  trackChip.title = 'Track this keyword in your Web CEO project';
-  trackChip.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (typeof trackQueryInWebceo === 'function') trackQueryInWebceo(q.query, trackChip);
-  });
+  if (tracked) {
+    trackChip.className = 'gsc-track-chip gsc-track-chip--done';
+    trackChip.textContent = 'Tracked';
+    trackChip.disabled = true;
+    trackChip.title = 'Tracked in your Web CEO project';
+  } else {
+    trackChip.className = 'gsc-track-chip';
+    trackChip.textContent = '+ Track';
+    trackChip.title = 'Track this keyword in your Web CEO project';
+    trackChip.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (typeof trackQueryInWebceo === 'function') trackQueryInWebceo(q.query, trackChip);
+    });
+  }
   wrap.appendChild(trackChip);
 
-  // Location chips (Brand / Title / Desc / H1–H5) stay aligned to the row's right
-  if (branded || locations.length) {
+  // Right-aligned chips: Brand / Title / Desc / H1–H5, plus an "Ad" chip when
+  // we're bidding on this query in Google Ads.
+  const bidding = typeof adsIsBidKeyword === 'function' && adsIsBidKeyword(q.query);
+  if (branded || locations.length || bidding) {
     const chipsEl = document.createElement('span');
     chipsEl.className = 'gsc-query-chips';
     if (branded) {
@@ -489,6 +499,13 @@ function buildQueryDataRow(q, locations, branded, selected) {
       pill.className = 'gsc-branded-pill';
       pill.textContent = 'Brand';
       chipsEl.appendChild(pill);
+    }
+    if (bidding) {
+      const ad = document.createElement('span');
+      ad.className = 'gsc-chip gsc-ad-chip';
+      ad.textContent = 'Ad';
+      ad.title = 'You are bidding on this query in Google Ads';
+      chipsEl.appendChild(ad);
     }
     locations.forEach(l => {
       const chip = document.createElement('span');
@@ -652,6 +669,10 @@ function renderGscQueries(queries, pageUrl) {
     container.appendChild(row);
   });
   document.getElementById('gsc-queries-empty').classList.toggle('hidden', shown > 0);
+
+  // Cross-tab chips load lazily, then re-render once: Web CEO "Tracked" + Ads "Ad"
+  if (typeof ensureWebceoTracked === 'function') ensureWebceoTracked(() => renderGscQueries(queries, pageUrl));
+  if (typeof ensureAdsKeywordSet === 'function') ensureAdsKeywordSet(() => renderGscQueries(queries, pageUrl));
 }
 
 // ─── Google Search Console: click-to-filter chart by query ──────────────────

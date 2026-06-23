@@ -21,6 +21,30 @@ function webceoErrorMessage(error, detail) {
   return detail ? `${base} (${detail})` : base;
 }
 
+// ─── Cross-tab signal: the project's tracked keyword set ─────────────────────
+// Used by the Search and Ads tabs to flag terms already tracked in Web CEO.
+
+let _webceoTrackedSet = null;         // lowercased tracked keywords, or null (unloaded)
+let _webceoTrackedLoading = false;
+
+function webceoIsTracked(term) {
+  return !!(_webceoTrackedSet && _webceoTrackedSet.has((term || '').toLowerCase().trim()));
+}
+function markWebceoTracked(term) {
+  if (_webceoTrackedSet) _webceoTrackedSet.add((term || '').toLowerCase().trim());
+}
+async function ensureWebceoTracked(onReady) {
+  if (_webceoTrackedSet || _webceoTrackedLoading) { if (onReady && _webceoTrackedSet) onReady(); return; }
+  _webceoTrackedLoading = true;
+  try {
+    const tab = await getActiveTab();
+    const res = await browser.runtime.sendMessage({ action: 'webceoGetTrackedKeywords', pageUrl: tab.url });
+    _webceoTrackedSet = new Set((res && res.keywords || []).map(k => String(k).toLowerCase().trim()));
+  } catch { _webceoTrackedSet = new Set(); }
+  _webceoTrackedLoading = false;
+  if (onReady) onReady();
+}
+
 // ─── Formatting ─────────────────────────────────────────────────────────────
 
 function webceoRanked(p) { return p != null && p > 0; }   // 0/null = not in tracked results
@@ -144,6 +168,27 @@ function webceoKeywordOnPage(kw) {
   return Object.values(kw.engines).some(e => webceoUrlIsThisPage(e.url));
 }
 
+// Chips for a ranking keyword: on-page locations (Title/Desc/H1–H5) + an "Ad"
+// chip when we're bidding on it — same styling as the Search tab.
+function rankingTermChips(text) {
+  const wrap = document.createElement('span');
+  wrap.className = 'gsc-query-chips';
+  if (typeof adsIsBidKeyword === 'function' && adsIsBidKeyword(text)) {
+    const ad = document.createElement('span');
+    ad.className = 'gsc-chip gsc-ad-chip';
+    ad.textContent = 'Ad';
+    ad.title = 'You are bidding on this keyword in Google Ads';
+    wrap.appendChild(ad);
+  }
+  (typeof gscQueryLocations === 'function' && typeof pageData !== 'undefined' ? gscQueryLocations(text, pageData) : []).forEach(loc => {
+    const chip = document.createElement('span');
+    chip.className = 'gsc-chip';
+    chip.textContent = loc;
+    wrap.appendChild(chip);
+  });
+  return wrap.childNodes.length ? wrap : null;
+}
+
 let _rankSort = { column: 'volume', dir: 'desc' };
 
 function renderRankingTable() {
@@ -208,6 +253,8 @@ function renderRankingTable() {
     kw.addEventListener('click', (e) => { e.stopPropagation(); browser.tabs.create({ url: `https://www.google.com/search?q=${encodeURIComponent(k.keyword)}` }); });
     term.appendChild(kw);
     if (k.starred) { const s = document.createElement('span'); s.className = 'ranking-star'; s.textContent = '★'; term.appendChild(s); }
+    const chips = rankingTermChips(k.keyword);
+    if (chips) term.appendChild(chips);
     row.appendChild(term);
 
     engines.forEach(eng => {
@@ -269,6 +316,8 @@ function renderWebceoPanel(response) {
     `${response.projectName || response.domain || ''} · ${kwCount} keywords · Updated ${gscRelativeTime(response.fetchedAt)}`;
   renderRankingChart();
   renderRankingTable();
+  // "Ad" chips appear once the page's ad-keyword set has loaded
+  if (typeof ensureAdsKeywordSet === 'function') ensureAdsKeywordSet(() => renderRankingTable());
   document.getElementById('ranking-data').classList.remove('hidden');
 }
 
@@ -465,9 +514,10 @@ async function trackQueryInWebceo(keyword, chip) {
   } catch { res = { error: 'NETWORK' }; }
   if (!chip) return;
   if (res && res.ok) {
-    chip.textContent = '✓ Tracked';
+    chip.textContent = 'Tracked';
     chip.disabled = true;
     chip.classList.add('gsc-track-chip--done');
+    markWebceoTracked(keyword);
   } else {
     chip.textContent = '+ Track';
     chip.disabled = false;

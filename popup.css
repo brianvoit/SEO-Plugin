@@ -59,7 +59,7 @@ body {
   font-size: 13px;
   background: var(--bg);
   color: var(--text);
-  width: 420px;
+  width: 520px;
   max-height: 600px;
   overflow-y: auto;
   line-height: 1.5;
@@ -1439,9 +1439,13 @@ body.settings-open #update-footer { margin-top: auto; }
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   color: var(--text-muted);
 }
+.ads-cell-num--c { text-align: center; }   /* Clicks / Cost / Conv columns */
 .ads-row--header .ads-cell-num,
 .ads-row--header .ads-cell-term { font-family: inherit; }
 .ads-organic-pill { background: var(--hint-green); }
+.ads-tracked-pill { background: #8b5cf6; }   /* Web CEO "Tracked" */
+/* "Ad" chip (bidding in Google Ads) — used on Search + Ranking */
+.gsc-ad-chip { color: #fff; background: #ea8600; }
 
 /* ── Ranking (Web CEO) tab ─────────────────────────────────────────────────── */
 .field-sub { font-size: 11px; color: var(--text-muted); margin: 2px 0 10px; }

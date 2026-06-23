@@ -702,6 +702,7 @@ async function loadData(expandMeta = false, forceRefreshGsc = false) {
     renderRedirectStatus(tab.id, data);
     loadDomainAge(tab);
     if (typeof loadAiInsights === 'function') loadAiInsights(forceRefreshGsc);
+    if (typeof hydrateActionPlanNav === 'function') hydrateActionPlanNav();
   } catch {
     document.getElementById('error-state').classList.remove('hidden');
     tabGroup.classList.add('hidden');

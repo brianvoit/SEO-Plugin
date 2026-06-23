@@ -418,16 +418,26 @@ async function refreshWebceoSettingsStatus() {
     badge.textContent = 'Connected';
     badge.className = 'gsc-status-badge gsc-status-badge--connected';
     setWebceoKeyState(true);
+    // Once the key is stored, collapse the inputs out of the way (like Google Ads)
+    setWebceoConfigCollapsed(true);
     box.classList.remove('hidden');
     refreshWebceoProjectInfo();
   } else {
     badge.textContent = 'Not connected';
     badge.className = 'gsc-status-badge gsc-status-badge--disconnected';
     setWebceoKeyState(false);
+    setWebceoConfigCollapsed(false);
     box.classList.add('hidden');
   }
   return status;
 }
+
+function setWebceoConfigCollapsed(collapsed) {
+  document.getElementById('webceo-config-fields').classList.toggle('hidden', collapsed);
+  document.getElementById('webceo-config-collapsed').classList.toggle('hidden', !collapsed);
+}
+
+document.getElementById('btn-webceo-edit-config').addEventListener('click', () => setWebceoConfigCollapsed(false));
 
 async function refreshWebceoProjectInfo() {
   const matchEl = document.getElementById('webceo-project-match');

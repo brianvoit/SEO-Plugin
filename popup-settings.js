@@ -244,6 +244,8 @@ function setKeyState(hasKey) {
   document.getElementById('btn-toggle-key-vis').classList.toggle('hidden', hasKey);
   document.getElementById('btn-clear-key').classList.toggle('hidden', !hasKey);
   document.getElementById('btn-save-key').classList.toggle('hidden', hasKey);
+  // Green highlight once saved, matching the connected-integration boxes
+  input.classList.toggle('api-key-input--saved', hasKey);
 
   if (hasKey) {
     input.type = 'password';

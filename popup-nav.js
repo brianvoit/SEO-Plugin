@@ -8,6 +8,7 @@ const settingsPanel = document.getElementById('settings-panel');
 const schemaPanel   = document.getElementById('schema-panel');
 const ogPanel       = document.getElementById('og-panel');
 const twPanel       = document.getElementById('tw-panel');
+const actionPlanPanel = document.getElementById('actionplan-panel');
 const searchTab     = document.getElementById('search-tab');
 const analyticsTab  = document.getElementById('analytics-tab');
 const adsTab        = document.getElementById('ads-tab');
@@ -28,6 +29,7 @@ function hideDetailPanels() {
   schemaPanel.classList.add('hidden');
   ogPanel.classList.add('hidden');
   twPanel.classList.add('hidden');
+  actionPlanPanel.classList.add('hidden');
 }
 
 function showActiveTab() {
@@ -79,6 +81,14 @@ function showOgPanel() {
 function showTwPanel() {
   enterDetailPanel();
   twPanel.classList.remove('hidden');
+}
+
+function showActionPlanPanel() {
+  enterDetailPanel();
+  actionPlanPanel.classList.remove('hidden');
+  // Render whatever we have (cached plan, or nothing), then generate on first open
+  if (typeof renderActionPlanPanel === 'function') renderActionPlanPanel();
+  if (typeof loadActionPlan === 'function') loadActionPlan(false);
 }
 
 function hideDetailPanelToTab() {
@@ -136,6 +146,8 @@ document.getElementById('btn-og').addEventListener('click', showOgPanel);
 document.getElementById('btn-og-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-tw').addEventListener('click', showTwPanel);
 document.getElementById('btn-tw-back').addEventListener('click', hideDetailPanelToTab);
+document.getElementById('btn-actionplan').addEventListener('click', showActionPlanPanel);
+document.getElementById('btn-actionplan-back').addEventListener('click', hideDetailPanelToTab);
 
 // ─── Main tabs (Overview / Search / Analytics / DNS / Redirect) ──────────────
 // The status pill is also a tab trigger (data-tab="redirect"), so the handler

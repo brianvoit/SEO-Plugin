@@ -1,0 +1,567 @@
+// ─── AI Action Plan: synthesize demand (GSC / Ads / Web CEO / GA4) vs. supply ──
+// (page content) into evidence-backed recommendations. Lives on the Overview as
+// a nav row that opens its own detail panel (like Open Graph / Structured Data).
+// A single, heavier Claude call — click-to-run, cached per URL with a short TTL.
+
+// Reasoning-heavy synthesis → the most capable model, distinct from the Haiku
+// used for the lightweight page insights. Change here to trade cost for depth.
+const ACTION_PLAN_MODEL = 'claude-opus-4-8';
+const ACTION_PLAN_TTL_MS = 60 * 60 * 1000;     // 1h — GSC data shifts; stale plans mislead
+const ACTION_PLAN_RANGE = '90';                // 90-day demand window (impressions/terms)
+
+// Tier metadata: effort label → section heading + accent class
+const ACTION_PLAN_TIERS = [
+  { effort: 'surgical', key: 'quick',  title: 'Quick wins' },
+  { effort: 'moderate', key: 'mod',    title: 'Recommended' },
+  { effort: 'rewrite',  key: 'heavy',  title: 'Heavy lift' }
+];
+
+let _actionPlan = null;          // normalized { recommendations, contentGaps }
+let _actionPlanSources = null;   // { gsc, ads, webceo, ga } booleans
+let _actionPlanFetchedAt = 0;
+let _actionPlanLoading = false;
+let _actionPlanError = '';
+
+// ─── Data gathering (best-effort; any source may be absent) ───────────────────
+
+async function gatherActionPlanData(tab) {
+  const send = (msg) => browser.runtime.sendMessage(msg).catch(() => null);
+  const measurementId = (typeof gaDetectedId === 'function') ? gaDetectedId() : undefined;
+
+  const [gsc, ads, webceo, tracked, ga] = await Promise.all([
+    send({ action: 'gscGetPageData',          pageUrl: tab.url, range: ACTION_PLAN_RANGE }),
+    send({ action: 'adsGetPageData',          pageUrl: tab.url, range: ACTION_PLAN_RANGE }),
+    send({ action: 'webceoGetRankings',       pageUrl: tab.url, historyDepth: 2 }),
+    send({ action: 'webceoGetTrackedKeywords', pageUrl: tab.url }),
+    send({ action: 'gaGetPageData',           pageUrl: tab.url, range: ACTION_PLAN_RANGE, measurementId })
+  ]);
+  return { gsc, ads, webceo, tracked, ga };
+}
+
+// GSC queries split into the two bands that drive surgical wins.
+function actionPlanGscBands(gsc) {
+  const queries = (gsc && gsc.connected && Array.isArray(gsc.queries)) ? gsc.queries : [];
+  // Page-2 trap: already relevant (position 5–20) but stranded — sorted by reach
+  const pageTwo = queries
+    .filter(q => q.position >= 5 && q.position <= 20 && q.impressions >= 50)
+    .sort((a, b) => b.impressions - a.impressions)
+    .slice(0, 12);
+  // Title/meta problem: lots of impressions, poor click-through
+  const lowCtr = queries
+    .filter(q => q.impressions >= 200 && q.ctr < 0.02 && q.position <= 15)
+    .sort((a, b) => b.impressions - a.impressions)
+    .slice(0, 8);
+  return { pageTwo, lowCtr, count: queries.length };
+}
+
+// GA4 → plain behavioral facts (read-time gap, bounce, exits, channel split).
+function actionPlanGaSignals(ga, wordCount) {
+  if (!ga || !ga.connected || ga.error || !ga.totals) return null;
+  const t = ga.totals;
+  const out = {};
+  if (wordCount && t.avgEngagement != null) {
+    out.estReadSeconds = Math.round((wordCount / 200) * 60);   // ~200 wpm
+    out.avgEngagementSeconds = Math.round(t.avgEngagement);
+  }
+  if (t.bounceRate != null) out.bounceRatePct = Math.round(t.bounceRate * 100);
+  if (t.sessions != null) out.sessions = t.sessions;
+  if (Array.isArray(ga.nextPages) && ga.nextPages.length) {
+    out.nextPages = ga.nextPages.slice(0, 4).map(p => ({ path: p.path, pageviews: p.pageviews }));
+  }
+  if (Array.isArray(ga.channels) && ga.channels.length) {
+    out.channels = ga.channels.slice(0, 5)
+      .map(c => ({ channel: c.channel, sessions: c.sessions, bounceRatePct: Math.round((c.bounceRate || 0) * 100) }));
+  }
+  return out;
+}
+
+// Which integrations actually contributed signal (drives the Sources badges).
+function actionPlanSources(g) {
+  return {
+    gsc:    !!(g.gsc && g.gsc.connected && Array.isArray(g.gsc.queries) && g.gsc.queries.length),
+    ads:    !!(g.ads && g.ads.connected && ((g.ads.keywords && g.ads.keywords.length) || (g.ads.searchTerms && g.ads.searchTerms.length))),
+    webceo: !!(g.webceo && g.webceo.connected && Array.isArray(g.webceo.rows) && g.webceo.rows.length),
+    ga:     !!(g.ga && g.ga.connected && g.ga.totals && g.ga.totals.sessions)
+  };
+}
+
+// ─── Prompt assembly ──────────────────────────────────────────────────────────
+
+function actionPlanContext(g) {
+  const lines = [];
+  const pd = pageData || {};
+
+  // Supply side — what's on the page
+  lines.push('## PAGE (supply)');
+  let pageUrl = pd.canonical || '';
+  lines.push(`URL: ${pageUrl || '(unknown)'}`);
+  if (pd.title) lines.push(`Title: "${pd.title.text}"`);
+  if (pd.metaDescription) lines.push(`Meta description: "${pd.metaDescription.text}"`);
+  if (Array.isArray(pd.headings) && pd.headings.length) {
+    lines.push('Heading outline:');
+    pd.headings.slice(0, 40).forEach(h => lines.push(`  ${h.tag.toUpperCase()}: ${h.text}`));
+  }
+  if (pd.bodyWordCount != null) lines.push(`Body word count: ${pd.bodyWordCount}`);
+  const schemaTypes = (pd.structuredData || []).map(s => [].concat(s['@type'])[0]).filter(Boolean);
+  lines.push(`Schema types: ${schemaTypes.length ? schemaTypes.join(', ') : 'none'}`);
+
+  // Page insights, if Claude already labelled them (cached by loadAiInsights)
+  if (g.insights) {
+    lines.push(`Intent: ${g.insights.intent}; Sentiment: ${g.insights.sentiment}; Readability: ${g.insights.readability}; Audience: ${g.insights.audience}`);
+  }
+  if (pd.bodyTextExcerpt) lines.push(`Content excerpt: "${pd.bodyTextExcerpt}"`);
+
+  // Demand side — what the market is asking for
+  const bands = actionPlanGscBands(g.gsc);
+  if (bands.pageTwo.length || bands.lowCtr.length) {
+    lines.push('\n## GSC (demand — what people search; the highest-value input)');
+    if (bands.pageTwo.length) {
+      lines.push('Page-2 band (position 5–20, Google already finds you relevant — stranded just off page 1):');
+      bands.pageTwo.forEach(q => lines.push(`  "${q.query}" — ${q.impressions} impr/period, position ${q.position.toFixed(1)}, CTR ${(q.ctr * 100).toFixed(1)}%`));
+    }
+    if (bands.lowCtr.length) {
+      lines.push('High-impressions / low-CTR (title or meta problem, not content):');
+      bands.lowCtr.forEach(q => lines.push(`  "${q.query}" — ${q.impressions} impr, position ${q.position.toFixed(1)}, CTR ${(q.ctr * 100).toFixed(1)}%`));
+    }
+  }
+
+  if (g.ads && g.ads.connected) {
+    const terms = (g.ads.searchTerms || []).filter(t => (t.conversions || 0) > 0)
+      .sort((a, b) => b.conversions - a.conversions).slice(0, 10);
+    const kws = (g.ads.keywords || []).slice(0, 10);
+    if (terms.length || kws.length) {
+      lines.push('\n## ADS (what you pay for — money-backed intent)');
+      if (terms.length) {
+        lines.push('Converting search terms:');
+        terms.forEach(t => lines.push(`  "${t.text}" — ${(+t.conversions).toFixed(1)} conv, ${t.clicks} clicks`));
+      }
+      if (kws.length) {
+        lines.push('Bid keywords:');
+        kws.forEach(k => lines.push(`  "${k.text}"${k.qualityScore != null ? ` (QS ${k.qualityScore})` : ''}`));
+      }
+    }
+  }
+
+  if (g.webceo && g.webceo.connected && Array.isArray(g.webceo.rows) && g.webceo.rows.length) {
+    lines.push('\n## WEB CEO (keywords you deliberately track)');
+    // Best row per keyword (lowest current position), with trajectory
+    const byKw = {};
+    g.webceo.rows.forEach(r => {
+      if (r.position == null || r.position <= 0) return;
+      if (!byKw[r.keyword] || r.position < byKw[r.keyword].position) byKw[r.keyword] = r;
+    });
+    Object.values(byKw).slice(0, 15).forEach(r => {
+      let traj = '';
+      if (r.previous != null && r.previous > 0) {
+        const delta = r.previous - r.position;     // positive = improved (lower is better)
+        traj = delta === 0 ? ' (flat)' : delta > 0 ? ` (up ${delta})` : ` (down ${-delta})`;
+      }
+      lines.push(`  "${r.keyword}" — position ${r.position}${traj}`);
+    });
+  }
+
+  const gaSig = actionPlanGaSignals(g.ga, pd.bodyWordCount);
+  if (gaSig) {
+    lines.push('\n## GA4 (behavior — what happens after the click)');
+    if (gaSig.estReadSeconds != null) lines.push(`  Est. read time: ${gaSig.estReadSeconds}s; actual avg engagement: ${gaSig.avgEngagementSeconds}s`);
+    if (gaSig.bounceRatePct != null) lines.push(`  Bounce rate: ${gaSig.bounceRatePct}%${gaSig.sessions ? ` over ${gaSig.sessions} sessions` : ''}`);
+    if (gaSig.nextPages) lines.push(`  Top exits to: ${gaSig.nextPages.map(p => `${p.path} (${p.pageviews})`).join(', ')}`);
+    if (gaSig.channels) lines.push(`  Channels: ${gaSig.channels.map(c => `${c.channel} ${c.sessions}s/${c.bounceRatePct}% bounce`).join(', ')}`);
+  }
+
+  return lines.join('\n');
+}
+
+const ACTION_PLAN_SYSTEM = `You are an elite SEO and answer-engine-optimization strategist. You are given a single web page's CONTENT (supply) and its DEMAND data (Google Search Console queries, Google Ads search terms/keywords, Web CEO tracked rankings, GA4 behavior). Your job is to find the gap between what the market asks for and what the page actually says, and return surgical, evidence-backed recommendations.
+
+Rules:
+- Every recommendation MUST cite specific evidence from the data provided (a query and its impressions/position, a converting term, a tracked keyword's position, a behavioral number). Never give generic advice.
+- Prioritize the page-2 band (queries ranking 5–20 with real impressions) and high-impression/low-CTR queries — those are the highest-ROI fixes.
+- Name content the page is missing because the market asks for it (queries, converting ad terms) but it appears nowhere in the headings.
+- Use GA4 behavioral signals (read-time gap, bounce, exits) for experience/structure fixes.
+- effort is one of: "surgical" (minutes — tweak a title/heading/sentence), "moderate" (an hour — add a section/FAQ/schema), "rewrite" (major — reposition intent or restructure the page).
+- impact is one of: "high", "medium", "low".
+- Return 3–8 recommendations total. Order by impact within each effort tier.
+
+Respond with ONLY a compact JSON object, no prose, no code fences, exactly:
+{"recommendations":[{"change":"…","evidence":"…","effort":"surgical|moderate|rewrite","impact":"high|medium|low"}],"contentGaps":["…","…"]}
+- "change": the action to take (imperative, specific).
+- "evidence": the data behind it, citing the actual numbers.
+- "contentGaps": short topic labels (2–4 words) the page should cover but doesn't. 0–8 items.`;
+
+// ─── Normalization (accept only well-formed, enum-valid recs) ─────────────────
+
+function actionPlanParse(text) {
+  let s = (text || '').replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
+  try { return JSON.parse(s); } catch { /* try to salvage a JSON object */ }
+  const first = s.indexOf('{'), last = s.lastIndexOf('}');
+  if (first !== -1 && last > first) {
+    try { return JSON.parse(s.slice(first, last + 1)); } catch { /* give up */ }
+  }
+  return null;
+}
+
+const _EFFORTS = ['surgical', 'moderate', 'rewrite'];
+const _IMPACTS = ['high', 'medium', 'low'];
+
+function normalizeActionPlan(raw) {
+  if (!raw || !Array.isArray(raw.recommendations)) return null;
+  const recommendations = raw.recommendations.map(r => {
+    const effort = _EFFORTS.includes(String(r.effort).toLowerCase()) ? String(r.effort).toLowerCase() : 'moderate';
+    const impact = _IMPACTS.includes(String(r.impact).toLowerCase()) ? String(r.impact).toLowerCase() : 'medium';
+    const change = String(r.change || '').trim();
+    const evidence = String(r.evidence || '').trim();
+    return change ? { change, evidence, effort, impact } : null;
+  }).filter(Boolean);
+  if (!recommendations.length) return null;
+  const contentGaps = Array.isArray(raw.contentGaps)
+    ? raw.contentGaps.map(s => String(s || '').trim()).filter(Boolean).slice(0, 8)
+    : [];
+  return { recommendations, contentGaps };
+}
+
+// ─── Main entry: generate (or render from cache) ──────────────────────────────
+
+async function loadActionPlan(forceRefresh = false) {
+  if (_actionPlanLoading) return;
+
+  if (!pageData) { _actionPlanError = 'No page data — open this on a regular web page.'; renderActionPlanPanel(); return; }
+
+  const { claudeApiKey } = await browser.storage.local.get('claudeApiKey');
+  if (!claudeApiKey) { _actionPlanError = 'Add a Claude API key in Settings to generate an action plan.'; renderActionPlanPanel(); return; }
+
+  const tab = await getActiveTab();
+  const cacheKey = (tab.url || '').split('#')[0];
+
+  const { actionPlanCache } = await browser.storage.local.get('actionPlanCache');
+  const cache = actionPlanCache || {};
+  const cached = cache[cacheKey];
+  if (!forceRefresh && cached && (Date.now() - cached.fetchedAt < ACTION_PLAN_TTL_MS)) {
+    _actionPlan = cached.plan;
+    _actionPlanSources = cached.sources;
+    _actionPlanFetchedAt = cached.fetchedAt;
+    _actionPlanError = '';
+    renderActionPlanPanel();
+    refreshActionPlanNav();
+    return;
+  }
+
+  _actionPlanLoading = true;
+  _actionPlanError = '';
+  renderActionPlanPanel();
+
+  try {
+    const gathered = await gatherActionPlanData(tab);
+
+    // Pull the four page insights from the same cache loadAiInsights writes to
+    try {
+      const { aiInsightsCache } = await browser.storage.local.get('aiInsightsCache');
+      const ins = aiInsightsCache && aiInsightsCache[cacheKey];
+      if (ins && ins.intent) gathered.insights = ins;
+    } catch { /* insights are optional */ }
+
+    const sources = actionPlanSources(gathered);
+    const context = actionPlanContext(gathered);
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: ACTION_PLAN_MODEL,
+        max_tokens: 2000,
+        system: ACTION_PLAN_SYSTEM,
+        messages: [{ role: 'user', content: context }]
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message ?? `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const plan = normalizeActionPlan(actionPlanParse(data.content?.[0]?.text));
+    if (!plan) throw new Error('Could not parse a plan from the response.');
+
+    _actionPlan = plan;
+    _actionPlanSources = sources;
+    _actionPlanFetchedAt = Date.now();
+
+    cache[cacheKey] = { plan, sources, fetchedAt: _actionPlanFetchedAt };
+    const keys = Object.keys(cache);
+    if (keys.length > 20) {
+      keys.sort((a, b) => cache[a].fetchedAt - cache[b].fetchedAt);
+      keys.slice(0, keys.length - 20).forEach(k => delete cache[k]);
+    }
+    browser.storage.local.set({ actionPlanCache: cache });
+  } catch (err) {
+    _actionPlanError = err.message;
+  } finally {
+    _actionPlanLoading = false;
+    renderActionPlanPanel();
+    refreshActionPlanNav();
+  }
+}
+
+// Hydrate the nav-row status from cache without generating (called on page load).
+async function hydrateActionPlanNav() {
+  try {
+    const tab = await getActiveTab();
+    const cacheKey = (tab.url || '').split('#')[0];
+    const { actionPlanCache } = await browser.storage.local.get('actionPlanCache');
+    const cached = actionPlanCache && actionPlanCache[cacheKey];
+    if (cached && (Date.now() - cached.fetchedAt < ACTION_PLAN_TTL_MS)) {
+      _actionPlan = cached.plan;
+      _actionPlanSources = cached.sources;
+      _actionPlanFetchedAt = cached.fetchedAt;
+    } else {
+      _actionPlan = null;
+    }
+  } catch { _actionPlan = null; }
+  refreshActionPlanNav();
+}
+
+// ─── Rendering ────────────────────────────────────────────────────────────────
+
+function actionPlanAgo(ts) {
+  if (!ts) return '';
+  const secs = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (secs < 60) return 'just now';
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
+}
+
+function actionPlanRecCard(rec) {
+  const card = document.createElement('div');
+  card.className = `ap-rec ap-rec--${rec.effort}`;
+
+  const top = document.createElement('div');
+  top.className = 'ap-rec-top';
+  const change = document.createElement('div');
+  change.className = 'ap-rec-change';
+  change.textContent = rec.change;
+  top.appendChild(change);
+
+  const tags = document.createElement('div');
+  tags.className = 'ap-rec-tags';
+  const effortTag = document.createElement('span');
+  effortTag.className = `ap-tag ap-tag--${rec.effort}`;
+  effortTag.textContent = rec.effort;
+  tags.appendChild(effortTag);
+  const impactTag = document.createElement('span');
+  impactTag.className = `ap-tag ap-tag-impact--${rec.impact}`;
+  impactTag.textContent = rec.impact;
+  tags.appendChild(impactTag);
+  top.appendChild(tags);
+  card.appendChild(top);
+
+  if (rec.evidence) {
+    const ev = document.createElement('div');
+    ev.className = 'ap-rec-evidence';
+    ev.textContent = rec.evidence;
+    card.appendChild(ev);
+  }
+  return card;
+}
+
+function renderActionPlanPanel() {
+  const root = document.getElementById('actionplan-content');
+  if (!root) return;
+  root.replaceChildren();
+
+  // Loading
+  if (_actionPlanLoading) {
+    const sec = document.createElement('section');
+    sec.className = 'field-section ap-center';
+    sec.appendChild(svgFromString('<svg class="ap-spinner" viewBox="0 0 16 16" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M14 8A6 6 0 1 1 8 2"/></svg>'));
+    root.appendChild(sec);
+    return;
+  }
+
+  // Error
+  if (_actionPlanError) {
+    const sec = document.createElement('section');
+    sec.className = 'field-section';
+    const msg = document.createElement('div');
+    msg.className = 'field-hint hint-red';
+    msg.textContent = _actionPlanError;
+    sec.appendChild(msg);
+    if (/Claude API key/.test(_actionPlanError)) {
+      const btn = document.createElement('button');
+      btn.className = 'save-key-btn';
+      btn.style.marginTop = '8px';
+      btn.textContent = 'Open Settings';
+      btn.addEventListener('click', showSettings);
+      sec.appendChild(btn);
+    }
+    root.appendChild(sec);
+    return;
+  }
+
+  if (!_actionPlan) return;   // panel opened but generation hasn't happened yet
+
+  // Sources + refresh + timestamp
+  const head = document.createElement('section');
+  head.className = 'field-section';
+  const headRow = document.createElement('div');
+  headRow.className = 'field-header';
+  const label = document.createElement('span');
+  label.className = 'field-label';
+  label.textContent = 'Sources';
+  headRow.appendChild(label);
+
+  const right = document.createElement('div');
+  right.className = 'ap-head-right';
+  const stamp = document.createElement('span');
+  stamp.className = 'ap-stamp';
+  stamp.textContent = `generated ${actionPlanAgo(_actionPlanFetchedAt)}`;
+  right.appendChild(stamp);
+
+  // Refresh — same glyph as the app-header refresh (next to the wrench)
+  const refresh = document.createElement('button');
+  refresh.className = 'icon-btn';
+  refresh.title = 'Regenerate the plan';
+  refresh.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 8A5.5 5.5 0 1 1 8 2.5a5.5 5.5 0 0 1 3.9 1.6L13.5 5.6"/><polyline points="13.5 2 13.5 5.6 9.9 5.6"/></svg>'));
+  refresh.addEventListener('click', () => loadActionPlan(true));
+  right.appendChild(refresh);
+
+  // Export the recommendations to an RTF file
+  const exportBtn = document.createElement('button');
+  exportBtn.className = 'icon-btn';
+  exportBtn.title = 'Export recommendations (.rtf)';
+  exportBtn.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8"/><polyline points="5 7 8 10 11 7"/><path d="M3 12.5h10"/></svg>'));
+  exportBtn.addEventListener('click', exportActionPlanRtf);
+  right.appendChild(exportBtn);
+
+  headRow.appendChild(right);
+  head.appendChild(headRow);
+
+  const badges = document.createElement('div');
+  badges.className = 'ap-sources';
+  [['gsc', 'GSC'], ['ads', 'Ads'], ['webceo', 'Ranking'], ['ga', 'GA4']].forEach(([k, lbl]) => {
+    const b = document.createElement('span');
+    const on = _actionPlanSources && _actionPlanSources[k];
+    b.className = 'ap-src' + (on ? ' ap-src--on' : ' ap-src--off');
+    b.textContent = on ? lbl : `${lbl} not used`;
+    badges.appendChild(b);
+  });
+  head.appendChild(badges);
+  root.appendChild(head);
+
+  // Three tiers
+  ACTION_PLAN_TIERS.forEach(tier => {
+    const recs = _actionPlan.recommendations.filter(r => r.effort === tier.effort);
+    if (!recs.length) return;
+    const sec = document.createElement('section');
+    sec.className = 'field-section';
+    const h = document.createElement('div');
+    h.className = 'field-header';
+    const lbl = document.createElement('span');
+    lbl.className = 'field-label';
+    lbl.textContent = tier.title;
+    h.appendChild(lbl);
+    sec.appendChild(h);
+    const list = document.createElement('div');
+    list.className = 'ap-rec-list';
+    recs.forEach(r => list.appendChild(actionPlanRecCard(r)));
+    sec.appendChild(list);
+    root.appendChild(sec);
+  });
+
+  // Content gaps (inert chips)
+  if (_actionPlan.contentGaps.length) {
+    const sec = document.createElement('section');
+    sec.className = 'field-section';
+    const h = document.createElement('div');
+    h.className = 'field-header';
+    const lbl = document.createElement('span');
+    lbl.className = 'field-label';
+    lbl.textContent = 'Content gaps';
+    h.appendChild(lbl);
+    sec.appendChild(h);
+    const chips = document.createElement('div');
+    chips.className = 'ap-gaps';
+    _actionPlan.contentGaps.forEach(g => {
+      const c = document.createElement('span');
+      c.className = 'ap-gap';
+      c.textContent = g;
+      chips.appendChild(c);
+    });
+    sec.appendChild(chips);
+    root.appendChild(sec);
+  }
+}
+
+// ─── Export to RTF ────────────────────────────────────────────────────────────
+
+// RTF is 7-bit ASCII: escape control chars and emit non-ASCII as \uN escapes.
+function rtfEscape(s) {
+  let out = '';
+  for (const ch of String(s)) {
+    if (ch === '\\') out += '\\\\';
+    else if (ch === '{') out += '\\{';
+    else if (ch === '}') out += '\\}';
+    else if (ch === '\n') out += '\\par ';
+    else {
+      const code = ch.codePointAt(0);
+      out += code > 127 ? `\\u${code > 32767 ? code - 65536 : code}?` : ch;
+    }
+  }
+  return out;
+}
+
+async function exportActionPlanRtf() {
+  if (!_actionPlan) return;
+
+  let host = 'page';
+  try { host = new URL((pageData && pageData.canonical) || (await getActiveTab()).url).hostname.replace(/^www\./, ''); } catch { /* keep default */ }
+
+  const parts = [];
+  parts.push(`{\\b\\fs32 Action Plan}\\par {\\fs18 ${rtfEscape(host)} \\u8212? generated ${rtfEscape(new Date(_actionPlanFetchedAt || Date.now()).toLocaleString())}}\\par\\par`);
+
+  ACTION_PLAN_TIERS.forEach(tier => {
+    const recs = _actionPlan.recommendations.filter(r => r.effort === tier.effort);
+    if (!recs.length) return;
+    parts.push(`{\\b\\fs26 ${rtfEscape(tier.title)}}\\par`);
+    recs.forEach(r => {
+      parts.push(`{\\b ${rtfEscape(r.change)}}  {\\i [${rtfEscape(r.effort)} \\u183? ${rtfEscape(r.impact)} impact]}\\par`);
+      if (r.evidence) parts.push(`${rtfEscape(r.evidence)}\\par`);
+      parts.push('\\par');
+    });
+  });
+
+  if (_actionPlan.contentGaps.length) {
+    parts.push(`{\\b\\fs26 Content gaps}\\par`);
+    parts.push(`${rtfEscape(_actionPlan.contentGaps.join(', '))}\\par`);
+  }
+
+  const rtf = `{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Helvetica;}}\\f0\\fs22 ${parts.join('')}}`;
+  const blob = new Blob([rtf], { type: 'application/rtf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `action-plan-${host}.rtf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Set the nav-row state on the Overview (chevron + star; "N recs" once generated)
+function refreshActionPlanNav() {
+  const status = document.getElementById('actionplan-status');
+  if (!status) return;
+  if (_actionPlan && _actionPlan.recommendations.length) {
+    status.textContent = `${_actionPlan.recommendations.length} recs`;
+    status.classList.remove('hidden');
+  } else {
+    status.textContent = '';
+    status.classList.add('hidden');
+  }
+}

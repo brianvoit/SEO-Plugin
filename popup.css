@@ -1900,6 +1900,38 @@ body.settings-open #update-footer { margin-top: auto; }
 
 #gsc-not-connected, #gsc-no-property, #gsc-error { padding: 16px 0; text-align: center; }
 
+/* Query-intent filter chips (Search tab) */
+.gsc-intent-filters { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+.gsc-intent-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 600; line-height: 1;
+  padding: 4px 9px; border-radius: 20px;
+  border: 1px solid var(--border); background: none; color: var(--text-muted);
+  cursor: pointer; transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.gsc-intent-chip:hover { border-color: var(--text-muted); }
+.gsc-intent-chip.is-disabled {
+  color: var(--text-none); cursor: default; opacity: 0.55;
+}
+.gsc-intent-chip.is-disabled:hover { border-color: var(--border); }
+.gsc-intent-count {
+  font-size: 10px; font-weight: 700;
+  padding: 0 5px; border-radius: 10px;
+  background: color-mix(in srgb, var(--text-muted) 16%, transparent); color: inherit;
+}
+/* Inactive chips carry their intent colour as a legend */
+.gsc-intent-chip--info { color: var(--accent); }
+.gsc-intent-chip--commercial { color: var(--chart-impressions); }
+.gsc-intent-chip--transactional { color: var(--hint-green); }
+.gsc-intent-chip--navigational { color: var(--hint-amber); }
+/* Active = filled (generic first, per-intent overrides after) */
+.gsc-intent-chip.is-active { color: #fff; border-color: transparent; background: var(--accent); }
+.gsc-intent-chip.is-active .gsc-intent-count { background: rgba(255, 255, 255, 0.25); color: #fff; }
+.gsc-intent-chip--info.is-active { background: var(--accent); }
+.gsc-intent-chip--commercial.is-active { background: var(--chart-impressions); }
+.gsc-intent-chip--transactional.is-active { background: var(--hint-green); }
+.gsc-intent-chip--navigational.is-active { background: var(--hint-amber); }
+
 /* Claude API key field reads green once saved, matching connected integrations */
 .api-key-input--saved {
   border-color: var(--hint-green);

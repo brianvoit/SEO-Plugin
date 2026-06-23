@@ -580,6 +580,7 @@
             </button>
           </div>
         </div>
+        <div id="gsc-intent-filters" class="gsc-intent-filters hidden"></div>
         <div id="gsc-queries-table" class="gsc-queries-table"></div>
         <div id="gsc-queries-empty" class="field-hint hidden">No query data for this page yet.</div>
         <button id="btn-gsc-more-queries" class="gsc-more-queries-btn hidden">Request more</button>
@@ -793,6 +794,7 @@
 
       <section class="field-section" id="ads-terms-section">
         <div class="field-header"><span class="field-label">SEARCH TERMS</span></div>
+        <div id="ads-terms-intent" class="gsc-intent-filters hidden"></div>
         <div id="ads-terms-table"></div>
       </section>
     </div>
@@ -844,6 +846,7 @@
           <span class="field-label">KEYWORD RANKINGS</span>
           <label class="ranking-onpage-toggle"><input type="checkbox" id="ranking-onpage-only" /> This page only</label>
         </div>
+        <div id="ranking-intent-filters" class="gsc-intent-filters hidden"></div>
         <div id="ranking-table"></div>
         <div id="ranking-empty" class="field-hint hidden">No ranking data for this project yet.</div>
       </section>
@@ -1164,6 +1167,7 @@
   </footer>
 
   <script src="popup-shared.js"></script>
+  <script src="popup-intent.js"></script>
   <script src="popup-nav.js"></script>
   <script src="popup-inspector.js"></script>
   <script src="popup-generate.js"></script>

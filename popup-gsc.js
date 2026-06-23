@@ -15,6 +15,9 @@ let _gscFilled = [];
 let _gscOverviewData = null;
 let _gscSelectedQuery = null;
 
+// Query-intent classification lives in popup-intent.js (shared with Ranking/Ads).
+let _gscIntentFilter = null;       // null = All, else one of INTENTS
+
 // Chart metrics config. The chart helpers below are generic — popup-ga.js
 // passes its own config of the same shape. Optional per-metric fields:
 //   invertY    zero-at-top axis (lower is better, e.g. SERP position)
@@ -638,6 +641,7 @@ function renderGscQueries(queries, pageUrl) {
 
   if (!queries.length) {
     document.getElementById('gsc-queries-empty').classList.remove('hidden');
+    document.getElementById('gsc-intent-filters').classList.add('hidden');
     moreBtn.classList.add('hidden');
     return;
   }
@@ -658,13 +662,21 @@ function renderGscQueries(queries, pageUrl) {
   });
 
   const sorted = sortGscQueries(queries, gscQuerySort);
+  // Branded filter first; intent chips count over this set, then intent narrows rows
+  const visible = sorted.filter(q => !(gscHideBranded && isQueryBranded(q.query, pattern)));
+  renderIntentChips(document.getElementById('gsc-intent-filters'), visible, q => q.query, _gscIntentFilter, (intent) => {
+    _gscIntentFilter = intent;
+    _gscSelectedQuery = null;                 // intent change supersedes a single-query selection
+    renderGscQueries(_gscQueries, _gscPageUrl);
+    refreshGscChartForState();
+  });
+
   let shown = 0;
-  sorted.forEach(q => {
-    const branded = isQueryBranded(q.query, pattern);
-    if (gscHideBranded && branded) return;
+  visible.forEach(q => {
+    if (_gscIntentFilter && intentOf(q.query) !== _gscIntentFilter) return;
     shown++;
     const locations = gscQueryLocations(q.query, pageData);
-    const row = buildQueryDataRow(q, locations, branded, q.query === _gscSelectedQuery);
+    const row = buildQueryDataRow(q, locations, isQueryBranded(q.query, pattern), q.query === _gscSelectedQuery);
     row.addEventListener('click', () => selectGscQuery(q.query));
     container.appendChild(row);
   });
@@ -673,14 +685,21 @@ function renderGscQueries(queries, pageUrl) {
   // Cross-tab chips load lazily, then re-render once: Web CEO "Tracked" + Ads "Ad"
   if (typeof ensureWebceoTracked === 'function') ensureWebceoTracked(() => renderGscQueries(queries, pageUrl));
   if (typeof ensureAdsKeywordSet === 'function') ensureAdsKeywordSet(() => renderGscQueries(queries, pageUrl));
+  // Intent classification (Haiku, shared cache): re-renders once when ready
+  ensureIntents(queries.map(q => q.query), () => renderGscQueries(_gscQueries, _gscPageUrl));
 }
 
 // ─── Google Search Console: click-to-filter chart by query ──────────────────
 
-function showGscQueryFilterBar(query) {
-  document.getElementById('gsc-query-filter-text').textContent = query;
-  document.getElementById('gsc-query-filter-bar').classList.remove('hidden');
+function showGscFilterBar(kind, value) {
+  const bar = document.getElementById('gsc-query-filter-bar');
+  const label = bar.querySelector('.gsc-query-filter-label');
+  if (label) label.textContent = kind === 'intent' ? 'Filtered to intent:' : 'Filtered to query:';
+  document.getElementById('gsc-query-filter-text').textContent = value;
+  bar.classList.remove('hidden');
 }
+
+function showGscQueryFilterBar(query) { showGscFilterBar('query', query); }
 
 function hideGscQueryFilterBar() {
   document.getElementById('gsc-query-filter-bar').classList.add('hidden');
@@ -694,13 +713,38 @@ async function applyGscQueryFilter(query) {
   renderGscCharts(response.timeseries, response.totals, response.previousTotals, gscSelectedRange);
 }
 
+// Chart for an intent: aggregate the visible (branded-filtered) queries of that
+// intent via one GSC call, then render. The set is always ≥1 (zero chips disabled).
+async function applyGscIntentChartFilter(intent) {
+  showGscFilterBar('intent', intent);
+  const pattern = gscBrandedPattern();
+  const list = _gscQueries
+    .filter(q => !(gscHideBranded && isQueryBranded(q.query, pattern)))
+    .filter(q => intentOf(q.query) === intent)
+    .map(q => q.query);
+  if (!list.length) return;
+  const res = await browser.runtime.sendMessage({ action: 'gscGetQueriesData', pageUrl: _gscPageUrl, range: gscSelectedRange, queries: list });
+  // Bail if the user moved on (cleared the intent or picked a single query) mid-fetch
+  if (_gscIntentFilter !== intent || _gscSelectedQuery) return;
+  if (!res || !res.connected || res.error) return;
+  renderGscCharts(res.timeseries, res.totals, res.previousTotals, gscSelectedRange);
+}
+
+// Single source of truth for what the top chart should show, by current state:
+// a selected query > an active intent filter > the page overview (branded-aware).
+function refreshGscChartForState() {
+  if (_gscSelectedQuery) { applyGscQueryFilter(_gscSelectedQuery); return; }
+  if (_gscIntentFilter) { applyGscIntentChartFilter(_gscIntentFilter); return; }
+  hideGscQueryFilterBar();
+  refreshGscChartForBranded();
+}
+
 function selectGscQuery(query) {
   if (_gscSelectedQuery === query) {
     _gscSelectedQuery = null;
-    hideGscQueryFilterBar();
     renderGscQueries(_gscQueries, _gscPageUrl);
-    // Restore the chart — branded-excluded if Hide branded is on, else overview
-    refreshGscChartForBranded();
+    // Restore the chart: intent chart if a filter is active, else overview
+    refreshGscChartForState();
     return;
   }
   _gscSelectedQuery = query;
@@ -825,6 +869,7 @@ function renderGscPanel(response, pageUrl) {
   _gscSiteUrl = response.siteUrl;
   _gscQueries = response.queries || [];
   _gscQueriesExhausted = _gscQueries.length < 25;   // first page is 25
+  if (_gscPageUrl !== pageUrl) _gscIntentFilter = null;   // new page → reset intent filter
   _gscPageUrl = pageUrl;
   _gscOverviewData = response.overview;
 
@@ -839,6 +884,10 @@ function renderGscPanel(response, pageUrl) {
 
   if (_gscSelectedQuery) {
     applyGscQueryFilter(_gscSelectedQuery);
+  } else if (_gscIntentFilter) {
+    // Intent persists across range changes; classifications are cached for the page
+    refreshGscChartForState();
+    if (gscHideBranded && gscBrandedPattern()) topUpGscQueries(25);
   } else {
     hideGscQueryFilterBar();
     // Honor a persisted Hide-branded: drop branded from the chart + backfill table
@@ -890,7 +939,7 @@ document.getElementById('btn-gsc-branded-toggle').addEventListener('click', () =
   browser.storage.local.set({ gscHideBranded });
   if (_gscPageUrl) {
     renderGscQueries(_gscQueries, _gscPageUrl);
-    refreshGscChartForBranded();              // chart drops/restores branded traffic
+    refreshGscChartForState();                 // chart follows selection/intent/branded
     if (gscHideBranded) topUpGscQueries(25);  // backfill the table to ~25 visible
   }
 });
@@ -907,7 +956,12 @@ document.getElementById('btn-gsc-more-queries').addEventListener('click', async 
 });
 
 document.getElementById('btn-gsc-clear-query-filter').addEventListener('click', () => {
-  if (_gscSelectedQuery) selectGscQuery(_gscSelectedQuery);
+  if (_gscSelectedQuery) { selectGscQuery(_gscSelectedQuery); return; }
+  if (_gscIntentFilter) {
+    _gscIntentFilter = null;
+    renderGscQueries(_gscQueries, _gscPageUrl);
+    refreshGscChartForState();
+  }
 });
 
 document.querySelectorAll('#gsc-metric-toggles .gsc-metric-toggle').forEach(btn => {

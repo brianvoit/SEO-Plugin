@@ -7,6 +7,7 @@ let adsSelectedRange = 30;
 let _adsHost = null;
 let _adsData = null;                                   // last adsGetPageData response
 let _adsFilter = null;                                 // { type:'adGroup'|'keyword'|'searchTerm', ... } | null
+let _adsTermIntent = null;                             // Search Terms intent filter (null = All)
 let _adsFilled = [];                                   // chart timeseries currently displayed
 let adsActiveMetrics = { impressions: true, clicks: true, cost: true, conversions: true };
 
@@ -247,7 +248,7 @@ const ADS_TERM_COLS = [
   { key: 'conversions', label: 'Conv' }
 ];
 
-function buildAdsMetricTable(container, rows, { withQs = false } = {}) {
+function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = null } = {}) {
   const cols = withQs ? ADS_KW_COLS : ADS_TERM_COLS;
   if (!container._sort) container._sort = { column: 'impressions', dir: 'desc' };
   const sort = container._sort;
@@ -273,7 +274,9 @@ function buildAdsMetricTable(container, rows, { withQs = false } = {}) {
     });
     container.appendChild(header);
 
-    const visible = rows.filter(r => withQs ? adsKeywordVisible(r) : adsTermVisible(r));
+    const visible = rows.filter(r =>
+      (withQs ? adsKeywordVisible(r) : adsTermVisible(r)) &&
+      (!intentFilter || intentOf(r.text) === intentFilter));
     const sorted = visible.sort((a, b) => {
       if (sort.column === 'text') {
         const av = (a.text || '').toLowerCase(), bv = (b.text || '').toLowerCase();
@@ -357,7 +360,13 @@ async function requestMoreAdsSearchTerms(btn) {
       _adsData.searchTermsLimited = res.searchTermsLimited;
       const tt = document.getElementById('ads-terms-table');
       tt._currency = _adsData.currency;
-      buildAdsMetricTable(tt, _adsData.searchTerms);
+      const terms = _adsData.searchTerms;
+      renderIntentChips(document.getElementById('ads-terms-intent'), terms.filter(adsTermVisible), t => t.text, _adsTermIntent, (intent) => {
+        _adsTermIntent = intent;
+        renderAdsAll();
+      });
+      buildAdsMetricTable(tt, terms, { intentFilter: _adsTermIntent });
+      ensureIntents(terms.map(t => t.text), () => renderAdsAll());
       return;
     }
   } catch { /* fall through to re-enable */ }
@@ -476,8 +485,18 @@ function renderAdsAll() {
   renderAdsTree();
   const kt = document.getElementById('ads-keywords-table'); kt._currency = _adsData.currency;
   buildAdsMetricTable(kt, _adsData.keywords || [], { withQs: true });
+
   const tt = document.getElementById('ads-terms-table'); tt._currency = _adsData.currency;
-  buildAdsMetricTable(tt, _adsData.searchTerms || []);
+  const terms = _adsData.searchTerms || [];
+  // Intent chips count over the cross-filter-visible terms (all intents), then narrow
+  const xfTerms = terms.filter(adsTermVisible);
+  renderIntentChips(document.getElementById('ads-terms-intent'), xfTerms, t => t.text, _adsTermIntent, (intent) => {
+    _adsTermIntent = intent;
+    renderAdsAll();
+  });
+  buildAdsMetricTable(tt, terms, { intentFilter: _adsTermIntent });
+  // Classify search terms by intent (shared Haiku cache); re-render once when ready
+  ensureIntents(terms.map(t => t.text), () => renderAdsAll());
 }
 
 // Metric scorecards toggle their series in/out of the chart
@@ -553,6 +572,7 @@ function renderAdsPanel(response) {
   if (hasAds) {
     _adsData = response;
     _adsFilter = null;
+    _adsTermIntent = null;
     _adsFilled = response.timeseries || [];
     renderAdsScorecards(response.totals, response.previousTotals);
     renderAdsChart();

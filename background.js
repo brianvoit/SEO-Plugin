@@ -923,6 +923,70 @@ async function gscGetQueryData({ pageUrl, range, query, forceRefresh }) {
   return { connected: true, ...entry };
 }
 
+// Aggregated timeseries/totals for a SET of queries (intent-filter chart on the
+// Search tab). GSC joins multiple dimensionFilterGroups with AND, so an OR-of-
+// queries can't be expressed server-side. Instead fetch date×query rows for the
+// page (one page filter) and aggregate client-side over the requested set.
+async function gscGetQueriesData({ pageUrl, range, queries }) {
+  const tokenResult = await gscGetAccessToken();
+  if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
+  if (tokenResult.error === 'REAUTH_REQUIRED') return { connected: false, reauthRequired: true };
+  if (tokenResult.error) return { connected: true, error: tokenResult.error };
+  const accessToken = tokenResult.accessToken;
+
+  const list = (Array.isArray(queries) ? queries : []).map(q => String(q || '')).filter(Boolean);
+  if (!list.length) {
+    return { connected: true, timeseries: [], totals: gscAggregateTotals([]), previousTotals: gscAggregateTotals([]) };
+  }
+  const set = new Set(list.map(q => q.toLowerCase()));
+
+  let sites;
+  try { sites = await gscFetchSites(accessToken); }
+  catch (err) { return { connected: true, error: err.code || 'API_ERROR', detail: err.detail }; }
+
+  const siteUrl = gscResolveSiteUrl(sites, pageUrl, await gscLoadOverride(pageUrl));
+  if (!siteUrl) return { connected: true, error: 'NO_PROPERTY' };
+
+  const { startDate, endDate, prevStartDate, prevEndDate } = gscDateRanges(range);
+  const pageFilter = { dimensionFilterGroups: [{ filters: [{ dimension: 'page', operator: 'equals', expression: pageUrl }] }] };
+
+  // Fetch per-(date,query) rows for a range, keep only the set, re-aggregate by
+  // date (impression-weighted position) into the same shape as the page chart.
+  const fetchAgg = async (sd, ed) => {
+    const data = await gscQuery(accessToken, siteUrl, {
+      startDate: sd, endDate: ed, dimensions: ['date', 'query'], rowLimit: 25000, dataState: 'all', ...pageFilter
+    });
+    const byDate = {};
+    (data.rows || []).forEach(r => {
+      if (!set.has((r.keys[1] || '').toLowerCase())) return;
+      const date = r.keys[0];
+      if (!byDate[date]) byDate[date] = { date, clicks: 0, impressions: 0, _pw: 0 };
+      byDate[date].clicks += r.clicks;
+      byDate[date].impressions += r.impressions;
+      byDate[date]._pw += r.position * r.impressions;
+    });
+    return Object.keys(byDate).sort().map(d => {
+      const o = byDate[d];
+      return { date: d, clicks: o.clicks, impressions: o.impressions, ctr: o.impressions ? o.clicks / o.impressions : 0, position: o.impressions ? o._pw / o.impressions : 0 };
+    });
+  };
+
+  let timeseries, prevSeries;
+  try {
+    [timeseries, prevSeries] = await Promise.all([fetchAgg(startDate, endDate), fetchAgg(prevStartDate, prevEndDate)]);
+  } catch (err) {
+    if (err.code === 'RATE_LIMITED') return { connected: true, error: 'RATE_LIMITED' };
+    return { connected: true, error: 'API_ERROR', detail: err.detail };
+  }
+
+  return {
+    connected: true,
+    timeseries,
+    totals: gscAggregateTotals(timeseries),
+    previousTotals: gscAggregateTotals(prevSeries)
+  };
+}
+
 // Next page of queries for the table ("Request More" / branded top-up). Not
 // cached — it's an explicit, paged fetch on top of the first 25.
 async function gscGetMoreQueries({ pageUrl, range, startRow }) {
@@ -2170,6 +2234,7 @@ browser.runtime.onMessage.addListener((message) => {
     case 'gscGetPageData':     return gscGetPageData(message);
     case 'gscGetQueryData':    return gscGetQueryData(message);
     case 'gscGetMoreQueries':  return gscGetMoreQueries(message);
+    case 'gscGetQueriesData':  return gscGetQueriesData(message);
     case 'gscGetChartData':    return gscGetChartData(message);
     case 'gscResolveProperty': return gscResolveProperty(message);
     case 'gscSetProperty':     return gscSetProperty(message);

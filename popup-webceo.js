@@ -7,6 +7,7 @@ let webceoSelectedDepth = 2;          // history_depth (number of recent scans)
 let _webceoHost = null;
 let _webceoData = null;               // last webceoGetRankings response
 let _webceoOnPageOnly = false;        // filter to keywords ranking for this page
+let _webceoIntent = null;             // intent filter (null = All, else one of INTENTS)
 
 const WEBCEO_ERRORS = {
   NO_API_KEY: 'Add your Web CEO API key in Settings.',
@@ -89,6 +90,7 @@ function webceoChartSeries(selectedKeyword) {
   const byDate = {};
   ((_webceoData && _webceoData.rows) || []).forEach(r => {
     if (selectedKeyword && r.keyword !== selectedKeyword) return;
+    if (!selectedKeyword && _webceoIntent && intentOf(r.keyword) !== _webceoIntent) return;
     (r.history || []).forEach(pt => {
       if (!webceoRanked(pt.pos)) return;
       if (!byDate[pt.date]) byDate[pt.date] = { date: pt.date, sum: 0, n: 0 };
@@ -102,7 +104,7 @@ function renderRankingChart() {
   const container = document.getElementById('ranking-chart');
   if (!container) return;
   document.getElementById('ranking-chart-label').textContent =
-    _webceoSelectedKeyword ? `“${_webceoSelectedKeyword}”` : 'AVERAGE POSITION';
+    _webceoSelectedKeyword ? `“${_webceoSelectedKeyword}”` : (_webceoIntent ? `${_webceoIntent.toUpperCase()} · AVG POSITION` : 'AVERAGE POSITION');
   document.getElementById('btn-ranking-chart-clear').classList.toggle('hidden', !_webceoSelectedKeyword);
 
   const series = webceoChartSeries(_webceoSelectedKeyword);
@@ -221,7 +223,14 @@ function renderRankingTable() {
   container.appendChild(header);
 
   const engPos = (k, eng) => { const e = k.engines[eng]; return (e && webceoRanked(e.position)) ? e.position : null; };
-  const visible = keywords.filter(k => !_webceoOnPageOnly || webceoKeywordOnPage(k));
+  const onPageVisible = keywords.filter(k => !_webceoOnPageOnly || webceoKeywordOnPage(k));
+  // Intent chips count over the on-page-filtered set, then narrow the rows
+  renderIntentChips(document.getElementById('ranking-intent-filters'), onPageVisible, k => k.keyword, _webceoIntent, (intent) => {
+    _webceoIntent = intent;
+    renderRankingTable();
+    renderRankingChart();
+  });
+  const visible = onPageVisible.filter(k => !_webceoIntent || intentOf(k.keyword) === _webceoIntent);
   visible.sort((a, b) => {
     if (_rankSort.column === 'keyword') {
       const r = (a.keyword || '').toLowerCase().localeCompare((b.keyword || '').toLowerCase());
@@ -285,6 +294,9 @@ function renderRankingTable() {
     row.addEventListener('click', () => selectRankingKeyword(k.keyword));
     container.appendChild(row);
   });
+
+  // Classify keywords by intent (shared Haiku cache); re-renders once when ready
+  ensureIntents(((_webceoData && _webceoData.rows) || []).map(r => r.keyword), () => renderRankingTable());
 }
 
 function selectRankingKeyword(keyword) {
@@ -312,6 +324,7 @@ function renderWebceoPanel(response) {
 
   _webceoData = response;
   _webceoSelectedKeyword = null;
+  _webceoIntent = null;
   setWebceoDepthUI(webceoSelectedDepth);
   document.getElementById('ranking-onpage-only').checked = _webceoOnPageOnly;
   const kwCount = new Set((response.rows || []).map(r => r.keyword)).size;

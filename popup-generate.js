@@ -35,19 +35,45 @@ async function generateField(field) {
       .map(s => s.trim())
       .filter(Boolean);
 
+    // AI insights (intent + sentiment) from the per-URL cache
+    const cacheKey = (tab.url || '').split('#')[0];
+    const { aiInsightsCache } = await browser.storage.local.get('aiInsightsCache');
+    const insights = (aiInsightsCache || {})[cacheKey] || null;
+
+    // Top GSC keywords already loaded in the Search tab (best-effort)
+    const topKeywords = (typeof _gscQueries !== 'undefined' ? _gscQueries : [])
+      .slice(0, 5).map(q => q.query).filter(Boolean);
+
     const context = [
       `Page URL: ${pageUrl}`,
       `Current title tag: "${pageData.title.text}"`,
       pageData.metaDescription && `Current meta description: "${pageData.metaDescription.text}"`,
-      pageData.headings.length && `Headings:\n${pageData.headings.map(h => `${h.tag.toUpperCase()}: ${h.text}`).join('\n')}`,
-      pageData.bodyTextExcerpt && `Page content excerpt: "${pageData.bodyTextExcerpt}"`
+      topKeywords.length        && `Top search queries landing on this page: ${topKeywords.join(', ')}`,
+      insights?.intent          && `Detected search intent: ${insights.intent}`,
+      insights?.sentiment       && `Detected page sentiment: ${insights.sentiment}`,
+      pageData.headings.length  && `Headings:\n${pageData.headings.map(h => `${h.tag.toUpperCase()}: ${h.text}`).join('\n')}`,
+      pageData.bodyTextExcerpt  && `Page content excerpt: "${pageData.bodyTextExcerpt}"`
     ].filter(Boolean).join('\n\n');
 
+    const brandLine = brandTerms.length
+      ? `Do not include the site name, brand name, or company name (e.g. ${brandTerms.join(', ')}).`
+      : 'Do not include the site name or brand name.';
+
+    const intentLine = insights?.intent && OG_INTENT_GUIDANCE[insights.intent]
+      ? `\n- Search intent is ${insights.intent}: ${OG_INTENT_GUIDANCE[insights.intent]}`
+      : '';
+    const sentimentLine = insights?.sentiment && OG_SENTIMENT_GUIDANCE[insights.sentiment]
+      ? `\n- Page sentiment is ${insights.sentiment}: ${OG_SENTIMENT_GUIDANCE[insights.sentiment]}`
+      : '';
+    const keywordLine = topKeywords.length
+      ? `\n- Weave in 1–2 of the top search keywords where they fit naturally — do not keyword-stuff.`
+      : '';
+
     const system = `You are an SEO copywriter. Write a single replacement ${fieldLabel} for the page described below.
-- Do not include the site name, brand name, or company name${brandTerms.length ? ` (e.g., ${brandTerms.join(', ')})` : ''}.
-- Be specific and relevant to the page's actual topic and primary keywords. Do not invent facts not supported by the page content.
+- ${brandLine}
+- Be specific and relevant to the page's actual topic. Do not invent facts not supported by the page content.
 - Target length: ${ranges.min}-${ranges.max} characters, ideally close to ${ranges.target} characters.
-- Return only the ${fieldLabel} text, nothing else — no quotes, no labels, no explanation.`;
+- Return only the ${fieldLabel} text, nothing else — no quotes, no labels, no explanation.${intentLine}${sentimentLine}${keywordLine}`;
 
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -115,6 +141,50 @@ const OG_GEN_CONFIG = {
   'twitter:description': { maxChars: 125, platform: 'X (Twitter)',                             type: 'description' },
 };
 
+const OG_INTENT_GUIDANCE = {
+  Informational:  'Frame it to clarify what the reader will learn — lead with the insight or answer they are seeking.',
+  Navigational:   'Be direct and specific about exactly what they will find — clarity beats creativity here.',
+  Commercial:     'Highlight the key differentiator or value proposition that helps someone make a decision.',
+  Transactional:  'Lead with the outcome or benefit of acting — make the next step feel obvious and rewarding.',
+};
+
+const OG_SENTIMENT_GUIDANCE = {
+  Positive: 'Match the confident, upbeat tone of the page.',
+  Negative: 'Use an empathetic, reassuring tone — the reader may have a problem or concern.',
+  Neutral:  'Keep the tone clear and factual.',
+  Mixed:    'Balance the nuanced tone of the page — avoid being either too upbeat or too cautious.',
+};
+
+function buildOGSystemPrompt(key, cfg, insights, brandTerms) {
+  const brandLine = brandTerms.length
+    ? `Do not include the brand name or site name (e.g. ${brandTerms.join(', ')}).`
+    : 'Do not pad with the site name.';
+
+  const lines = [
+    `You are a social media copywriter. Write a single ${key} tag value for the page described below.`,
+    `- Platform: ${cfg.platform}`,
+    `- Maximum ${cfg.maxChars} characters — stay under this limit.`,
+    `- ${brandLine}`,
+    `- Do not invent facts not found in the page content.`,
+    `- Return only the text, no quotes, no labels, no explanation.`,
+  ];
+
+  if (insights?.intent && OG_INTENT_GUIDANCE[insights.intent]) {
+    lines.push(`- Search intent is ${insights.intent}: ${OG_INTENT_GUIDANCE[insights.intent]}`);
+  }
+  if (insights?.sentiment && OG_SENTIMENT_GUIDANCE[insights.sentiment]) {
+    lines.push(`- Page sentiment is ${insights.sentiment}: ${OG_SENTIMENT_GUIDANCE[insights.sentiment]}`);
+  }
+
+  if (cfg.type === 'title') {
+    lines.push('- Write a compelling, specific share headline. Weave in the most relevant keyword from the top search queries if it fits naturally — do not force it.');
+  } else {
+    lines.push('- Write an engaging description that makes people want to click. Naturally include 1–2 top search keywords where they fit — do not keyword-stuff.');
+  }
+
+  return lines.join('\n');
+}
+
 async function generateOGField(key, bodyEl, btn) {
   if (!pageData || btn.disabled) return;
 
@@ -139,6 +209,21 @@ async function generateOGField(key, bodyEl, btn) {
 
     const tab = await getActiveTab();
     const pageUrl = pageData.canonical || tab.url;
+
+    // Brand terms for this host
+    let host = '';
+    try { host = new URL(pageUrl, tab.url).hostname.replace(/^www\./, ''); } catch { /* ignore */ }
+    const brandTerms = (allBrandedTerms[host] || '').split('|').map(s => s.trim()).filter(Boolean);
+
+    // AI insights (intent + sentiment) from the per-URL cache
+    const cacheKey = (tab.url || '').split('#')[0];
+    const { aiInsightsCache } = await browser.storage.local.get('aiInsightsCache');
+    const insights = (aiInsightsCache || {})[cacheKey] || null;
+
+    // Top GSC keywords already loaded in the Search tab (best-effort — empty if not yet loaded)
+    const topKeywords = (typeof _gscQueries !== 'undefined' ? _gscQueries : [])
+      .slice(0, 5).map(q => q.query).filter(Boolean);
+
     const og = pageData.openGraph?.og || {};
     const tw = pageData.openGraph?.twitter || {};
 
@@ -146,25 +231,18 @@ async function generateOGField(key, bodyEl, btn) {
       `Page URL: ${pageUrl}`,
       `Title tag: "${pageData.title?.text}"`,
       pageData.metaDescription?.text && `Meta description: "${pageData.metaDescription.text}"`,
-      og['og:title']            && `Current og:title: "${og['og:title']}"`,
-      og['og:description']      && `Current og:description: "${og['og:description']}"`,
-      tw['twitter:title']       && `Current twitter:title: "${tw['twitter:title']}"`,
-      tw['twitter:description'] && `Current twitter:description: "${tw['twitter:description']}"`,
-      pageData.headings?.length && `Headings:\n${pageData.headings.map(h => `${h.tag.toUpperCase()}: ${h.text}`).join('\n')}`,
-      pageData.bodyTextExcerpt  && `Page content excerpt: "${pageData.bodyTextExcerpt}"`
+      topKeywords.length            && `Top search queries landing on this page: ${topKeywords.join(', ')}`,
+      insights?.intent              && `Detected search intent: ${insights.intent}`,
+      insights?.sentiment           && `Detected page sentiment: ${insights.sentiment}`,
+      og['og:title']                && `Current og:title: "${og['og:title']}"`,
+      og['og:description']          && `Current og:description: "${og['og:description']}"`,
+      tw['twitter:title']           && `Current twitter:title: "${tw['twitter:title']}"`,
+      tw['twitter:description']     && `Current twitter:description: "${tw['twitter:description']}"`,
+      pageData.headings?.length     && `Headings:\n${pageData.headings.map(h => `${h.tag.toUpperCase()}: ${h.text}`).join('\n')}`,
+      pageData.bodyTextExcerpt      && `Page content excerpt: "${pageData.bodyTextExcerpt}"`
     ].filter(Boolean).join('\n\n');
 
-    const system = cfg.type === 'title'
-      ? `You are a social media copywriter. Write a single ${key} tag value for the page described below.
-- Platform: ${cfg.platform}
-- Maximum ${cfg.maxChars} characters — stay under this limit.
-- Write a compelling, specific share headline. Do not pad with the site name. Do not invent facts not in the page.
-- Return only the text, no quotes, no labels, no explanation.`
-      : `You are a social media copywriter. Write a single ${key} tag value for the page described below.
-- Platform: ${cfg.platform}
-- Maximum ${cfg.maxChars} characters — stay under this limit.
-- Write an engaging, specific description that makes people want to click. Do not invent facts not in the page.
-- Return only the text, no quotes, no labels, no explanation.`;
+    const system = buildOGSystemPrompt(key, cfg, insights, brandTerms);
 
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',

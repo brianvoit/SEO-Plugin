@@ -328,7 +328,11 @@ function buildRedirectExportText() {
   lines.push('Redirect Path:');
   chain.forEach((hop, i) => {
     const isFinal = i === chain.length - 1 && !hop.pending;
-    const kind = hop.kind === 'client' ? (hop.metaDelay != null ? `META REFRESH ${hop.metaDelay}s` : 'JS/META') : (isFinal ? 'FINAL' : redirectTypeLabel(hop.status) || 'REDIRECT');
+    let kind;
+    if (hop.kind === 'client')        kind = hop.metaDelay != null ? `META REFRESH ${hop.metaDelay}s` : 'JS/META';
+    else if (hop.kind === 'internal') kind = 'HSTS';
+    else if (isFinal)                 kind = 'FINAL';
+    else                              kind = redirectTypeLabel(hop.status) || (i === 0 ? 'INITIAL' : 'REDIRECT');
     lines.push(`${i + 1}. [${hop.status}] ${kind} ${hop.url}`);
     const extras = hopExtras(hop);
     if (extras.length) lines.push(`     ${extras.join(' · ')}`);

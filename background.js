@@ -321,28 +321,14 @@ function getRedirectInfo({ tabId }) {
 
 const TRACE_TIMEOUT_MS = 12000;
 
-// Strip www + force http so the trace starts from the most "naked" variant and
-// cascades through the site's canonical redirects.
-function nakedTraceUrl(rawUrl) {
-  const u = new URL(rawUrl);
-  const host = u.hostname.replace(/^www\./i, '');
-  return `http://${host}${u.pathname}${u.search}`;
-}
-
-// Trace the naked (http, non-www) variant first to reveal the full canonical
-// chain; if that variant can't be reached, fall back to the page's own URL.
+// Trace the page's actual URL so the chain reflects how this specific URL
+// behaves — no synthesized bare-domain variant.
 async function traceUrl({ pageUrl }) {
-  let httpsUrl, nakedUrl;
-  try { httpsUrl = new URL(pageUrl).href; nakedUrl = nakedTraceUrl(pageUrl); }
+  let url;
+  try { url = new URL(pageUrl).href; }
   catch { return { error: 'BAD_URL', hops: [] }; }
-  if (!/^https?:/i.test(httpsUrl)) return { error: 'BAD_URL', hops: [] };
-
-  const res = await traceOnce(nakedUrl);
-  if ((!res.hops || !res.hops.length) && nakedUrl !== httpsUrl) {
-    const alt = await traceOnce(httpsUrl);
-    if (alt.hops && alt.hops.length) return alt;
-  }
-  return res;
+  if (!/^https?:/i.test(url)) return { error: 'BAD_URL', hops: [] };
+  return traceOnce(url);
 }
 
 function traceOnce(startUrl) {

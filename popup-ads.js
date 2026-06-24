@@ -838,8 +838,9 @@ function loadAdsPrefs() {
 // ─── Ad copy generator: Responsive display assets via Claude Sonnet ──────────
 // Generates Headlines (≤30), Long Headlines (≤90), and Descriptions (≤90) for
 // an ad pointing to the current page. Grounded in the page's intent + sentiment
-// (aiInsightsCache), its Web CEO tracked keywords, and the organic GSC queries
-// whose classified intent matches the page. Sonnet (not Haiku) for ad copy.
+// (aiInsightsCache), the actual Google Ads search terms that triggered ads for
+// it, its Web CEO tracked keywords, and the organic GSC queries whose classified
+// intent matches the page. Sonnet (not Haiku) for ad copy.
 
 const ADS_GEN_ASSETS = [
   { key: 'headlines',     label: 'Headlines',      max: 30 },
@@ -866,7 +867,7 @@ function buildAdCopySystem(insights, brandTerms) {
     '- No misleading claims or unverifiable superlatives ("#1", "best", "guaranteed").',
     '',
     'Make every asset specific to this page\'s actual offering — do not invent facts.',
-    '- Prioritize the tracked keywords and the matching organic queries; weave the most relevant ones in naturally without keyword-stuffing.',
+    '- Prioritize the real paid search terms, then the tracked keywords and matching organic queries; weave the most relevant ones in naturally without keyword-stuffing.',
     '- Vary the angle across the five options (benefit, feature, proof, call-to-action, audience).',
   ];
   if (insights?.intent && typeof OG_INTENT_GUIDANCE !== 'undefined' && OG_INTENT_GUIDANCE[insights.intent]) {
@@ -998,6 +999,20 @@ async function generateAdCopy() {
       trackedKeywords = (res && res.keywords || []).map(k => String(k).trim()).filter(Boolean).slice(0, 15);
     } catch { /* best-effort */ }
 
+    // Actual Google Ads search terms that triggered ads for this page (top, deduped)
+    let adsSearchTerms = [];
+    if (typeof _adsData !== 'undefined' && _adsData && Array.isArray(_adsData.searchTerms)) {
+      const seen = new Set();
+      for (const t of _adsData.searchTerms) {
+        const s = String(t && t.text || '').trim();
+        const lc = s.toLowerCase();
+        if (!s || seen.has(lc)) continue;
+        seen.add(lc);
+        adsSearchTerms.push(s);
+        if (adsSearchTerms.length >= 10) break;
+      }
+    }
+
     // Organic GSC queries whose classified intent matches the page's intent
     const organic = (typeof _gscQueries !== 'undefined' && Array.isArray(_gscQueries)) ? _gscQueries : [];
     let organicMatched = [];
@@ -1015,6 +1030,7 @@ async function generateAdCopy() {
       pageIntent          && `Page search intent: ${pageIntent}`,
       insights?.sentiment && `Page sentiment: ${insights.sentiment}`,
       trackedKeywords.length  && `Tracked keywords (prioritize these): ${trackedKeywords.join(', ')}`,
+      adsSearchTerms.length   && `Actual paid search terms that triggered ads for this page (real user demand): ${adsSearchTerms.join(', ')}`,
       organicMatched.length   && `Organic queries matching this page's intent: ${organicMatched.join(', ')}`,
       pageData.headings?.length && `Headings:\n${pageData.headings.map(h => `${h.tag.toUpperCase()}: ${h.text}`).join('\n')}`,
       pageData.bodyTextExcerpt  && `Page content excerpt: "${pageData.bodyTextExcerpt}"`

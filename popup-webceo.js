@@ -531,12 +531,13 @@ document.getElementById('btn-webceo-save-config').addEventListener('click', asyn
 
 // Called from the Search tab's "+ Track" chip: add a GSC query as a tracked
 // keyword in this domain's Web CEO project.
-async function trackQueryInWebceo(keyword, chip) {
+async function trackQueryInWebceo(keyword, chip, intent) {
   if (chip) { chip.disabled = true; chip.textContent = '…'; }
   let res;
   try {
     const tab = await getActiveTab();
-    res = await browser.runtime.sendMessage({ action: 'webceoAddKeywords', pageUrl: tab.url, keywords: [keyword] });
+    const tags = intent ? [intent] : [];
+    res = await browser.runtime.sendMessage({ action: 'webceoAddKeywords', pageUrl: tab.url, keywords: [keyword], tags });
   } catch { res = { error: 'NETWORK' }; }
   if (!chip) return;
   if (res && res.ok) {

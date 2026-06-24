@@ -518,6 +518,14 @@ function renderActionPlanPanel() {
   exportBtn.addEventListener('click', exportActionPlanRtf);
   right.appendChild(exportBtn);
 
+  // Export the recommendations to a Google Doc
+  const docsBtn = document.createElement('button');
+  docsBtn.className = 'icon-btn';
+  docsBtn.title = 'Export to Google Doc';
+  docsBtn.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="1.5" width="10" height="13" rx="1.5"/><line x1="5.5" y1="5.5" x2="10.5" y2="5.5"/><line x1="5.5" y1="8" x2="10.5" y2="8"/><line x1="5.5" y1="10.5" x2="8.5" y2="10.5"/></svg>'));
+  docsBtn.addEventListener('click', () => exportToGoogleDocs(docsBtn));
+  right.appendChild(docsBtn);
+
   headRow.appendChild(right);
   head.appendChild(headRow);
 
@@ -703,6 +711,46 @@ function rtfEscape(s) {
     }
   }
   return out;
+}
+
+async function exportToGoogleDocs(btn) {
+  if (!_actionPlan) return;
+  let host = 'page';
+  try { host = new URL((pageData && pageData.canonical) || (await getActiveTab()).url).hostname.replace(/^www\./, ''); } catch { /* keep default */ }
+
+  const originalLabel = btn.innerHTML;
+  btn.disabled = true;
+  btn.title = 'Creating Google Doc…';
+
+  async function attempt() {
+    return browser.runtime.sendMessage({
+      action: 'docsExportActionPlan',
+      plan: _actionPlan,
+      host,
+      fetchedAt: _actionPlanFetchedAt
+    });
+  }
+
+  let res = await attempt();
+
+  if (res && res.notConnected) {
+    const auth = await browser.runtime.sendMessage({ action: 'docsConnect' });
+    if (!auth || auth.error) {
+      btn.disabled = false;
+      btn.title = 'Google Docs auth failed — try again';
+      return;
+    }
+    res = await attempt();
+  }
+
+  btn.disabled = false;
+  btn.title = 'Export to Google Doc';
+
+  if (res && res.url) {
+    browser.tabs.create({ url: res.url });
+  } else {
+    btn.title = `Export failed: ${(res && res.error) || 'unknown error'}`;
+  }
 }
 
 async function exportActionPlanRtf() {

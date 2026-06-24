@@ -480,10 +480,12 @@ main, #search-tab { padding: 4px 0 8px; }
   margin-top: 5px;
 }
 
-.hint-green { color: var(--hint-green); font-weight: 600; }
-.hint-amber { color: var(--hint-amber); font-weight: 600; }
-.hint-red   { color: var(--hint-red);   font-weight: 600; }
-.hint-muted { color: var(--hint-muted); font-weight: 600; }
+.hint-green      { color: var(--hint-green);           font-weight: 600; }
+.hint-amber      { color: var(--hint-amber);           font-weight: 600; }
+.hint-red        { color: var(--hint-red);             font-weight: 600; }
+.hint-muted      { color: var(--hint-muted);           font-weight: 600; }
+.hint-info       { color: var(--accent);               font-weight: 600; }
+.hint-commercial { color: var(--chart-impressions);    font-weight: 600; }
 
 /* Count color states */
 .field-meta.is-count-green { color: var(--hint-green); }
@@ -1921,6 +1923,25 @@ body.settings-open #update-footer { margin-top: auto; }
 .gsc-query-filter-clear:hover { color: var(--text); }
 
 #gsc-not-connected, #gsc-no-property, #gsc-error { padding: 16px 0; text-align: center; }
+
+/* Query regex search bar (Search tab) */
+.gsc-query-search-bar { display: flex; align-items: center; gap: 5px; margin-bottom: 6px; }
+.gsc-query-search-input {
+  flex: 1; min-width: 0;
+  font-size: 11px; padding: 4px 7px;
+  border: 1px solid var(--border); border-radius: 5px;
+  background: var(--bg-input, var(--bg-section)); color: var(--text);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+.gsc-query-search-input.is-invalid { border-color: var(--hint-red); }
+.gsc-query-search-input:focus { outline: none; border-color: var(--accent); }
+.gsc-query-search-mode-btn {
+  font-size: 10px; font-weight: 700; padding: 3px 8px;
+  border: 1px solid var(--border); border-radius: 5px;
+  background: none; color: var(--text-muted); cursor: pointer;
+  white-space: nowrap; flex-shrink: 0;
+}
+.gsc-query-search-mode-btn:hover { border-color: var(--text-muted); color: var(--text); }
 
 /* Query-intent filter chips (Search tab) */
 .gsc-intent-filters { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }

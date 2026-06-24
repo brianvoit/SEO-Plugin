@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SEO Inspector",
-  "version": "1.42",
+  "version": "1.43",
   "description": "Quick SEO metadata inspector — title, meta description, headings, canonical, and alt text overlay.",
   "browser_specific_settings": {
     "gecko": {
@@ -24,6 +24,8 @@
     "https://analyticsadmin.googleapis.com/*",
     "https://analyticsdata.googleapis.com/*",
     "https://googleads.googleapis.com/*",
+    "https://docs.googleapis.com/*",
+    "https://drive.googleapis.com/*",
     "https://accounts.google.com/*"
   ],
   "background": {

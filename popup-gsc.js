@@ -17,6 +17,8 @@ let _gscSelectedQuery = null;
 
 // Query-intent classification lives in popup-intent.js (shared with Ranking/Ads).
 let _gscIntentFilter = null;       // null = All, else one of INTENTS
+let _gscQuerySearch = '';          // regex string for query text filter
+let _gscQuerySearchExclude = false; // false = match (include), true = exclude
 
 // Chart metrics config. The chart helpers below are generic — popup-ga.js
 // passes its own config of the same shape. Optional per-metric fields:
@@ -486,7 +488,8 @@ function buildQueryDataRow(q, locations, branded, selected) {
     trackChip.title = 'Track this keyword in your Web CEO project';
     trackChip.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (typeof trackQueryInWebceo === 'function') trackQueryInWebceo(q.query, trackChip);
+      const intent = typeof intentOf === 'function' ? intentOf(q.query) : null;
+      if (typeof trackQueryInWebceo === 'function') trackQueryInWebceo(q.query, trackChip, intent);
     });
   }
   wrap.appendChild(trackChip);
@@ -662,8 +665,17 @@ function renderGscQueries(queries, pageUrl) {
   });
 
   const sorted = sortGscQueries(queries, gscQuerySort);
-  // Branded filter first; intent chips count over this set, then intent narrows rows
-  const visible = sorted.filter(q => !(gscHideBranded && isQueryBranded(q.query, pattern)));
+  // Branded filter first
+  let visible = sorted.filter(q => !(gscHideBranded && isQueryBranded(q.query, pattern)));
+  // Regex text search filter — applied before intent chip counting so counts reflect the filtered set
+  if (_gscQuerySearch) {
+    try {
+      const re = new RegExp(_gscQuerySearch, 'i');
+      visible = _gscQuerySearchExclude
+        ? visible.filter(q => !re.test(q.query))
+        : visible.filter(q =>  re.test(q.query));
+    } catch { /* invalid regex — leave visible unchanged */ }
+  }
   renderIntentChips(document.getElementById('gsc-intent-filters'), visible, q => q.query, _gscIntentFilter, (intent) => {
     _gscIntentFilter = intent;
     _gscSelectedQuery = null;                 // intent change supersedes a single-query selection
@@ -931,6 +943,20 @@ document.querySelectorAll('#gsc-range-group .mode-option').forEach(btn => {
     browser.storage.local.set({ gscSelectedRange: range });
     loadGscData(false);
   });
+});
+
+function isValidRegex(s) { try { new RegExp(s); return true; } catch { return false; } }
+
+document.getElementById('gsc-query-search').addEventListener('input', e => {
+  _gscQuerySearch = e.target.value;
+  e.target.classList.toggle('is-invalid', !!_gscQuerySearch && !isValidRegex(_gscQuerySearch));
+  renderGscQueries(_gscQueries, _gscPageUrl);
+});
+document.getElementById('btn-gsc-query-search-mode').addEventListener('click', () => {
+  _gscQuerySearchExclude = !_gscQuerySearchExclude;
+  document.getElementById('btn-gsc-query-search-mode').textContent =
+    _gscQuerySearchExclude ? 'Excl.' : 'Match';
+  renderGscQueries(_gscQueries, _gscPageUrl);
 });
 
 document.getElementById('btn-gsc-branded-toggle').addEventListener('click', () => {

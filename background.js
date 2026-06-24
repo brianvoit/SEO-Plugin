@@ -2185,7 +2185,7 @@ async function webceoGetRankings({ pageUrl, historyDepth = 2, forceRefresh = fal
 }
 
 // Add tracked keyword(s) to this domain's project (Search tab "+ Track" chip).
-async function webceoAddKeywords({ pageUrl, keywords }) {
+async function webceoAddKeywords({ pageUrl, keywords, tags }) {
   const list = (Array.isArray(keywords) ? keywords : [keywords]).map(k => String(k || '').trim()).filter(Boolean);
   if (!list.length) return { error: 'NO_KEYWORDS' };
   const resolved = await webceoResolveProject({ pageUrl });
@@ -2193,7 +2193,9 @@ async function webceoAddKeywords({ pageUrl, keywords }) {
   if (resolved.error) return { connected: true, error: resolved.error, detail: resolved.detail };
   if (!resolved.project) return { connected: true, error: 'NO_PROJECT' };
 
-  const res = await webceoCall('add_rankings_keywords', { project: resolved.project, keywords: list });
+  const payload = { project: resolved.project, keywords: list };
+  if (Array.isArray(tags) && tags.length) payload.tags = tags;
+  const res = await webceoCall('add_rankings_keywords', payload);
   if (res.error) return { connected: true, error: res.error, detail: res.detail };
   await browser.storage.local.remove('webceoCache');   // rankings now stale
   return { connected: true, ok: true, added: list, project: resolved.project };
@@ -2222,6 +2224,175 @@ function webceoSaveConfig({ apiKey, baseUrl }) {
 function webceoDisconnect() {
   return browser.storage.local.remove(['webceoApiKey', 'webceoProjects', 'webceoCache', 'webceoProjectOverrides'])
     .then(() => ({ ok: true }));
+}
+
+// ─── Google Docs: Action Plan export ────────────────────────────────────────
+
+const GOOGLE_DOCS_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+
+async function docsConnect() {
+  return googleOAuthConnect(GOOGLE_DOCS_SCOPE, 'docsAuth');
+}
+
+async function docsGetAccessToken() {
+  return googleGetAccessToken('docsAuth');
+}
+
+async function docsExportActionPlan({ plan, host, fetchedAt }) {
+  const token = await docsGetAccessToken();
+  if (token.error) return { notConnected: true, error: token.error };
+
+  const docTitle = `Action Plan — ${host || 'page'}`;
+  const createRes = await fetch('https://docs.googleapis.com/v1/documents', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token.accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: docTitle })
+  });
+  if (!createRes.ok) return { error: 'CREATE_FAILED' };
+  const { documentId } = await createRes.json();
+
+  const requests = [];
+  let idx = 1;
+
+  const GRAY  = { red: 0.6,  green: 0.6,  blue: 0.6  };
+  const EFFORT_COLOR = {
+    surgical: { red: 0.08, green: 0.49, blue: 0.22 },
+    moderate: { red: 0.71, green: 0.33, blue: 0.05 },
+    rewrite:  { red: 0.5,  green: 0.5,  blue: 0.5  }
+  };
+
+  function rgbFg(rgb) { return { color: { rgbColor: rgb } }; }
+
+  function ins(text) {
+    requests.push({ insertText: { location: { index: idx }, text } });
+    const start = idx, end = idx + text.length;
+    idx = end;
+    return { start, end, textEnd: end - (text.endsWith('\n') ? 1 : 0) };
+  }
+
+  function styleParaH(start, end, namedStyleType) {
+    requests.push({ updateParagraphStyle: {
+      range: { startIndex: start, endIndex: end },
+      paragraphStyle: { namedStyleType },
+      fields: 'namedStyleType'
+    }});
+  }
+
+  function styleTxt(start, end, textStyle, fields) {
+    if (start >= end) return;
+    requests.push({ updateTextStyle: {
+      range: { startIndex: start, endIndex: end },
+      textStyle, fields
+    }});
+  }
+
+  // Title
+  let r = ins(docTitle + '\n');
+  styleParaH(r.start, r.end, 'HEADING_1');
+
+  // Subtitle
+  const dateStr = new Date(fetchedAt || Date.now()).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  r = ins(`Generated ${dateStr}\n`);
+  styleTxt(r.start, r.textEnd, { foregroundColor: rgbFg(GRAY), fontSize: { magnitude: 10, unit: 'PT' } }, 'foregroundColor,fontSize');
+  ins('\n');
+
+  // Recommendations by tier
+  const TIERS = [
+    { effort: 'surgical', title: 'Quick wins' },
+    { effort: 'moderate', title: 'Recommended' },
+    { effort: 'rewrite',  title: 'Heavy lift' }
+  ];
+
+  TIERS.forEach(tier => {
+    const recs = (plan.recommendations || []).filter(rec => rec.effort === tier.effort);
+    if (!recs.length) return;
+
+    r = ins(tier.title + '\n');
+    styleParaH(r.start, r.end, 'HEADING_2');
+
+    const effortColor = EFFORT_COLOR[tier.effort];
+
+    recs.forEach(rec => {
+      r = ins((rec.change || '') + '\n');
+      styleTxt(r.start, r.textEnd, { bold: true, fontSize: { magnitude: 12, unit: 'PT' } }, 'bold,fontSize');
+
+      const impactStr = rec.impact ? `${tier.title} · ${rec.impact} impact` : tier.title;
+      r = ins(impactStr + '\n');
+      styleTxt(r.start, r.textEnd, { foregroundColor: rgbFg(effortColor), fontSize: { magnitude: 10, unit: 'PT' } }, 'foregroundColor,fontSize');
+
+      if (rec.evidence) {
+        r = ins(rec.evidence + '\n');
+        styleTxt(r.start, r.textEnd, { italic: true, foregroundColor: rgbFg(GRAY) }, 'italic,foregroundColor');
+      }
+      ins('\n');
+    });
+  });
+
+  // Content gaps
+  if (plan.contentGaps && plan.contentGaps.length) {
+    r = ins('Content gaps\n');
+    styleParaH(r.start, r.end, 'HEADING_2');
+    ins(plan.contentGaps.join(', ') + '\n');
+    ins('\n');
+  }
+
+  // Intent gap
+  const gap = plan.intentGap;
+  if (gap && gap.pageIntent) {
+    r = ins('Intent gap\n');
+    styleParaH(r.start, r.end, 'HEADING_2');
+
+    r = ins(`${gap.pageIntent} → ${gap.trafficIntent || ''}\n`);
+    styleTxt(r.start, r.textEnd, { bold: true }, 'bold');
+
+    if (gap.summary) {
+      r = ins(gap.summary + '\n');
+      styleTxt(r.start, r.textEnd, { italic: true, foregroundColor: rgbFg(GRAY) }, 'italic,foregroundColor');
+    }
+    if (gap.suggestions && gap.suggestions.length) {
+      r = ins('Phrase suggestions:\n');
+      styleTxt(r.start, r.textEnd, { bold: true }, 'bold');
+      ins(gap.suggestions.join(' / ') + '\n');
+    }
+    ins('\n');
+  }
+
+  // E-E-A-T
+  const eeat = plan.eeat;
+  if (eeat && eeat.score) {
+    r = ins('E-E-A-T Signals\n');
+    styleParaH(r.start, r.end, 'HEADING_2');
+
+    const scoreLabel = eeat.score.charAt(0).toUpperCase() + eeat.score.slice(1);
+    r = ins(`Score: ${scoreLabel}\n`);
+    styleTxt(r.start, r.textEnd, { bold: true }, 'bold');
+
+    (eeat.signals || []).forEach(s => {
+      const dimText = `${s.dimension}: `;
+      const dimStart = idx;
+      ins(dimText);
+      styleTxt(dimStart, idx, { bold: true }, 'bold');
+      ins((s.observation || '') + '\n');
+    });
+
+    if (eeat.gaps && eeat.gaps.length) {
+      ins('\n');
+      r = ins('Improvements:\n');
+      styleTxt(r.start, r.textEnd, { bold: true }, 'bold');
+      eeat.gaps.forEach(g => ins(`• ${g}\n`));
+    }
+  }
+
+  const updateRes = await fetch(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token.accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests })
+  });
+  if (!updateRes.ok) {
+    const detail = await updateRes.text().catch(() => '');
+    return { error: 'UPDATE_FAILED', detail };
+  }
+  return { url: `https://docs.google.com/document/d/${documentId}/edit` };
 }
 
 // ─── Google Search Console: message handlers ────────────────────────────────
@@ -2267,6 +2438,8 @@ browser.runtime.onMessage.addListener((message) => {
     case 'webceoGetRankings':    return webceoGetRankings(message);
     case 'webceoAddKeywords':    return webceoAddKeywords(message);
     case 'webceoGetTrackedKeywords': return webceoGetTrackedKeywords(message);
+    case 'docsConnect':          return docsConnect();
+    case 'docsExportActionPlan': return docsExportActionPlan(message);
     default: return undefined;
   }
 });

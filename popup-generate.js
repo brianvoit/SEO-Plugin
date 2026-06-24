@@ -401,6 +401,7 @@ const AI_INSIGHTS_TTL_MS = 24 * 60 * 60 * 1000;
 
 const AI_SENTIMENT_CLASS   = { Positive: 'hint-green', Negative: 'hint-red', Mixed: 'hint-amber', Neutral: '' };
 const AI_READABILITY_CLASS = { Easy: 'hint-green', Medium: 'hint-amber', Hard: 'hint-red' };
+const AI_INTENT_CLASS      = { Informational: 'hint-info', Commercial: 'hint-commercial', Transactional: 'hint-green', Navigational: 'hint-amber' };
 
 // Hover explainers for each AI-derived label (what the dimension represents)
 const AI_HINTS = {
@@ -426,7 +427,7 @@ function renderAiInsights(v) {
 
   const intentEl = document.getElementById('ai-intent');
   intentEl.textContent = v.intent;
-  intentEl.className = 'field-meta';
+  intentEl.className = 'field-meta ' + (AI_INTENT_CLASS[v.intent] || '');
   intentEl.title = AI_HINTS.intent;
 
   // "Easy, General" — readability colored, audience plain

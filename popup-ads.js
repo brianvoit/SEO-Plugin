@@ -834,3 +834,233 @@ function loadAdsPrefs() {
     });
   });
 }
+
+// ─── Ad copy generator: Responsive display assets via Claude Sonnet ──────────
+// Generates Headlines (≤30), Long Headlines (≤90), and Descriptions (≤90) for
+// an ad pointing to the current page. Grounded in the page's intent + sentiment
+// (aiInsightsCache), its Web CEO tracked keywords, and the organic GSC queries
+// whose classified intent matches the page. Sonnet (not Haiku) for ad copy.
+
+const ADS_GEN_ASSETS = [
+  { key: 'headlines',     label: 'Headlines',      max: 30 },
+  { key: 'longHeadlines', label: 'Long Headlines', max: 90 },
+  { key: 'descriptions',  label: 'Descriptions',   max: 90 },
+];
+
+function buildAdCopySystem(insights, brandTerms) {
+  const lines = [
+    'You are an expert Google Ads copywriter. Write responsive display ad assets for an ad that drives traffic to the landing page described below.',
+    '',
+    'Return ONLY a compact JSON object — no prose, no code fences — of exactly this shape:',
+    '{"headlines":[5 strings],"longHeadlines":[5 strings],"descriptions":[5 strings]}',
+    '',
+    'Hard character limits (count every character including spaces; NEVER exceed):',
+    '- headlines: 5 items, each at most 30 characters',
+    '- longHeadlines: 5 items, each at most 90 characters',
+    '- descriptions: 5 items, each at most 90 characters',
+    '',
+    'Follow Google Ads editorial policy:',
+    '- Title or sentence case — never ALL CAPS (standard acronyms/trademarks excepted).',
+    '- No exclamation marks in headlines; at most one in any description.',
+    '- No repeated or gimmicky punctuation, no emoji, no phone numbers.',
+    '- No misleading claims or unverifiable superlatives ("#1", "best", "guaranteed").',
+    '',
+    'Make every asset specific to this page\'s actual offering — do not invent facts.',
+    '- Prioritize the tracked keywords and the matching organic queries; weave the most relevant ones in naturally without keyword-stuffing.',
+    '- Vary the angle across the five options (benefit, feature, proof, call-to-action, audience).',
+  ];
+  if (insights?.intent && typeof OG_INTENT_GUIDANCE !== 'undefined' && OG_INTENT_GUIDANCE[insights.intent]) {
+    lines.push(`- Search intent is ${insights.intent}: ${OG_INTENT_GUIDANCE[insights.intent]}`);
+  }
+  if (insights?.sentiment && typeof OG_SENTIMENT_GUIDANCE !== 'undefined' && OG_SENTIMENT_GUIDANCE[insights.sentiment]) {
+    lines.push(`- Page sentiment is ${insights.sentiment}: ${OG_SENTIMENT_GUIDANCE[insights.sentiment]}`);
+  }
+  if (brandTerms.length) {
+    lines.push(`- You may use the brand name (${brandTerms.join(', ')}) where it strengthens the ad.`);
+  }
+  return lines.join('\n');
+}
+
+function adsGenCopyBtn(text) {
+  const btn = document.createElement('button');
+  btn.className = 'gen-result-btn';
+  btn.title = 'Copy';
+  btn.appendChild(svgFromString(
+    '<svg class="icon-copy" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+    '<rect x="5" y="4" width="9" height="11" rx="1.5"/>' +
+    '<path d="M3 12H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1"/></svg>'));
+  btn.appendChild(svgFromString(
+    '<svg class="icon-check hidden" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<polyline points="2 8 6 12 14 4"/></svg>'));
+  btn.addEventListener('click', async () => { await copyToClipboard(text); flashCopyBtn(btn); });
+  return btn;
+}
+
+function renderAdCopy(resultEl, parsed, insights) {
+  resultEl.replaceChildren();
+
+  const label = document.createElement('div');
+  label.className = 'gen-result-label';
+  label.appendChild(document.createTextNode('AD COPY FOR THIS PAGE '));
+  const chips = typeof buildInsightChips === 'function' ? buildInsightChips(insights) : null;
+  if (chips) label.appendChild(chips);
+  resultEl.appendChild(label);
+
+  let rendered = 0;
+  ADS_GEN_ASSETS.forEach(asset => {
+    const items = Array.isArray(parsed[asset.key]) ? parsed[asset.key] : [];
+    const texts = items.map(t => String(t || '').trim()).filter(Boolean);
+    if (!texts.length) return;
+    rendered += texts.length;
+
+    const group = document.createElement('div');
+    group.className = 'ads-gen-group';
+
+    const head = document.createElement('div');
+    head.className = 'ads-gen-group-head';
+    head.appendChild(document.createTextNode(asset.label + ' '));
+    const lim = document.createElement('span');
+    lim.textContent = `· max ${asset.max}`;
+    head.appendChild(lim);
+    group.appendChild(head);
+
+    texts.forEach(text => {
+      const item = document.createElement('div');
+      item.className = 'ads-gen-item';
+
+      const txt = document.createElement('span');
+      txt.className = 'ads-gen-text';
+      txt.textContent = text;
+
+      const count = document.createElement('span');
+      count.className = 'ads-gen-count ' + (text.length <= asset.max ? 'is-count-green' : 'is-count-red');
+      count.textContent = `${text.length}/${asset.max}`;
+
+      item.appendChild(txt);
+      item.appendChild(count);
+      item.appendChild(adsGenCopyBtn(text));
+      group.appendChild(item);
+    });
+
+    resultEl.appendChild(group);
+  });
+
+  if (!rendered) throw new Error('No usable ad copy in the response');
+}
+
+async function generateAdCopy() {
+  const btn = document.getElementById('btn-gen-adcopy');
+  const resultEl = document.getElementById('ads-gen-result');
+  if (!btn || !resultEl || btn.disabled) return;
+
+  if (!pageData) {
+    resultEl.classList.remove('hidden');
+    resultEl.classList.add('is-error');
+    resultEl.replaceChildren();
+    const e = document.createElement('div');
+    e.className = 'gen-result-text';
+    e.textContent = 'Open this on a regular web page to generate ad copy.';
+    resultEl.appendChild(e);
+    return;
+  }
+
+  btn.disabled = true;
+  btn.querySelector('.icon-generate').classList.add('hidden');
+  btn.querySelector('.icon-spinner').classList.remove('hidden');
+  resultEl.classList.remove('hidden', 'is-error');
+  resultEl.replaceChildren();
+  const loading = document.createElement('div');
+  loading.className = 'gen-result-text';
+  loading.textContent = 'Generating ad copy…';
+  resultEl.appendChild(loading);
+
+  try {
+    const { claudeApiKey } = await browser.storage.local.get('claudeApiKey');
+    if (!claudeApiKey) throw new Error('No Claude API key — add one in Settings (⚙).');
+
+    const tab = await getActiveTab();
+    const pageUrl = pageData.canonical || tab.url;
+
+    let host = '';
+    try { host = new URL(pageUrl, tab.url).hostname.replace(/^www\./, ''); } catch { /* ignore */ }
+    const brandTerms = (allBrandedTerms[host] || '').split('|').map(s => s.trim()).filter(Boolean);
+
+    // Page intent + sentiment from the per-URL insights cache
+    const cacheKey = (tab.url || '').split('#')[0];
+    const { aiInsightsCache } = await browser.storage.local.get('aiInsightsCache');
+    const insights = (aiInsightsCache || {})[cacheKey] || null;
+    const pageIntent = insights?.intent || null;
+
+    // Tracked keywords for this domain's Web CEO project
+    let trackedKeywords = [];
+    try {
+      const res = await browser.runtime.sendMessage({ action: 'webceoGetTrackedKeywords', pageUrl: tab.url });
+      trackedKeywords = (res && res.keywords || []).map(k => String(k).trim()).filter(Boolean).slice(0, 15);
+    } catch { /* best-effort */ }
+
+    // Organic GSC queries whose classified intent matches the page's intent
+    const organic = (typeof _gscQueries !== 'undefined' && Array.isArray(_gscQueries)) ? _gscQueries : [];
+    let organicMatched = [];
+    if (organic.length) {
+      const matched = (pageIntent && typeof intentOf === 'function')
+        ? organic.filter(q => intentOf(q.query) === pageIntent)
+        : [];
+      organicMatched = (matched.length ? matched : organic).slice(0, 10).map(q => q.query).filter(Boolean);
+    }
+
+    const context = [
+      `Landing page URL: ${pageUrl}`,
+      `Page title: "${pageData.title?.text}"`,
+      pageData.metaDescription?.text && `Meta description: "${pageData.metaDescription.text}"`,
+      pageIntent          && `Page search intent: ${pageIntent}`,
+      insights?.sentiment && `Page sentiment: ${insights.sentiment}`,
+      trackedKeywords.length  && `Tracked keywords (prioritize these): ${trackedKeywords.join(', ')}`,
+      organicMatched.length   && `Organic queries matching this page's intent: ${organicMatched.join(', ')}`,
+      pageData.headings?.length && `Headings:\n${pageData.headings.map(h => `${h.tag.toUpperCase()}: ${h.text}`).join('\n')}`,
+      pageData.bodyTextExcerpt  && `Page content excerpt: "${pageData.bodyTextExcerpt}"`
+    ].filter(Boolean).join('\n\n');
+
+    const system = buildAdCopySystem(insights, brandTerms);
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1200,
+        system,
+        messages: [{ role: 'user', content: context }]
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message ?? `HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    const text = (data.content?.[0]?.text ?? '').replace(/^```(?:json)?|```$/g, '').trim();
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { throw new Error('Could not parse the ad copy response'); }
+
+    renderAdCopy(resultEl, parsed, insights);
+  } catch (err) {
+    resultEl.replaceChildren();
+    resultEl.classList.add('is-error');
+    const errEl = document.createElement('div');
+    errEl.className = 'gen-result-text';
+    errEl.textContent = err.message;
+    resultEl.appendChild(errEl);
+  } finally {
+    btn.disabled = false;
+    btn.querySelector('.icon-generate').classList.remove('hidden');
+    btn.querySelector('.icon-spinner').classList.add('hidden');
+  }
+}
+
+document.getElementById('btn-gen-adcopy').addEventListener('click', generateAdCopy);

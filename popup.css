@@ -360,6 +360,50 @@ main, #search-tab { padding: 4px 0 8px; }
 }
 
 .gen-result-btn:hover { background: var(--copy-hover); color: var(--text); }
+
+/* Ad copy generator (Ads tab) */
+.ads-gen-result {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-section);
+}
+.ads-gen-result.is-error .gen-result-text { color: var(--hint-red); }
+.ads-gen-group { margin-top: 10px; }
+.ads-gen-group-head {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 2px;
+}
+.ads-gen-group-head span { color: var(--text-muted); font-weight: 600; }
+.ads-gen-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  border-top: 1px solid var(--border);
+}
+.ads-gen-item:first-of-type { border-top: none; }
+.ads-gen-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.4;
+  word-break: break-word;
+}
+.ads-gen-count {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+.ads-gen-count.is-count-green { color: var(--hint-green); }
+.ads-gen-count.is-count-red   { color: var(--hint-red);   }
 .gen-result-btn .icon-check { color: var(--hint-green); }
 
 /* Headings */

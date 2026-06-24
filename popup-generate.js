@@ -130,6 +130,8 @@ function clearGenResults() {
     genSuggestions[field] = '';
     document.getElementById(`${field}-gen-result`).classList.add('hidden');
   });
+  const adsGen = document.getElementById('ads-gen-result');
+  if (adsGen) { adsGen.classList.add('hidden'); adsGen.replaceChildren(); }
 }
 
 // ─── Generate OG / Twitter text fields ───────────────────────────────────────

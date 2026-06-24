@@ -715,8 +715,8 @@ function rtfEscape(s) {
 
 async function exportToGoogleDocs(btn) {
   if (!_actionPlan) return;
-  let host = 'page';
-  try { host = new URL((pageData && pageData.canonical) || (await getActiveTab()).url).hostname.replace(/^www\./, ''); } catch { /* keep default */ }
+  let pageUrl = '';
+  try { pageUrl = (pageData && pageData.canonical) || (await getActiveTab()).url; } catch { /* keep default */ }
 
   const originalLabel = btn.innerHTML;
   btn.disabled = true;
@@ -726,7 +726,7 @@ async function exportToGoogleDocs(btn) {
     return browser.runtime.sendMessage({
       action: 'docsExportActionPlan',
       plan: _actionPlan,
-      host,
+      pageUrl,
       fetchedAt: _actionPlanFetchedAt
     });
   }

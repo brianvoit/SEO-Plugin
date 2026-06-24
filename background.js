@@ -2238,18 +2238,47 @@ async function docsGetAccessToken() {
   return googleGetAccessToken('docsAuth');
 }
 
-async function docsExportActionPlan({ plan, host, fetchedAt }) {
+async function docsGetOrCreateFolder(accessToken) {
+  const { docsFolderID } = await browser.storage.local.get('docsFolderID');
+  if (docsFolderID) return docsFolderID;
+
+  const res = await fetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'SEO Plans', mimeType: 'application/vnd.google-apps.folder' })
+  });
+  if (!res.ok) return null;
+  const { id } = await res.json();
+  await browser.storage.local.set({ docsFolderID: id });
+  return id;
+}
+
+async function docsExportActionPlan({ plan, pageUrl, fetchedAt }) {
   const token = await docsGetAccessToken();
   if (token.error) return { notConnected: true, error: token.error };
 
-  const docTitle = `Action Plan — ${host || 'page'}`;
-  const createRes = await fetch('https://docs.googleapis.com/v1/documents', {
+  let urlLabel = 'page';
+  try {
+    const u = new URL(pageUrl);
+    const h = u.hostname.replace(/^www\./, '');
+    const p = u.pathname.replace(/\/$/, '');
+    urlLabel = p ? `${h}${p}` : h;
+  } catch { /* keep default */ }
+
+  const date = new Date().toISOString().slice(0, 10);
+  const docTitle = `${date}: Action Plan For ${urlLabel}`;
+
+  const folderId = await docsGetOrCreateFolder(token.accessToken);
+
+  const fileBody = { name: docTitle, mimeType: 'application/vnd.google-apps.document' };
+  if (folderId) fileBody.parents = [folderId];
+  const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${token.accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title: docTitle })
+    body: JSON.stringify(fileBody)
   });
   if (!createRes.ok) return { error: 'CREATE_FAILED' };
-  const { documentId } = await createRes.json();
+  const { id: documentId } = await createRes.json();
 
   const requests = [];
   let idx = 1;

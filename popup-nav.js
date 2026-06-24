@@ -10,6 +10,7 @@ const ogPanel         = document.getElementById('og-panel');
 const twPanel         = document.getElementById('tw-panel');
 const actionPlanPanel = document.getElementById('actionplan-panel');
 const hreflangPanel   = document.getElementById('hreflang-panel');
+const adcopyPanel     = document.getElementById('adcopy-panel');
 const searchTab     = document.getElementById('search-tab');
 const analyticsTab  = document.getElementById('analytics-tab');
 const adsTab        = document.getElementById('ads-tab');
@@ -32,6 +33,7 @@ function hideDetailPanels() {
   twPanel.classList.add('hidden');
   actionPlanPanel.classList.add('hidden');
   hreflangPanel.classList.add('hidden');
+  adcopyPanel.classList.add('hidden');
 }
 
 function showActiveTab() {
@@ -99,6 +101,13 @@ function showHreflangPanel() {
   if (typeof renderHreflangDetail === 'function') renderHreflangDetail();
 }
 
+function showAdCopyPanel() {
+  enterDetailPanel();
+  adcopyPanel.classList.remove('hidden');
+  // Show cached copy for this page if present, otherwise generate on first open
+  if (typeof openAdCopyPanel === 'function') openAdCopyPanel();
+}
+
 function hideDetailPanelToTab() {
   showActiveTab();
 }
@@ -158,6 +167,9 @@ document.getElementById('btn-actionplan').addEventListener('click', showActionPl
 document.getElementById('btn-actionplan-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-hreflang').addEventListener('click', showHreflangPanel);
 document.getElementById('btn-hreflang-back').addEventListener('click', hideDetailPanelToTab);
+document.getElementById('btn-gen-adcopy').addEventListener('click', showAdCopyPanel);
+document.getElementById('btn-adcopy-back').addEventListener('click', hideDetailPanelToTab);
+document.getElementById('btn-adcopy-regen').addEventListener('click', () => { if (typeof generateAdCopy === 'function') generateAdCopy(true); });
 
 // ─── Main tabs (Overview / Search / Analytics / DNS / Redirect) ──────────────
 // The status pill is also a tab trigger (data-tab="redirect"), so the handler
@@ -171,7 +183,8 @@ document.querySelectorAll('#main-tabs [data-tab]').forEach(btn => {
       || !schemaPanel.classList.contains('hidden')
       || !ogPanel.classList.contains('hidden')
       || !twPanel.classList.contains('hidden')
-      || !hreflangPanel.classList.contains('hidden');
+      || !hreflangPanel.classList.contains('hidden')
+      || !adcopyPanel.classList.contains('hidden');
     if (tab === activeTab && !inPanel) return;
     activeTab = tab;
     // Settings reloads page data on exit; other panels just return to the tab

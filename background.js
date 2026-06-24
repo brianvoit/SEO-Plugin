@@ -2268,17 +2268,23 @@ async function docsExportActionPlan({ plan, pageUrl, fetchedAt }) {
   const date = new Date().toISOString().slice(0, 10);
   const docTitle = `${date}: Action Plan For ${urlLabel}`;
 
-  const folderId = await docsGetOrCreateFolder(token.accessToken);
-
-  const fileBody = { name: docTitle, mimeType: 'application/vnd.google-apps.document' };
-  if (folderId) fileBody.parents = [folderId];
-  const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+  // Create via Docs API so the document is fully initialized before batchUpdate
+  const createRes = await fetch('https://docs.googleapis.com/v1/documents', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${token.accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(fileBody)
+    body: JSON.stringify({ title: docTitle })
   });
   if (!createRes.ok) return { error: 'CREATE_FAILED' };
-  const { id: documentId } = await createRes.json();
+  const { documentId } = await createRes.json();
+
+  // Move into the SEO Plans folder (best-effort — doc still works if this fails)
+  const folderId = await docsGetOrCreateFolder(token.accessToken);
+  if (folderId) {
+    await fetch(`https://www.googleapis.com/drive/v3/files/${documentId}?addParents=${encodeURIComponent(folderId)}&removeParents=root&fields=id`, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${token.accessToken}` }
+    }).catch(() => {});
+  }
 
   const requests = [];
   let idx = 1;

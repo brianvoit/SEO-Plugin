@@ -744,10 +744,19 @@ async function exportToGoogleDocs(btn) {
   }
 
   btn.disabled = false;
-  btn.title = 'Export to Google Doc';
 
   if (res && res.url) {
     browser.tabs.create({ url: res.url });
+    btn.innerHTML = '';
+    btn.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="2 8 6 12 14 4"/></svg>'));
+    btn.classList.add('is-success');
+    btn.title = 'Opened in Google Docs';
+    setTimeout(() => {
+      btn.innerHTML = '';
+      btn.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="1.5" width="10" height="13" rx="1.5"/><line x1="5.5" y1="5.5" x2="10.5" y2="5.5"/><line x1="5.5" y1="8" x2="10.5" y2="8"/><line x1="5.5" y1="10.5" x2="8.5" y2="10.5"/></svg>'));
+      btn.classList.remove('is-success');
+      btn.title = 'Export to Google Doc';
+    }, 3000);
   } else {
     btn.title = `Export failed: ${(res && res.error) || 'unknown error'}`;
   }

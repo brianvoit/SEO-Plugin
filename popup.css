@@ -152,6 +152,7 @@ header {
   color: #fff;
 }
 .icon-btn.is-active:hover { color: #fff; }
+.icon-btn.is-success { color: var(--hint-green); }
 
 /* Split row (indexability + word count) */
 .field-section--split {

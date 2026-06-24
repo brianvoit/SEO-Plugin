@@ -85,6 +85,34 @@ function actionPlanSources(g) {
   };
 }
 
+// ─── Intent distribution ──────────────────────────────────────────────────────
+
+// Compute intent breakdown of all terms classified across tabs (best-effort).
+// Returns { pct: {Informational:N,...}, total:N } or null if < 5 terms classified.
+function computeIntentDistribution(gathered) {
+  const terms = [];
+  (gathered.gsc?.queries || []).forEach(q => { if (q.query) terms.push(String(q.query)); });
+  (gathered.webceo?.rows || []).forEach(r => { if (r.keyword) terms.push(String(r.keyword)); });
+  (gathered.ads?.searchTerms || []).forEach(t => {
+    const txt = t.text || t.term;
+    if (txt) terms.push(String(txt));
+  });
+
+  const counts = { Informational: 0, Navigational: 0, Commercial: 0, Transactional: 0 };
+  let total = 0;
+  terms.forEach(t => {
+    const intent = intentOf(t);
+    if (intent && Object.prototype.hasOwnProperty.call(counts, intent)) {
+      counts[intent]++;
+      total++;
+    }
+  });
+  if (total < 5) return null;
+  const pct = {};
+  for (const [k, v] of Object.entries(counts)) pct[k] = Math.round((v / total) * 100);
+  return { pct, total };
+}
+
 // ─── Prompt assembly ──────────────────────────────────────────────────────────
 
 function actionPlanContext(g) {
@@ -169,6 +197,15 @@ function actionPlanContext(g) {
     if (gaSig.channels) lines.push(`  Channels: ${gaSig.channels.map(c => `${c.channel} ${c.sessions}s/${c.bounceRatePct}% bounce`).join(', ')}`);
   }
 
+  // Intent distribution — only present if user has run Search/Rankings/Ads tabs first
+  const intentDist = computeIntentDistribution(g);
+  if (intentDist) {
+    lines.push(`\n## TRAFFIC INTENT DISTRIBUTION (${intentDist.total} classified terms)`);
+    ['Navigational', 'Informational', 'Commercial', 'Transactional'].forEach(intent => {
+      lines.push(`- ${intent}: ${intentDist.pct[intent] || 0}%`);
+    });
+  }
+
   return lines.join('\n');
 }
 
@@ -184,10 +221,11 @@ Rules:
 - Return 3–8 recommendations total. Order by impact within each effort tier.
 
 Respond with ONLY a compact JSON object, no prose, no code fences, exactly:
-{"recommendations":[{"change":"…","evidence":"…","effort":"surgical|moderate|rewrite","impact":"high|medium|low"}],"contentGaps":["…","…"]}
+{"recommendations":[{"change":"…","evidence":"…","effort":"surgical|moderate|rewrite","impact":"high|medium|low"}],"contentGaps":["…","…"],"intentGap":{"pageIntent":"…","trafficIntent":"…","divergence":true,"summary":"…","suggestions":["…","…","…","…","…","…","…","…"]}}
 - "change": the action to take (imperative, specific).
 - "evidence": the data behind it, citing the actual numbers.
-- "contentGaps": short topic labels (2–4 words) the page should cover but doesn't. 0–8 items.`;
+- "contentGaps": short topic labels (2–4 words) the page should cover but doesn't. 0–8 items.
+- "intentGap": include ONLY when TRAFFIC INTENT DISTRIBUTION is present in the input. If the page's evident purpose (from its title, headings, and content) diverges significantly from the dominant traffic intent, set "divergence":true, "pageIntent" to the intent the page targets (one of: Informational, Navigational, Commercial, Transactional), "trafficIntent" to the dominant incoming intent, "summary" to one sentence explaining the mismatch and opportunity, and "suggestions" to exactly 8 diverse keyword phrases — range from head to long-tail, no brand terms — that the page should be visible for given its actual purpose. If no significant divergence exists, omit "intentGap" entirely.`;
 
 // ─── Normalization (accept only well-formed, enum-valid recs) ─────────────────
 
@@ -217,7 +255,16 @@ function normalizeActionPlan(raw) {
   const contentGaps = Array.isArray(raw.contentGaps)
     ? raw.contentGaps.map(s => String(s || '').trim()).filter(Boolean).slice(0, 8)
     : [];
-  return { recommendations, contentGaps };
+  const out = { recommendations, contentGaps };
+  if (raw.intentGap && raw.intentGap.divergence === true && Array.isArray(raw.intentGap.suggestions)) {
+    out.intentGap = {
+      pageIntent:    String(raw.intentGap.pageIntent    || '').trim(),
+      trafficIntent: String(raw.intentGap.trafficIntent || '').trim(),
+      summary:       String(raw.intentGap.summary       || '').trim(),
+      suggestions:   raw.intentGap.suggestions.slice(0, 8).map(s => String(s || '').trim()).filter(Boolean)
+    };
+  }
+  return out;
 }
 
 // ─── Main entry: generate (or render from cache) ──────────────────────────────
@@ -496,6 +543,63 @@ function renderActionPlanPanel() {
     sec.appendChild(chips);
     root.appendChild(sec);
   }
+
+  // Intent gap — phrase suggestions when page purpose ≠ dominant traffic intent
+  const gap = _actionPlan.intentGap;
+  if (gap && gap.suggestions && gap.suggestions.length) {
+    const intentClassMap = { Informational: 'info', Commercial: 'commercial', Transactional: 'transactional', Navigational: 'navigational' };
+    const sec = document.createElement('section');
+    sec.className = 'field-section';
+
+    const h = document.createElement('div');
+    h.className = 'field-header';
+    const lbl = document.createElement('span');
+    lbl.className = 'field-label';
+    lbl.textContent = 'Intent gap';
+    h.appendChild(lbl);
+    sec.appendChild(h);
+
+    const match = document.createElement('div');
+    match.className = 'ap-intent-match';
+    if (gap.pageIntent) {
+      const b = document.createElement('span');
+      b.className = `ap-intent-badge ap-intent-badge--${intentClassMap[gap.pageIntent] || ''}`;
+      b.textContent = `Page: ${gap.pageIntent}`;
+      match.appendChild(b);
+    }
+    const arrow = document.createElement('span');
+    arrow.className = 'ap-intent-arrow';
+    arrow.textContent = '→';
+    match.appendChild(arrow);
+    if (gap.trafficIntent) {
+      const b = document.createElement('span');
+      b.className = `ap-intent-badge ap-intent-badge--${intentClassMap[gap.trafficIntent] || ''}`;
+      b.textContent = `Traffic: ${gap.trafficIntent}`;
+      match.appendChild(b);
+    }
+    sec.appendChild(match);
+
+    if (gap.summary) {
+      const summary = document.createElement('p');
+      summary.className = 'ap-intent-summary';
+      summary.textContent = gap.summary;
+      sec.appendChild(summary);
+    }
+
+    const suggChips = document.createElement('div');
+    suggChips.className = 'ap-suggestion-chips';
+    gap.suggestions.forEach(kw => {
+      const chip = document.createElement('button');
+      chip.className = 'ap-suggestion-chip';
+      chip.textContent = kw;
+      chip.addEventListener('click', () => {
+        window.open('https://www.google.com/search?q=' + encodeURIComponent(kw), '_blank');
+      });
+      suggChips.appendChild(chip);
+    });
+    sec.appendChild(suggChips);
+    root.appendChild(sec);
+  }
 }
 
 // ─── Export to RTF ────────────────────────────────────────────────────────────
@@ -539,6 +643,14 @@ async function exportActionPlanRtf() {
   if (_actionPlan.contentGaps.length) {
     parts.push(`{\\b\\fs26 Content gaps}\\par`);
     parts.push(`${rtfEscape(_actionPlan.contentGaps.join(', '))}\\par`);
+  }
+
+  const gap = _actionPlan.intentGap;
+  if (gap && gap.suggestions && gap.suggestions.length) {
+    parts.push(`\\par{\\b\\fs26 Intent gap}\\par`);
+    parts.push(`Page: ${rtfEscape(gap.pageIntent)}  \\u8594?  Traffic: ${rtfEscape(gap.trafficIntent)}\\par`);
+    if (gap.summary) parts.push(`${rtfEscape(gap.summary)}\\par`);
+    parts.push(`\\par Phrase suggestions:\\par ${rtfEscape(gap.suggestions.join(' / '))}\\par`);
   }
 
   const rtf = `{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Helvetica;}}\\f0\\fs22 ${parts.join('')}}`;

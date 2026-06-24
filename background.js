@@ -2228,11 +2228,12 @@ function webceoDisconnect() {
 
 // ─── Google Docs: Action Plan export ────────────────────────────────────────
 
-const GOOGLE_DOCS_SCOPE = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/documents';
+// Only the Drive API is needed: we upload formatted HTML and let Drive convert
+// it to a native Google Doc. This avoids the Docs API entirely (which would need
+// a separate API enablement + the sensitive 'documents' scope).
+const GOOGLE_DOCS_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
 async function docsConnect() {
-  // Clear any stale token obtained with old scopes so re-auth gets the full scope set
-  await browser.storage.local.remove('docsAuth');
   return googleOAuthConnect(GOOGLE_DOCS_SCOPE, 'docsAuth');
 }
 
@@ -2255,6 +2256,73 @@ async function docsGetOrCreateFolder(accessToken) {
   return id;
 }
 
+function htmlEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Build the Action Plan as an HTML document. Drive's import converter maps
+// h1/h2 → heading styles, b/i → bold/italic, and inline color styles → text color.
+function buildActionPlanHtml(plan, docTitle, fetchedAt) {
+  const GRAY = '#999999';
+  const EFFORT_COLOR = { surgical: '#15803d', moderate: '#b45309', rewrite: '#808080' };
+  const out = [];
+
+  out.push(`<h1>${htmlEsc(docTitle)}</h1>`);
+  const dateStr = new Date(fetchedAt || Date.now()).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  out.push(`<p style="color:${GRAY};font-size:10pt">Generated ${htmlEsc(dateStr)}</p>`);
+
+  const TIERS = [
+    { effort: 'surgical', title: 'Quick wins' },
+    { effort: 'moderate', title: 'Recommended' },
+    { effort: 'rewrite',  title: 'Heavy lift' }
+  ];
+  TIERS.forEach(tier => {
+    const recs = (plan.recommendations || []).filter(rec => rec.effort === tier.effort);
+    if (!recs.length) return;
+    out.push(`<h2>${htmlEsc(tier.title)}</h2>`);
+    const color = EFFORT_COLOR[tier.effort];
+    recs.forEach(rec => {
+      out.push(`<p style="font-size:12pt"><b>${htmlEsc(rec.change)}</b></p>`);
+      const impactStr = rec.impact ? `${tier.title} · ${rec.impact} impact` : tier.title;
+      out.push(`<p style="color:${color};font-size:10pt">${htmlEsc(impactStr)}</p>`);
+      if (rec.evidence) out.push(`<p style="color:${GRAY}"><i>${htmlEsc(rec.evidence)}</i></p>`);
+    });
+  });
+
+  if (plan.contentGaps && plan.contentGaps.length) {
+    out.push('<h2>Content gaps</h2>');
+    out.push(`<p>${htmlEsc(plan.contentGaps.join(', '))}</p>`);
+  }
+
+  const gap = plan.intentGap;
+  if (gap && gap.pageIntent) {
+    out.push('<h2>Intent gap</h2>');
+    out.push(`<p><b>${htmlEsc(gap.pageIntent)} → ${htmlEsc(gap.trafficIntent || '')}</b></p>`);
+    if (gap.summary) out.push(`<p style="color:${GRAY}"><i>${htmlEsc(gap.summary)}</i></p>`);
+    if (gap.suggestions && gap.suggestions.length) {
+      out.push('<p><b>Phrase suggestions:</b></p>');
+      out.push(`<p>${htmlEsc(gap.suggestions.join(' / '))}</p>`);
+    }
+  }
+
+  const eeat = plan.eeat;
+  if (eeat && eeat.score) {
+    out.push('<h2>E-E-A-T Signals</h2>');
+    const scoreLabel = eeat.score.charAt(0).toUpperCase() + eeat.score.slice(1);
+    out.push(`<p><b>Score: ${htmlEsc(scoreLabel)}</b></p>`);
+    (eeat.signals || []).forEach(s => {
+      out.push(`<p><b>${htmlEsc(s.dimension)}:</b> ${htmlEsc(s.observation)}</p>`);
+    });
+    if (eeat.gaps && eeat.gaps.length) {
+      out.push('<p><b>Improvements:</b></p>');
+      out.push('<ul>' + eeat.gaps.map(g => `<li>${htmlEsc(g)}</li>`).join('') + '</ul>');
+    }
+  }
+
+  return `<html><head><meta charset="utf-8"></head><body>${out.join('')}</body></html>`;
+}
+
 async function docsExportActionPlan({ plan, pageUrl, fetchedAt }) {
   const token = await docsGetAccessToken();
   if (token.error) return { notConnected: true, error: token.error };
@@ -2270,172 +2338,41 @@ async function docsExportActionPlan({ plan, pageUrl, fetchedAt }) {
   const date = new Date().toISOString().slice(0, 10);
   const docTitle = `${date}: Action Plan For ${urlLabel}`;
 
-  // Create via Docs API so the document is fully initialized before batchUpdate
-  const createRes = await fetch('https://docs.googleapis.com/v1/documents', {
+  const folderId = await docsGetOrCreateFolder(token.accessToken);
+
+  const metadata = { name: docTitle, mimeType: 'application/vnd.google-apps.document' };
+  if (folderId) metadata.parents = [folderId];
+
+  // Multipart upload: file metadata + HTML body. Drive converts HTML → Google Doc.
+  const html = buildActionPlanHtml(plan, docTitle, fetchedAt);
+  const boundary = '----seoInspectorBoundary' + Date.now();
+  const body =
+    `--${boundary}\r\n` +
+    'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+    JSON.stringify(metadata) + '\r\n' +
+    `--${boundary}\r\n` +
+    'Content-Type: text/html; charset=UTF-8\r\n\r\n' +
+    html + '\r\n' +
+    `--${boundary}--`;
+
+  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${token.accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title: docTitle })
+    headers: {
+      'Authorization': `Bearer ${token.accessToken}`,
+      'Content-Type': `multipart/related; boundary=${boundary}`
+    },
+    body
   });
-  if (!createRes.ok) {
-    if (createRes.status === 401 || createRes.status === 403) {
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    if (res.status === 401) {
       await browser.storage.local.remove('docsAuth');
       return { notConnected: true, error: 'REAUTH_REQUIRED' };
     }
-    return { error: 'CREATE_FAILED' };
+    return { error: 'CREATE_FAILED', detail };
   }
-  const { documentId } = await createRes.json();
-
-  // Move into the SEO Plans folder (best-effort — doc still works if this fails)
-  const folderId = await docsGetOrCreateFolder(token.accessToken);
-  if (folderId) {
-    await fetch(`https://www.googleapis.com/drive/v3/files/${documentId}?addParents=${encodeURIComponent(folderId)}&removeParents=root&fields=id`, {
-      method: 'PATCH',
-      headers: { 'Authorization': `Bearer ${token.accessToken}` }
-    }).catch(() => {});
-  }
-
-  const requests = [];
-  let idx = 1;
-
-  const GRAY  = { red: 0.6,  green: 0.6,  blue: 0.6  };
-  const EFFORT_COLOR = {
-    surgical: { red: 0.08, green: 0.49, blue: 0.22 },
-    moderate: { red: 0.71, green: 0.33, blue: 0.05 },
-    rewrite:  { red: 0.5,  green: 0.5,  blue: 0.5  }
-  };
-
-  function rgbFg(rgb) { return { color: { rgbColor: rgb } }; }
-
-  function ins(text) {
-    requests.push({ insertText: { location: { index: idx }, text } });
-    const start = idx, end = idx + text.length;
-    idx = end;
-    return { start, end, textEnd: end - (text.endsWith('\n') ? 1 : 0) };
-  }
-
-  function styleParaH(start, end, namedStyleType) {
-    requests.push({ updateParagraphStyle: {
-      range: { startIndex: start, endIndex: end },
-      paragraphStyle: { namedStyleType },
-      fields: 'namedStyleType'
-    }});
-  }
-
-  function styleTxt(start, end, textStyle, fields) {
-    if (start >= end) return;
-    requests.push({ updateTextStyle: {
-      range: { startIndex: start, endIndex: end },
-      textStyle, fields
-    }});
-  }
-
-  // Title
-  let r = ins(docTitle + '\n');
-  styleParaH(r.start, r.end, 'HEADING_1');
-
-  // Subtitle
-  const dateStr = new Date(fetchedAt || Date.now()).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-  r = ins(`Generated ${dateStr}\n`);
-  styleTxt(r.start, r.textEnd, { foregroundColor: rgbFg(GRAY), fontSize: { magnitude: 10, unit: 'PT' } }, 'foregroundColor,fontSize');
-  ins('\n');
-
-  // Recommendations by tier
-  const TIERS = [
-    { effort: 'surgical', title: 'Quick wins' },
-    { effort: 'moderate', title: 'Recommended' },
-    { effort: 'rewrite',  title: 'Heavy lift' }
-  ];
-
-  TIERS.forEach(tier => {
-    const recs = (plan.recommendations || []).filter(rec => rec.effort === tier.effort);
-    if (!recs.length) return;
-
-    r = ins(tier.title + '\n');
-    styleParaH(r.start, r.end, 'HEADING_2');
-
-    const effortColor = EFFORT_COLOR[tier.effort];
-
-    recs.forEach(rec => {
-      r = ins((rec.change || '') + '\n');
-      styleTxt(r.start, r.textEnd, { bold: true, fontSize: { magnitude: 12, unit: 'PT' } }, 'bold,fontSize');
-
-      const impactStr = rec.impact ? `${tier.title} · ${rec.impact} impact` : tier.title;
-      r = ins(impactStr + '\n');
-      styleTxt(r.start, r.textEnd, { foregroundColor: rgbFg(effortColor), fontSize: { magnitude: 10, unit: 'PT' } }, 'foregroundColor,fontSize');
-
-      if (rec.evidence) {
-        r = ins(rec.evidence + '\n');
-        styleTxt(r.start, r.textEnd, { italic: true, foregroundColor: rgbFg(GRAY) }, 'italic,foregroundColor');
-      }
-      ins('\n');
-    });
-  });
-
-  // Content gaps
-  if (plan.contentGaps && plan.contentGaps.length) {
-    r = ins('Content gaps\n');
-    styleParaH(r.start, r.end, 'HEADING_2');
-    ins(plan.contentGaps.join(', ') + '\n');
-    ins('\n');
-  }
-
-  // Intent gap
-  const gap = plan.intentGap;
-  if (gap && gap.pageIntent) {
-    r = ins('Intent gap\n');
-    styleParaH(r.start, r.end, 'HEADING_2');
-
-    r = ins(`${gap.pageIntent} → ${gap.trafficIntent || ''}\n`);
-    styleTxt(r.start, r.textEnd, { bold: true }, 'bold');
-
-    if (gap.summary) {
-      r = ins(gap.summary + '\n');
-      styleTxt(r.start, r.textEnd, { italic: true, foregroundColor: rgbFg(GRAY) }, 'italic,foregroundColor');
-    }
-    if (gap.suggestions && gap.suggestions.length) {
-      r = ins('Phrase suggestions:\n');
-      styleTxt(r.start, r.textEnd, { bold: true }, 'bold');
-      ins(gap.suggestions.join(' / ') + '\n');
-    }
-    ins('\n');
-  }
-
-  // E-E-A-T
-  const eeat = plan.eeat;
-  if (eeat && eeat.score) {
-    r = ins('E-E-A-T Signals\n');
-    styleParaH(r.start, r.end, 'HEADING_2');
-
-    const scoreLabel = eeat.score.charAt(0).toUpperCase() + eeat.score.slice(1);
-    r = ins(`Score: ${scoreLabel}\n`);
-    styleTxt(r.start, r.textEnd, { bold: true }, 'bold');
-
-    (eeat.signals || []).forEach(s => {
-      const dimText = `${s.dimension}: `;
-      const dimStart = idx;
-      ins(dimText);
-      styleTxt(dimStart, idx, { bold: true }, 'bold');
-      ins((s.observation || '') + '\n');
-    });
-
-    if (eeat.gaps && eeat.gaps.length) {
-      ins('\n');
-      r = ins('Improvements:\n');
-      styleTxt(r.start, r.textEnd, { bold: true }, 'bold');
-      eeat.gaps.forEach(g => ins(`• ${g}\n`));
-    }
-  }
-
-  const updateRes = await fetch(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${token.accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ requests })
-  });
-  if (!updateRes.ok) {
-    const detail = await updateRes.text().catch(() => '');
-    return { error: 'UPDATE_FAILED', detail };
-  }
-  return { url: `https://docs.google.com/document/d/${documentId}/edit` };
+  const { id } = await res.json();
+  return { url: `https://docs.google.com/document/d/${id}/edit` };
 }
 
 // ─── Google Search Console: message handlers ────────────────────────────────

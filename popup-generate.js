@@ -106,6 +106,176 @@ function clearGenResults() {
   });
 }
 
+// ─── Generate OG / Twitter text fields ───────────────────────────────────────
+
+const OG_GEN_CONFIG = {
+  'og:title':            { maxChars: 60,  platform: 'Open Graph (Facebook, LinkedIn, Slack)', type: 'title' },
+  'og:description':      { maxChars: 125, platform: 'Open Graph (Facebook, LinkedIn, Slack)', type: 'description' },
+  'twitter:title':       { maxChars: 60,  platform: 'X (Twitter)',                             type: 'title' },
+  'twitter:description': { maxChars: 125, platform: 'X (Twitter)',                             type: 'description' },
+};
+
+async function generateOGField(key, bodyEl, btn) {
+  if (!pageData || btn.disabled) return;
+
+  const cfg = OG_GEN_CONFIG[key];
+  const resultEl = bodyEl.querySelector('.gen-result');
+  if (!resultEl) return;
+
+  btn.disabled = true;
+  btn.querySelector('.icon-generate').classList.add('hidden');
+  btn.querySelector('.icon-spinner').classList.remove('hidden');
+  resultEl.classList.remove('hidden', 'is-error');
+  resultEl.replaceChildren();
+
+  const loadingEl = document.createElement('div');
+  loadingEl.className = 'gen-result-text';
+  loadingEl.textContent = 'Generating…';
+  resultEl.appendChild(loadingEl);
+
+  try {
+    const { claudeApiKey } = await browser.storage.local.get('claudeApiKey');
+    if (!claudeApiKey) throw new Error('No Claude API key — add one in Settings (⚙).');
+
+    const tab = await getActiveTab();
+    const pageUrl = pageData.canonical || tab.url;
+    const og = pageData.openGraph?.og || {};
+    const tw = pageData.openGraph?.twitter || {};
+
+    const context = [
+      `Page URL: ${pageUrl}`,
+      `Title tag: "${pageData.title?.text}"`,
+      pageData.metaDescription?.text && `Meta description: "${pageData.metaDescription.text}"`,
+      og['og:title']            && `Current og:title: "${og['og:title']}"`,
+      og['og:description']      && `Current og:description: "${og['og:description']}"`,
+      tw['twitter:title']       && `Current twitter:title: "${tw['twitter:title']}"`,
+      tw['twitter:description'] && `Current twitter:description: "${tw['twitter:description']}"`,
+      pageData.headings?.length && `Headings:\n${pageData.headings.map(h => `${h.tag.toUpperCase()}: ${h.text}`).join('\n')}`,
+      pageData.bodyTextExcerpt  && `Page content excerpt: "${pageData.bodyTextExcerpt}"`
+    ].filter(Boolean).join('\n\n');
+
+    const system = cfg.type === 'title'
+      ? `You are a social media copywriter. Write a single ${key} tag value for the page described below.
+- Platform: ${cfg.platform}
+- Maximum ${cfg.maxChars} characters — stay under this limit.
+- Write a compelling, specific share headline. Do not pad with the site name. Do not invent facts not in the page.
+- Return only the text, no quotes, no labels, no explanation.`
+      : `You are a social media copywriter. Write a single ${key} tag value for the page described below.
+- Platform: ${cfg.platform}
+- Maximum ${cfg.maxChars} characters — stay under this limit.
+- Write an engaging, specific description that makes people want to click. Do not invent facts not in the page.
+- Return only the text, no quotes, no labels, no explanation.`;
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 200,
+        system,
+        messages: [{ role: 'user', content: context }]
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message ?? `HTTP ${res.status}`);
+    }
+
+    const resp = await res.json();
+    const suggestion = (resp.content?.[0]?.text ?? '').trim();
+    if (!suggestion) throw new Error('Empty response from Claude');
+
+    resultEl.replaceChildren();
+
+    const labelEl = document.createElement('div');
+    labelEl.className = 'gen-result-label';
+    labelEl.textContent = `SUGGESTED ${key.toUpperCase()}`;
+
+    const textEl = document.createElement('div');
+    textEl.className = 'gen-result-text';
+    textEl.textContent = suggestion;
+
+    const footer = document.createElement('div');
+    footer.className = 'gen-result-footer';
+
+    const metaEl = document.createElement('span');
+    metaEl.className = 'gen-result-meta ' + (suggestion.length > cfg.maxChars ? 'is-count-amber' : 'is-count-green');
+    metaEl.textContent = `${suggestion.length} chars`;
+
+    const actions = document.createElement('div');
+    actions.className = 'gen-result-actions';
+
+    const regenBtn = document.createElement('button');
+    regenBtn.className = 'gen-result-btn';
+    regenBtn.title = 'Regenerate';
+    regenBtn.appendChild(svgFromString(
+      '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M13.5 8A5.5 5.5 0 1 1 8 2.5a5.5 5.5 0 0 1 3.9 1.6L13.5 5.6"/>' +
+      '<polyline points="13.5 2 13.5 5.6 9.9 5.6"/>' +
+      '</svg>'
+    ));
+    regenBtn.addEventListener('click', () => generateOGField(key, bodyEl, btn));
+
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'gen-result-btn';
+    copyBtn.title = 'Copy suggestion';
+    copyBtn.appendChild(svgFromString(
+      '<svg class="icon-copy" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<rect x="5" y="4" width="9" height="11" rx="1.5"/>' +
+      '<path d="M3 12H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1"/>' +
+      '</svg>'
+    ));
+    copyBtn.appendChild(svgFromString(
+      '<svg class="icon-check hidden" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<polyline points="2 8 6 12 14 4"/>' +
+      '</svg>'
+    ));
+    copyBtn.addEventListener('click', async () => {
+      await copyToClipboard(suggestion);
+      flashCopyBtn(copyBtn);
+    });
+
+    const dismissBtn = document.createElement('button');
+    dismissBtn.className = 'gen-result-btn';
+    dismissBtn.title = 'Dismiss';
+    dismissBtn.appendChild(svgFromString(
+      '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">' +
+      '<line x1="3" y1="3" x2="13" y2="13"/>' +
+      '<line x1="13" y1="3" x2="3" y2="13"/>' +
+      '</svg>'
+    ));
+    dismissBtn.addEventListener('click', () => resultEl.classList.add('hidden'));
+
+    actions.appendChild(regenBtn);
+    actions.appendChild(copyBtn);
+    actions.appendChild(dismissBtn);
+    footer.appendChild(metaEl);
+    footer.appendChild(actions);
+
+    resultEl.appendChild(labelEl);
+    resultEl.appendChild(textEl);
+    resultEl.appendChild(footer);
+
+  } catch (err) {
+    resultEl.replaceChildren();
+    resultEl.classList.add('is-error');
+    const errEl = document.createElement('div');
+    errEl.className = 'gen-result-text';
+    errEl.textContent = err.message;
+    resultEl.appendChild(errEl);
+  } finally {
+    btn.disabled = false;
+    btn.querySelector('.icon-generate').classList.remove('hidden');
+    btn.querySelector('.icon-spinner').classList.add('hidden');
+  }
+}
+
 // ─── Page insights: sentiment / intent / readability / audience ──────────────
 // One Claude call returns all four labels; results are cached per URL for a
 // day so browsing back and forth doesn't re-bill.

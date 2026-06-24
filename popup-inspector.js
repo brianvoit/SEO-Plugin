@@ -315,6 +315,9 @@ function renderIndexability(data) {
 const OG_KEYS = ['og:title','og:description','og:image','og:url','og:site_name','og:type'];
 const TW_KEYS = ['twitter:card','twitter:title','twitter:description','twitter:image'];
 
+// Keys where we offer AI generation (text-only, not images/URLs/vocab values)
+const OG_GENERABLE_KEYS = new Set(['og:title','og:description','twitter:title','twitter:description']);
+
 // Conditional-formatting thresholds for social cards
 const OG_TITLE_MAX   = 60;    // X/LinkedIn truncate beyond ~60 chars
 const OG_DESC_MAX    = 125;   // social previews often show ~125 chars
@@ -498,12 +501,38 @@ function appendOGRow(container, key, value) {
     line.appendChild(valueEl);
   }
 
+  let genBtn = null;
+  if (OG_GENERABLE_KEYS.has(key)) {
+    genBtn = document.createElement('button');
+    genBtn.className = 'gen-btn og-gen-btn';
+    genBtn.title = 'Generate with Claude';
+    genBtn.appendChild(svgFromString(
+      '<svg class="icon-generate" viewBox="0 0 16 16" width="13" height="13" fill="currentColor">' +
+      '<path d="M8 1l1.4 4.6L14 7l-4.6 1.4L8 13l-1.4-4.6L2 7l4.6-1.4z"/>' +
+      '</svg>'
+    ));
+    genBtn.appendChild(svgFromString(
+      '<svg class="icon-spinner hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">' +
+      '<path d="M14 8A6 6 0 1 1 8 2"/>' +
+      '</svg>'
+    ));
+    line.appendChild(genBtn);
+  }
+
   const detailEl = document.createElement('div');
   detailEl.className = 'og-detail';
   detailEl.textContent = detail;
 
   body.appendChild(line);
   body.appendChild(detailEl);
+
+  if (OG_GENERABLE_KEYS.has(key)) {
+    const resultEl = document.createElement('div');
+    resultEl.className = 'gen-result hidden';
+    body.appendChild(resultEl);
+    genBtn.addEventListener('click', () => generateOGField(key, body, genBtn));
+  }
+
   row.appendChild(dot);
   row.appendChild(body);
   container.appendChild(row);

@@ -1090,6 +1090,7 @@ body.settings-open #update-footer { margin-top: auto; }
 
 .og-body { flex: 1; min-width: 0; }
 .og-line { display: flex; align-items: baseline; gap: 6px; }
+.og-gen-btn { margin-left: auto; align-self: center; width: 22px; height: 22px; }
 .og-key {
   font-size: 10px;
   font-weight: 600;

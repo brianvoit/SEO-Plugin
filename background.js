@@ -2228,9 +2228,11 @@ function webceoDisconnect() {
 
 // ─── Google Docs: Action Plan export ────────────────────────────────────────
 
-const GOOGLE_DOCS_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const GOOGLE_DOCS_SCOPE = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/documents';
 
 async function docsConnect() {
+  // Clear any stale token obtained with old scopes so re-auth gets the full scope set
+  await browser.storage.local.remove('docsAuth');
   return googleOAuthConnect(GOOGLE_DOCS_SCOPE, 'docsAuth');
 }
 
@@ -2274,7 +2276,13 @@ async function docsExportActionPlan({ plan, pageUrl, fetchedAt }) {
     headers: { 'Authorization': `Bearer ${token.accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ title: docTitle })
   });
-  if (!createRes.ok) return { error: 'CREATE_FAILED' };
+  if (!createRes.ok) {
+    if (createRes.status === 401 || createRes.status === 403) {
+      await browser.storage.local.remove('docsAuth');
+      return { notConnected: true, error: 'REAUTH_REQUIRED' };
+    }
+    return { error: 'CREATE_FAILED' };
+  }
   const { documentId } = await createRes.json();
 
   // Move into the SEO Plans folder (best-effort — doc still works if this fails)

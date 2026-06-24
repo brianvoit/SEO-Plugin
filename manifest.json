@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SEO Inspector",
-  "version": "1.41",
+  "version": "1.42",
   "description": "Quick SEO metadata inspector — title, meta description, headings, canonical, and alt text overlay.",
   "browser_specific_settings": {
     "gecko": {

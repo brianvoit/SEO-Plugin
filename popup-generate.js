@@ -155,6 +155,36 @@ const OG_SENTIMENT_GUIDANCE = {
   Mixed:    'Balance the nuanced tone of the page — avoid being either too upbeat or too cautious.',
 };
 
+// CSS modifier suffix for each intent / sentiment value
+const INSIGHT_CHIP_CLASS = {
+  Informational:  'info',
+  Commercial:     'commercial',
+  Transactional:  'transactional',
+  Navigational:   'navigational',
+  Positive:       'positive',
+  Negative:       'negative',
+  Neutral:        'neutral',
+  Mixed:          'mixed',
+};
+
+// Builds a <span> containing small intent + sentiment chips, or returns null
+function buildInsightChips(insights) {
+  if (!insights || (!insights.intent && !insights.sentiment)) return null;
+  const wrap = document.createElement('span');
+  wrap.className = 'og-insight-chips';
+  const addChip = (label, key) => {
+    const cls = INSIGHT_CHIP_CLASS[key] || 'neutral';
+    const chip = document.createElement('span');
+    chip.className = `og-insight-chip og-insight-chip--${cls}`;
+    chip.textContent = label;
+    chip.title = key;
+    wrap.appendChild(chip);
+  };
+  if (insights.intent)    addChip(insights.intent,    insights.intent);
+  if (insights.sentiment) addChip(insights.sentiment, insights.sentiment);
+  return wrap;
+}
+
 function buildOGSystemPrompt(key, cfg, insights, brandTerms) {
   const brandLine = brandTerms.length
     ? `Do not include the brand name or site name (e.g. ${brandTerms.join(', ')}).`
@@ -273,7 +303,9 @@ async function generateOGField(key, bodyEl, btn) {
 
     const labelEl = document.createElement('div');
     labelEl.className = 'gen-result-label';
-    labelEl.textContent = `SUGGESTED ${key.toUpperCase()}`;
+    labelEl.appendChild(document.createTextNode(`SUGGESTED ${key.toUpperCase()} `));
+    const chips = buildInsightChips(insights);
+    if (chips) labelEl.appendChild(chips);
 
     const textEl = document.createElement('div');
     textEl.className = 'gen-result-text';

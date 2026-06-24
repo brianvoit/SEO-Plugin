@@ -1091,6 +1091,27 @@ body.settings-open #update-footer { margin-top: auto; }
 .og-body { flex: 1; min-width: 0; }
 .og-line { display: flex; align-items: baseline; gap: 6px; }
 .og-gen-btn { margin-left: auto; align-self: center; width: 22px; height: 22px; }
+
+/* Intent / sentiment chips on OG rows and generated result labels */
+.og-insight-chips { display: inline-flex; align-items: center; gap: 3px; margin-top: 3px; }
+.gen-result-label .og-insight-chips { margin-top: 0; vertical-align: middle; }
+.og-insight-chip {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  line-height: 1.6;
+}
+.og-insight-chip--info          { color: var(--accent);             background: color-mix(in srgb, var(--accent)             13%, transparent); }
+.og-insight-chip--commercial    { color: var(--chart-impressions);  background: color-mix(in srgb, var(--chart-impressions)  13%, transparent); }
+.og-insight-chip--transactional { color: var(--hint-green);         background: color-mix(in srgb, var(--hint-green)         13%, transparent); }
+.og-insight-chip--navigational  { color: var(--hint-amber);         background: color-mix(in srgb, var(--hint-amber)         13%, transparent); }
+.og-insight-chip--positive      { color: var(--hint-green);         background: color-mix(in srgb, var(--hint-green)         13%, transparent); }
+.og-insight-chip--negative      { color: var(--hint-red);           background: color-mix(in srgb, var(--hint-red)           13%, transparent); }
+.og-insight-chip--neutral       { color: var(--text-muted);         background: color-mix(in srgb, var(--text-muted)         13%, transparent); }
+.og-insight-chip--mixed         { color: var(--hint-amber);         background: color-mix(in srgb, var(--hint-amber)         13%, transparent); }
 .og-key {
   font-size: 10px;
   font-weight: 600;

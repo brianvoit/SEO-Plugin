@@ -326,15 +326,24 @@ const OG_IMG_RATIO_TOL = 0.30;
 const OG_IMG_MIN_W   = 600;
 const OG_IMG_MIN_H   = 315;
 
-function renderOpenGraph(data) {
+async function renderOpenGraph(data) {
   const ogList = document.getElementById('og-list');
   const twList = document.getElementById('tw-list');
   ogList.innerHTML = '';
   twList.innerHTML = '';
   const { og, twitter } = data.openGraph;
 
-  OG_KEYS.forEach(key => appendOGRow(ogList, key, og[key]));
-  TW_KEYS.forEach(key => appendOGRow(twList, key, twitter[key]));
+  // Best-effort: read cached AI insights so we can show chips on existing value rows
+  let insights = null;
+  try {
+    const tab = await getActiveTab();
+    const cacheKey = (tab.url || '').split('#')[0];
+    const { aiInsightsCache } = await browser.storage.local.get('aiInsightsCache');
+    insights = (aiInsightsCache || {})[cacheKey] || null;
+  } catch { /* ignore */ }
+
+  OG_KEYS.forEach(key => appendOGRow(ogList, key, og[key], insights));
+  TW_KEYS.forEach(key => appendOGRow(twList, key, twitter[key], insights));
 
   const ogPresent = OG_KEYS.filter(k => og[k]).length;
   const twPresent = TW_KEYS.filter(k => twitter[k]).length;
@@ -464,7 +473,7 @@ function checkOgImage(url, row) {
   img.src = url;
 }
 
-function appendOGRow(container, key, value) {
+function appendOGRow(container, key, value, insights = null) {
   const present = value !== undefined && value !== null && value !== '';
   const label   = key.replace('og:', '').replace('twitter:', 'tw:');
   const isImage = present && (key === 'og:image' || key === 'twitter:image');
@@ -527,6 +536,11 @@ function appendOGRow(container, key, value) {
   body.appendChild(detailEl);
 
   if (OG_GENERABLE_KEYS.has(key)) {
+    // Show intent/sentiment chips on existing value rows (only when a value is present)
+    if (present && insights && typeof buildInsightChips === 'function') {
+      const chips = buildInsightChips(insights);
+      if (chips) body.appendChild(chips);
+    }
     const resultEl = document.createElement('div');
     resultEl.className = 'gen-result hidden';
     body.appendChild(resultEl);

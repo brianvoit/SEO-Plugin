@@ -546,6 +546,155 @@ function hideImagePreview() {
   if (_ogPreviewEl) _ogPreviewEl.classList.remove('visible');
 }
 
+// ─── Render: hreflang ────────────────────────────────────────────────────────
+
+function hreflangRowLevel(tag) {
+  if (!/^https?:\/\//i.test(tag.href)) return 'warn';
+  const lang = tag.lang;
+  if (lang === 'x-default') return 'ok';
+  if (!/^[a-z]{2}(-[a-z]{2,4})?$/.test(lang)) return 'warn';
+  return 'ok';
+}
+
+function buildHreflangChecks(tags, pageLanguage, canonical) {
+  const langs = tags.map(t => t.lang);
+  const hrefs = tags.map(t => t.href);
+  const checks = [];
+
+  checks.push({ pass: langs.includes('x-default'), label: 'x-default tag present' });
+
+  const selfRef = canonical && hrefs.some(h => {
+    try { return new URL(h).pathname.replace(/\/$/, '') === new URL(canonical).pathname.replace(/\/$/, ''); }
+    catch { return false; }
+  });
+  checks.push({ pass: !!selfRef, label: 'Page references itself in hreflang (self-referencing tag)' });
+
+  const dupes = langs.filter((l, i) => langs.indexOf(l) !== i);
+  checks.push({
+    pass: dupes.length === 0,
+    label: 'No duplicate locale codes' + (dupes.length ? ` (duplicates: ${[...new Set(dupes)].join(', ')})` : '')
+  });
+
+  checks.push({ pass: hrefs.every(h => /^https?:\/\//i.test(h)), label: 'All href values are absolute URLs' });
+
+  if (pageLanguage) {
+    const match = langs.some(l => l === pageLanguage || l.startsWith(pageLanguage + '-') || pageLanguage.startsWith(l + '-'));
+    checks.push({ pass: match, label: `<html lang="${pageLanguage}"> matches a hreflang entry` });
+  }
+
+  return checks;
+}
+
+function hreflangValidationLevel(tags, pageLanguage, canonical) {
+  const checks = buildHreflangChecks(tags, pageLanguage, canonical);
+  const failures = checks.filter(c => !c.pass).length;
+  if (failures >= 2) return 'error';
+  if (failures === 1) return 'warning';
+  return 'ok';
+}
+
+function renderHreflang(data) {
+  const tags = data.hreflang || [];
+  const btn     = document.getElementById('btn-hreflang');
+  const summary = document.getElementById('hreflang-summary');
+
+  if (!tags.length) {
+    summary.textContent = 'None';
+    btn.disabled = true;
+    setNavStatus('hreflang-status', 'ok');
+    return;
+  }
+
+  const langCount = tags.filter(t => t.lang !== 'x-default').length;
+  summary.textContent = `${langCount} language${langCount !== 1 ? 's' : ''}`;
+  btn.disabled = false;
+
+  const canonical = data.canonical || data.indexability?.canonicalUrl || null;
+  setNavStatus('hreflang-status', hreflangValidationLevel(tags, data.pageLanguage || null, canonical));
+}
+
+function renderHreflangDetail() {
+  const content = document.getElementById('hreflang-detail-content');
+  content.replaceChildren();
+
+  const tags      = (pageData && pageData.hreflang)      || [];
+  const pageLang  = (pageData && pageData.pageLanguage)  || null;
+  const canonical = (pageData && (pageData.canonical || pageData.indexability?.canonicalUrl)) || null;
+
+  if (!tags.length) {
+    const sec = document.createElement('section');
+    sec.className = 'field-section';
+    const hint = document.createElement('div');
+    hint.className = 'field-hint hint-muted';
+    hint.textContent = 'No hreflang tags found on this page.';
+    sec.appendChild(hint);
+    content.appendChild(sec);
+    return;
+  }
+
+  // Languages table
+  const tableSec = document.createElement('section');
+  tableSec.className = 'field-section';
+  const th = document.createElement('div');
+  th.className = 'field-header';
+  const tl = document.createElement('span');
+  tl.className = 'field-label';
+  tl.textContent = 'LANGUAGES';
+  th.appendChild(tl);
+  tableSec.appendChild(th);
+
+  tags.forEach(t => {
+    const row = document.createElement('div');
+    row.className = 'hl-row';
+    const langEl = document.createElement('span');
+    langEl.className = 'hl-lang';
+    langEl.textContent = t.lang;
+
+    const hrefEl = document.createElement('span');
+    hrefEl.className = 'hl-href';
+    try {
+      const u = new URL(t.href);
+      hrefEl.textContent = u.pathname + (u.search || '');
+    } catch { hrefEl.textContent = t.href || '(empty)'; }
+    hrefEl.title = t.href;
+
+    const level = hreflangRowLevel(t);
+    const chip = document.createElement('span');
+    chip.className = `hl-chip hl-chip--${level}`;
+    chip.textContent = level === 'ok' ? '✓' : '!';
+    if (level === 'warn') chip.title = /^https?:\/\//i.test(t.href) ? 'Locale format may be invalid' : 'href is not absolute — must be an absolute URL';
+
+    row.append(langEl, hrefEl, chip);
+    tableSec.appendChild(row);
+  });
+  content.appendChild(tableSec);
+
+  // Validation checklist
+  const checkSec = document.createElement('section');
+  checkSec.className = 'field-section';
+  const ch = document.createElement('div');
+  ch.className = 'field-header';
+  const cl = document.createElement('span');
+  cl.className = 'field-label';
+  cl.textContent = 'VALIDATION';
+  ch.appendChild(cl);
+  checkSec.appendChild(ch);
+
+  buildHreflangChecks(tags, pageLang, canonical).forEach(c => {
+    const row = document.createElement('div');
+    row.className = `hl-check hl-check--${c.pass ? 'pass' : 'fail'}`;
+    const icon = document.createElement('span');
+    icon.className = 'hl-check-icon';
+    icon.textContent = c.pass ? '✓' : '✗';
+    const label = document.createElement('span');
+    label.className = 'hl-check-label';
+    label.textContent = c.label;
+    row.append(icon, label);
+    checkSec.appendChild(row);
+  });
+  content.appendChild(checkSec);
+}
+
 // ─── Render: structured data ─────────────────────────────────────────────────
 
 // Recommended properties per common Schema.org type — a missing one is a
@@ -601,6 +750,9 @@ function renderStructuredData(data) {
   setNavStatus('schema-status', schemaWorstLevel(_schemas, invalid));
 }
 
+let _schemaSuggestions = null;
+let _schemaSuggestLoading = false;
+
 function renderSchemaDetail() {
   const content = document.getElementById('schema-detail-content');
   content.innerHTML = '';
@@ -642,6 +794,159 @@ function renderSchemaDetail() {
 
     content.appendChild(card);
   });
+
+  renderSchemaSuggestions();
+}
+
+function renderSchemaSuggestions() {
+  const content = document.getElementById('schema-detail-content');
+  let sec = document.getElementById('schema-suggestions-sec');
+  if (!sec) {
+    sec = document.createElement('section');
+    sec.id = 'schema-suggestions-sec';
+    sec.className = 'field-section';
+    content.appendChild(sec);
+  }
+  sec.replaceChildren();
+
+  const h = document.createElement('div');
+  h.className = 'field-header';
+  const lbl = document.createElement('span');
+  lbl.className = 'field-label';
+  lbl.textContent = 'SCHEMA SUGGESTIONS';
+  h.appendChild(lbl);
+  sec.appendChild(h);
+
+  if (_schemaSuggestLoading) {
+    const wrap = document.createElement('div');
+    wrap.className = 'ap-center';
+    wrap.appendChild(svgFromString('<svg class="ap-spinner" viewBox="0 0 16 16" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M14 8A6 6 0 1 1 8 2"/></svg>'));
+    sec.appendChild(wrap);
+    return;
+  }
+
+  if (_schemaSuggestions) {
+    if (!_schemaSuggestions.length) {
+      const hint = document.createElement('div');
+      hint.className = 'field-hint hint-muted';
+      hint.textContent = 'No additional schema types suggested for this page.';
+      sec.appendChild(hint);
+      return;
+    }
+    _schemaSuggestions.forEach(s => {
+      const card = document.createElement('div');
+      card.className = 'schema-suggestion';
+      const top = document.createElement('div');
+      top.className = 'schema-suggestion-top';
+      const typeLink = document.createElement('a');
+      typeLink.className = 'schema-suggestion-type';
+      typeLink.textContent = s.type;
+      typeLink.href = '#';
+      typeLink.addEventListener('click', e => {
+        e.preventDefault();
+        browser.tabs.create({ url: `https://schema.org/${encodeURIComponent(s.type)}` });
+      });
+      const badge = document.createElement('span');
+      badge.className = `schema-suggestion-priority schema-suggestion-priority--${s.priority}`;
+      badge.textContent = s.priority;
+      top.append(typeLink, badge);
+      const why = document.createElement('div');
+      why.className = 'schema-suggestion-why';
+      why.textContent = s.why;
+      card.append(top, why);
+      sec.appendChild(card);
+    });
+    return;
+  }
+
+  // Check for Claude key, then show button or fallback hint
+  browser.storage.local.get('claudeApiKey').then(({ claudeApiKey }) => {
+    if (!claudeApiKey) {
+      const hint = document.createElement('div');
+      hint.className = 'field-hint hint-muted';
+      hint.textContent = 'Add a Claude API key in Settings to get schema suggestions.';
+      sec.appendChild(hint);
+      return;
+    }
+    const btn = document.createElement('button');
+    btn.className = 'schema-suggest-btn';
+    btn.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M8 1l1.4 4.6L14 7l-4.6 1.4L8 13l-1.4-4.6L2 7l4.6-1.4z"/></svg>'));
+    btn.appendChild(document.createTextNode(' Suggest with Claude'));
+    btn.addEventListener('click', () => loadSchemaSuggestions(claudeApiKey));
+    sec.appendChild(btn);
+  });
+}
+
+async function loadSchemaSuggestions(apiKey) {
+  if (_schemaSuggestLoading) return;
+  _schemaSuggestLoading = true;
+  renderSchemaSuggestions();
+
+  try {
+    const pd = pageData || {};
+    const existingTypes = (_schemas || []).map(s => [].concat(s['@type'])[0]).filter(Boolean);
+    const headings = (pd.headings || [])
+      .filter(h => ['h1','h2','h3'].includes(h.tag))
+      .slice(0, 10)
+      .map(h => `${h.tag.toUpperCase()}: ${h.text}`)
+      .join('\n');
+
+    const prompt = [
+      pd.canonical   ? `URL: ${pd.canonical}` : '',
+      pd.title       ? `Title: "${pd.title.text}"` : '',
+      pd.metaDescription ? `Meta description: "${pd.metaDescription.text}"` : '',
+      headings       ? `Headings:\n${headings}` : '',
+      existingTypes.length ? `Existing schema types: ${existingTypes.join(', ')}` : 'No existing schema markup.',
+      pd.bodyTextExcerpt ? `Content excerpt: "${pd.bodyTextExcerpt.slice(0, 500)}"` : ''
+    ].filter(Boolean).join('\n');
+
+    const system = `You are a structured data expert. Given a page's content and its existing Schema.org markup, suggest up to 5 additional JSON-LD schema types that would be appropriate and likely to earn Google rich results. Be specific about why each type fits this page. Avoid suggesting types already present.
+
+Respond with ONLY a compact JSON object, no prose, no code fences:
+{"suggestions":[{"type":"FAQPage","why":"one sentence explaining why this type fits","priority":"high|medium|low"}]}
+priority: high = strong rich-result candidate; medium = useful; low = nice-to-have.`;
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 600,
+        system,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message ?? `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    let text = (data.content?.[0]?.text || '').replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
+    const parsed = JSON.parse(text);
+    _schemaSuggestions = (parsed.suggestions || []).slice(0, 5).map(s => ({
+      type:     String(s.type     || '').trim(),
+      why:      String(s.why      || '').trim(),
+      priority: ['high','medium','low'].includes(s.priority) ? s.priority : 'medium'
+    })).filter(s => s.type);
+  } catch (err) {
+    _schemaSuggestions = null;
+    const sec2 = document.getElementById('schema-suggestions-sec');
+    if (sec2) {
+      const errEl = document.createElement('div');
+      errEl.className = 'field-hint hint-red';
+      errEl.textContent = `Error: ${err.message}`;
+      sec2.appendChild(errEl);
+    }
+    _schemaSuggestLoading = false;
+    return;
+  }
+  _schemaSuggestLoading = false;
+  renderSchemaSuggestions();
 }
 
 // ─── Render: dates ───────────────────────────────────────────────────────────
@@ -669,6 +974,8 @@ function renderOverlayToggle(active) {
 
 function render(data, expandMeta = false) {
   pageData = data;
+  _schemaSuggestions = null;   // reset on each new page load
+  _schemaSuggestLoading = false;
   renderTitle(data);
   renderMeta(data, expandMeta);
   renderWordCount(data);
@@ -677,6 +984,7 @@ function render(data, expandMeta = false) {
   renderCanonical(data);
   renderOpenGraph(data);
   renderStructuredData(data);
+  renderHreflang(data);
   renderDates(data);
   renderOverlayToggle(data.altOverlayActive);
 }

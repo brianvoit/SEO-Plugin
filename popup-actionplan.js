@@ -206,6 +206,26 @@ function actionPlanContext(g) {
     });
   }
 
+  // E-E-A-T signals derived from page structure (always included)
+  const hasAuthorSchema = (pd.structuredData || []).some(s => {
+    const types = [].concat(s['@type'] || []);
+    if (types.some(t => ['Person','Author'].includes(t))) return true;
+    if (s.author && (s.author.name || [].concat(s.author['@type'] || []).some(t => t === 'Person'))) return true;
+    return false;
+  });
+  lines.push('\n## E-E-A-T SIGNALS (from page structure)');
+  lines.push(`- Author schema present: ${hasAuthorSchema ? 'yes' : 'no'}`);
+  lines.push(`- Published date: ${pd.dates?.published || 'not found'}`);
+  lines.push(`- Modified date: ${pd.dates?.modified || 'not found'}`);
+  if (pd.externalLinkCount != null) lines.push(`- External links in body: ${pd.externalLinkCount}`);
+  const urlPath = (pd.canonical || '').toLowerCase();
+  const pathType = urlPath.includes('/blog/') || urlPath.includes('/article') ? 'blog/article'
+    : urlPath.includes('/product') ? 'product'
+    : urlPath.includes('/about')   ? 'about'
+    : urlPath.includes('/contact') ? 'contact'
+    : 'general';
+  lines.push(`- URL pattern: ${pathType}`);
+
   return lines.join('\n');
 }
 
@@ -225,7 +245,8 @@ Respond with ONLY a compact JSON object, no prose, no code fences, exactly:
 - "change": the action to take (imperative, specific).
 - "evidence": the data behind it, citing the actual numbers.
 - "contentGaps": short topic labels (2–4 words) the page should cover but doesn't. 0–8 items.
-- "intentGap": include ONLY when TRAFFIC INTENT DISTRIBUTION is present in the input. If the page's evident purpose (from its title, headings, and content) diverges significantly from the dominant traffic intent, set "divergence":true, "pageIntent" to the intent the page targets (one of: Informational, Navigational, Commercial, Transactional), "trafficIntent" to the dominant incoming intent, "summary" to one sentence explaining the mismatch and opportunity, and "suggestions" to exactly 8 diverse keyword phrases — range from head to long-tail, no brand terms — that the page should be visible for given its actual purpose. If no significant divergence exists, omit "intentGap" entirely.`;
+- "intentGap": include ONLY when TRAFFIC INTENT DISTRIBUTION is present in the input. If the page's evident purpose (from its title, headings, and content) diverges significantly from the dominant traffic intent, set "divergence":true, "pageIntent" to the intent the page targets (one of: Informational, Navigational, Commercial, Transactional), "trafficIntent" to the dominant incoming intent, "summary" to one sentence explaining the mismatch and opportunity, and "suggestions" to exactly 8 diverse keyword phrases — range from head to long-tail, no brand terms — that the page should be visible for given its actual purpose. If no significant divergence exists, omit "intentGap" entirely.
+- "eeat": using the E-E-A-T SIGNALS block, assess the page's Experience/Expertise/Authoritativeness/Trustworthiness and include: "score" ("strong", "moderate", or "weak"), "signals" (array of up to 4 objects with "dimension" (one of: Experience, Expertise, Authoritativeness, Trustworthiness) and "observation" (one sentence on what you found or inferred)), and "gaps" (array of 2–4 specific actionable improvements, e.g. "Add an author bio with credentials above the fold").`;
 
 // ─── Normalization (accept only well-formed, enum-valid recs) ─────────────────
 
@@ -262,6 +283,17 @@ function normalizeActionPlan(raw) {
       trafficIntent: String(raw.intentGap.trafficIntent || '').trim(),
       summary:       String(raw.intentGap.summary       || '').trim(),
       suggestions:   raw.intentGap.suggestions.slice(0, 8).map(s => String(s || '').trim()).filter(Boolean)
+    };
+  }
+  if (raw.eeat && raw.eeat.score) {
+    const EEAT_SCORES = ['strong', 'moderate', 'weak'];
+    out.eeat = {
+      score:   EEAT_SCORES.includes(String(raw.eeat.score).toLowerCase()) ? String(raw.eeat.score).toLowerCase() : 'moderate',
+      signals: (Array.isArray(raw.eeat.signals) ? raw.eeat.signals : []).slice(0, 4).map(s => ({
+        dimension:   String(s.dimension   || '').trim(),
+        observation: String(s.observation || '').trim()
+      })).filter(s => s.dimension && s.observation),
+      gaps: (Array.isArray(raw.eeat.gaps) ? raw.eeat.gaps : []).slice(0, 4).map(s => String(s || '').trim()).filter(Boolean)
     };
   }
   return out;
@@ -600,6 +632,59 @@ function renderActionPlanPanel() {
     sec.appendChild(suggChips);
     root.appendChild(sec);
   }
+
+  // E-E-A-T signals
+  const eeat = _actionPlan.eeat;
+  if (eeat && eeat.score) {
+    const sec = document.createElement('section');
+    sec.className = 'field-section';
+    const h = document.createElement('div');
+    h.className = 'field-header';
+    const lbl = document.createElement('span');
+    lbl.className = 'field-label';
+    lbl.textContent = 'E-E-A-T SIGNALS';
+    const scoreBadge = document.createElement('span');
+    scoreBadge.className = `ap-eeat-score ap-eeat-score--${eeat.score}`;
+    scoreBadge.textContent = eeat.score.charAt(0).toUpperCase() + eeat.score.slice(1);
+    h.appendChild(lbl);
+    h.appendChild(scoreBadge);
+    sec.appendChild(h);
+
+    if (eeat.signals && eeat.signals.length) {
+      const grid = document.createElement('div');
+      grid.className = 'ap-eeat-signals';
+      eeat.signals.forEach(s => {
+        const row = document.createElement('div');
+        row.className = 'ap-eeat-signal-row';
+        const dim = document.createElement('span');
+        dim.className = 'ap-eeat-dimension';
+        dim.textContent = s.dimension;
+        const obs = document.createElement('span');
+        obs.className = 'ap-eeat-observation';
+        obs.textContent = s.observation;
+        row.append(dim, obs);
+        grid.appendChild(row);
+      });
+      sec.appendChild(grid);
+    }
+
+    if (eeat.gaps && eeat.gaps.length) {
+      const gapsHeader = document.createElement('div');
+      gapsHeader.className = 'ap-eeat-gaps-label';
+      gapsHeader.textContent = 'Improvements';
+      sec.appendChild(gapsHeader);
+      const gapsList = document.createElement('ul');
+      gapsList.className = 'ap-eeat-gaps';
+      eeat.gaps.forEach(g => {
+        const li = document.createElement('li');
+        li.textContent = g;
+        gapsList.appendChild(li);
+      });
+      sec.appendChild(gapsList);
+    }
+
+    root.appendChild(sec);
+  }
 }
 
 // ─── Export to RTF ────────────────────────────────────────────────────────────
@@ -651,6 +736,19 @@ async function exportActionPlanRtf() {
     parts.push(`Page: ${rtfEscape(gap.pageIntent)}  \\u8594?  Traffic: ${rtfEscape(gap.trafficIntent)}\\par`);
     if (gap.summary) parts.push(`${rtfEscape(gap.summary)}\\par`);
     parts.push(`\\par Phrase suggestions:\\par ${rtfEscape(gap.suggestions.join(' / '))}\\par`);
+  }
+
+  const eeat = _actionPlan.eeat;
+  if (eeat && eeat.score) {
+    parts.push(`\\par{\\b\\fs26 E-E-A-T Signals}\\par`);
+    parts.push(`Score: ${rtfEscape(eeat.score.charAt(0).toUpperCase() + eeat.score.slice(1))}\\par`);
+    (eeat.signals || []).forEach(s => {
+      parts.push(`{\\b ${rtfEscape(s.dimension)}:} ${rtfEscape(s.observation)}\\par`);
+    });
+    if (eeat.gaps && eeat.gaps.length) {
+      parts.push(`\\par Improvements:\\par`);
+      eeat.gaps.forEach(g => parts.push(`\\u8226? ${rtfEscape(g)}\\par`));
+    }
   }
 
   const rtf = `{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Helvetica;}}\\f0\\fs22 ${parts.join('')}}`;

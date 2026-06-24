@@ -175,6 +175,118 @@ function gaNextPageUrl(path) {
   return `https://${_gaHost}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
+// ─── Internal links ───────────────────────────────────────────────────────────
+
+function makeInternalLinkChip(text, cls, title) {
+  const chip = document.createElement('span');
+  chip.className = `gsc-branded-pill ga-link-chip ${cls}`;
+  chip.textContent = text;
+  chip.title = title;
+  return chip;
+}
+
+function renderInternalLinks(links) {
+  const list  = document.getElementById('ga-internal-links');
+  const empty = document.getElementById('ga-internal-links-empty');
+  if (!list) return;
+  list.replaceChildren();
+
+  if (!links || !links.length) {
+    if (empty) empty.classList.remove('hidden');
+    return;
+  }
+  if (empty) empty.classList.add('hidden');
+
+  links.forEach(link => {
+    const row = document.createElement('div');
+    row.className = 'ga-link-row';
+
+    const dest = document.createElement('span');
+    dest.className = 'ga-link-dest';
+    dest.textContent = link.href;
+    dest.title = link.href;
+    if (_gaHost) {
+      dest.classList.add('ga-next-link');
+      dest.addEventListener('click', () => browser.tabs.create({ url: `https://${_gaHost}${link.href}` }));
+    }
+
+    const txt = document.createElement('span');
+    txt.className = 'ga-link-text';
+    txt.textContent = link.text;
+    txt.title = link.text;
+
+    const chips = document.createElement('span');
+    chips.className = 'ga-link-chips';
+
+    row.append(dest, txt, chips);
+    list.appendChild(row);
+  });
+
+  loadInternalLinkChips(links);
+}
+
+async function loadInternalLinkChips(links) {
+  if (!_gaHost) return;
+  const send = msg => browser.runtime.sendMessage(msg).catch(() => null);
+
+  // Collect unique destination paths → indices of rows that share that destination
+  const destMap = new Map();
+  links.forEach((link, idx) => {
+    if (!destMap.has(link.href)) destMap.set(link.href, []);
+    destMap.get(link.href).push({ text: link.text, idx });
+  });
+
+  const uniqueDests = Array.from(destMap.keys()).slice(0, 10);
+
+  await Promise.allSettled(uniqueDests.map(async path => {
+    const destUrl = `https://${_gaHost}${path}`;
+    const entries = destMap.get(path) || [];
+
+    const [gscRes, adsRes, webceoRes] = await Promise.allSettled([
+      send({ action: 'gscGetPageData',    pageUrl: destUrl, range: '90' }),
+      send({ action: 'adsGetPageData',    pageUrl: destUrl, range: '90' }),
+      send({ action: 'webceoGetRankings', pageUrl: destUrl, historyDepth: 1 })
+    ]);
+
+    entries.forEach(({ text, idx }) => {
+      const linkList = document.getElementById('ga-internal-links');
+      if (!linkList) return;
+      const rowEls = linkList.querySelectorAll('.ga-link-row');
+      if (!rowEls[idx]) return;
+      const chipContainer = rowEls[idx].querySelector('.ga-link-chips');
+      if (!chipContainer) return;
+
+      const anchor = text.toLowerCase().trim();
+
+      const gscData = gscRes.status === 'fulfilled' ? gscRes.value : null;
+      if (gscData && gscData.connected && Array.isArray(gscData.queries)) {
+        if (gscData.queries.some(q => (q.query || '').toLowerCase() === anchor)) {
+          chipContainer.appendChild(makeInternalLinkChip('GSC', 'ga-link-chip--gsc',
+            'Anchor text appears in Search Console queries for the destination page'));
+        }
+      }
+
+      const adsData = adsRes.status === 'fulfilled' ? adsRes.value : null;
+      if (adsData && adsData.connected) {
+        const inKw = (adsData.keywords    || []).some(k => (k.text || '').toLowerCase() === anchor);
+        const inSt = (adsData.searchTerms || []).some(k => (k.text || '').toLowerCase() === anchor);
+        if (inKw || inSt) {
+          chipContainer.appendChild(makeInternalLinkChip('Ads', 'ga-link-chip--ads',
+            'Anchor text appears in Google Ads keywords/terms for the destination page'));
+        }
+      }
+
+      const wcData = webceoRes.status === 'fulfilled' ? webceoRes.value : null;
+      if (wcData && wcData.connected && Array.isArray(wcData.rows)) {
+        if (wcData.rows.some(r => (r.keyword || '').toLowerCase() === anchor)) {
+          chipContainer.appendChild(makeInternalLinkChip('Ranking', 'ga-link-chip--ranking',
+            'Anchor text appears in Web CEO tracked keywords for the destination page'));
+        }
+      }
+    });
+  }));
+}
+
 // ─── Channel cross-filter (chart + scorecards) ──────────────────────────────────
 
 function showGaChannelFilterBar(channel) {
@@ -257,6 +369,7 @@ function renderGaPanel(response) {
   renderGaCharts(response.timeseries, response.totals, response.previousTotals, gaSelectedRange);
   renderGaChannels(response.channels || []);
   renderGaNextPages(response.nextPages || []);
+  renderInternalLinks((typeof pageData !== 'undefined' && pageData && pageData.internalLinks) || []);
   document.getElementById('ga-fetched-meta').textContent =
     `${response.propertyName} · ${response.path} · Updated ${gscRelativeTime(response.fetchedAt)}`;
   dataBox.classList.remove('hidden');

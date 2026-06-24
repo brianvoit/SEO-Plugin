@@ -4,11 +4,12 @@
 
 // ─── Panel navigation ────────────────────────────────────────────────────────
 
-const settingsPanel = document.getElementById('settings-panel');
-const schemaPanel   = document.getElementById('schema-panel');
-const ogPanel       = document.getElementById('og-panel');
-const twPanel       = document.getElementById('tw-panel');
+const settingsPanel   = document.getElementById('settings-panel');
+const schemaPanel     = document.getElementById('schema-panel');
+const ogPanel         = document.getElementById('og-panel');
+const twPanel         = document.getElementById('tw-panel');
 const actionPlanPanel = document.getElementById('actionplan-panel');
+const hreflangPanel   = document.getElementById('hreflang-panel');
 const searchTab     = document.getElementById('search-tab');
 const analyticsTab  = document.getElementById('analytics-tab');
 const adsTab        = document.getElementById('ads-tab');
@@ -30,6 +31,7 @@ function hideDetailPanels() {
   ogPanel.classList.add('hidden');
   twPanel.classList.add('hidden');
   actionPlanPanel.classList.add('hidden');
+  hreflangPanel.classList.add('hidden');
 }
 
 function showActiveTab() {
@@ -91,6 +93,12 @@ function showActionPlanPanel() {
   if (typeof loadActionPlan === 'function') loadActionPlan(false);
 }
 
+function showHreflangPanel() {
+  enterDetailPanel();
+  hreflangPanel.classList.remove('hidden');
+  if (typeof renderHreflangDetail === 'function') renderHreflangDetail();
+}
+
 function hideDetailPanelToTab() {
   showActiveTab();
 }
@@ -148,6 +156,8 @@ document.getElementById('btn-tw').addEventListener('click', showTwPanel);
 document.getElementById('btn-tw-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-actionplan').addEventListener('click', showActionPlanPanel);
 document.getElementById('btn-actionplan-back').addEventListener('click', hideDetailPanelToTab);
+document.getElementById('btn-hreflang').addEventListener('click', showHreflangPanel);
+document.getElementById('btn-hreflang-back').addEventListener('click', hideDetailPanelToTab);
 
 // ─── Main tabs (Overview / Search / Analytics / DNS / Redirect) ──────────────
 // The status pill is also a tab trigger (data-tab="redirect"), so the handler
@@ -160,7 +170,8 @@ document.querySelectorAll('#main-tabs [data-tab]').forEach(btn => {
     const inPanel = inSettings
       || !schemaPanel.classList.contains('hidden')
       || !ogPanel.classList.contains('hidden')
-      || !twPanel.classList.contains('hidden');
+      || !twPanel.classList.contains('hidden')
+      || !hreflangPanel.classList.contains('hidden');
     if (tab === activeTab && !inPanel) return;
     activeTab = tab;
     // Settings reloads page data on exit; other panels just return to the tab

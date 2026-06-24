@@ -99,6 +99,58 @@ function getDates() {
   return { published, modified };
 }
 
+// Body-content links: skip nav/header/footer/aside elements.
+// Uses closest() which is O(depth) but simple and correct.
+function isBodyContent(el) {
+  return !el.closest('nav, header, footer, aside, [role="navigation"], [role="banner"], [role="contentinfo"], [role="complementary"]');
+}
+
+function getHreflang() {
+  const tags = [];
+  document.querySelectorAll('link[rel="alternate"][hreflang]').forEach(el => {
+    const lang = (el.getAttribute('hreflang') || '').trim().toLowerCase();
+    const href = el.href || '';
+    if (lang) tags.push({ lang, href });
+  });
+  const pageLanguage = (document.documentElement.getAttribute('lang') || '').trim().toLowerCase() || null;
+  return { tags, pageLanguage };
+}
+
+function getInternalLinks() {
+  const seen = new Set();
+  const links = [];
+  const currentPath = window.location.pathname.replace(/\/$/, '') || '/';
+  document.querySelectorAll('a[href]').forEach(a => {
+    if (!isBodyContent(a)) return;
+    let normalized;
+    try {
+      const url = new URL(a.href, window.location.href);
+      if (url.origin !== window.location.origin) return;
+      normalized = url.pathname.replace(/\/$/, '') || '/';
+      if (normalized === currentPath) return;
+    } catch { return; }
+    const text = (a.innerText || a.textContent || '').trim().replace(/\s+/g, ' ');
+    if (!text) return;
+    const key = `${normalized}::${text}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    links.push({ href: normalized, text });
+  });
+  return links.slice(0, 30);
+}
+
+function getExternalLinkCount() {
+  let count = 0;
+  document.querySelectorAll('a[href]').forEach(a => {
+    if (!isBodyContent(a)) return;
+    try {
+      const url = new URL(a.href, window.location.href);
+      if (url.origin !== window.location.origin) count++;
+    } catch { /* skip */ }
+  });
+  return count;
+}
+
 // A <meta http-equiv="refresh" content="0; url=..."> is a client-side redirect
 // that webRequest can't see, so the popup flags it from the page itself.
 function getMetaRefresh() {
@@ -145,6 +197,7 @@ function getPageData() {
 
   const bodyText = getCleanBodyText();
   const sd = getStructuredData();
+  const hl = getHreflang();
 
   return {
     metaRefresh: getMetaRefresh(),
@@ -161,7 +214,11 @@ function getPageData() {
     structuredData:        sd.schemas,
     structuredDataInvalid: sd.invalid,
     dates:            getDates(),
-    gaMeasurementIds: getGaMeasurementIds()
+    gaMeasurementIds: getGaMeasurementIds(),
+    hreflang:         hl.tags,
+    pageLanguage:     hl.pageLanguage,
+    internalLinks:    getInternalLinks(),
+    externalLinkCount: getExternalLinkCount()
   };
 }
 

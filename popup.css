@@ -1689,6 +1689,13 @@ body.settings-open #update-footer { margin-top: auto; }
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
 .adgroup-detail-summary { padding-top: 6px; padding-bottom: 6px; }
+.adgroup-metrics-table { display: flex; flex-direction: column; gap: 2px; }
+.adgroup-metrics-row { display: grid; grid-template-columns: 1fr repeat(4, 56px); gap: 4px; align-items: center; font-size: 11px; }
+.adgroup-metrics-row--header { color: var(--text-muted); font-weight: 500; border-bottom: 0.5px solid var(--border); padding-bottom: 4px; margin-bottom: 2px; }
+.adgroup-metrics-type { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.adgroup-metrics-row--header .adgroup-metrics-type { color: var(--text-muted); }
+.adgroup-metrics-num { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+.adgroup-metrics-row--header .adgroup-metrics-num { color: var(--text-muted); }
 
 .adgroup-asset-section .field-header { margin-bottom: 8px; }
 .asset-gen-low { color: var(--accent); }

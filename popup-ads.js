@@ -2251,13 +2251,40 @@ function renderOneAd(ad, detail, multi, body) {
     body.appendChild(header);
   }
 
-  // Type + metrics summary line
+  // Type + metrics summary table (header row + data row)
   const summary = document.createElement('div');
   summary.className = 'field-section adgroup-detail-summary' + (multi ? ' adgroup-indent' : '');
-  const metrics = document.createElement('div');
-  metrics.className = 'adgroup-ad-metrics';
-  metrics.textContent = `${adsFriendlyType(type)} · ${adsNum(ad.impressions)} impr · ${adsNum(ad.clicks)} clicks · ${adsCost(ad.cost, _adsData && _adsData.currency)} · ${adsConv(ad.conversions)} conv`;
-  summary.appendChild(metrics);
+
+  const metricsTable = document.createElement('div');
+  metricsTable.className = 'adgroup-metrics-table';
+
+  const headerRow = document.createElement('div');
+  headerRow.className = 'adgroup-metrics-row adgroup-metrics-row--header';
+  ['Ad type', 'Impr.', 'Clicks', 'Cost', 'Conv.'].forEach((h, i) => {
+    const cell = document.createElement('span');
+    cell.className = i === 0 ? 'adgroup-metrics-type' : 'adgroup-metrics-num';
+    cell.textContent = h;
+    headerRow.appendChild(cell);
+  });
+  metricsTable.appendChild(headerRow);
+
+  const dataRow = document.createElement('div');
+  dataRow.className = 'adgroup-metrics-row';
+  const currency = _adsData && _adsData.currency;
+  [
+    [adsFriendlyType(type), 'adgroup-metrics-type'],
+    [adsNum(ad.impressions),              'adgroup-metrics-num'],
+    [adsNum(ad.clicks),                   'adgroup-metrics-num'],
+    [adsCost(ad.cost, currency),          'adgroup-metrics-num'],
+    [adsConv(ad.conversions),             'adgroup-metrics-num'],
+  ].forEach(([val, cls]) => {
+    const cell = document.createElement('span');
+    cell.className = cls;
+    cell.textContent = val;
+    dataRow.appendChild(cell);
+  });
+  metricsTable.appendChild(dataRow);
+  summary.appendChild(metricsTable);
   body.appendChild(summary);
 
   const hasAssets = (detail.headlines || []).length || (detail.descriptions || []).length;
@@ -2282,8 +2309,9 @@ function renderAdAssetSection(label, assetKey, items, body, indent) {
   lbl.textContent = `${label} (${items.length})`;
   const gen = document.createElement('button');
   gen.className = 'save-key-btn';
-  gen.textContent = 'Generate *';
   gen.title = `Generate a new ${asset.one}`;
+  gen.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M8 1l1.4 4.6L14 7l-4.6 1.4L8 13l-1.4-4.6L2 7l4.6-1.4z"/></svg>'));
+  gen.appendChild(document.createTextNode(' Generate'));
   head.appendChild(lbl);
   head.appendChild(gen);
   section.appendChild(head);

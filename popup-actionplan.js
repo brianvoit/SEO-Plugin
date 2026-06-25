@@ -412,7 +412,7 @@ async function loadActionPlan(forceRefresh = false) {
       },
       body: JSON.stringify({
         model: ACTION_PLAN_MODEL,
-        max_tokens: 2000,
+        max_tokens: 4096,
         system: [{ type: 'text', text: ACTION_PLAN_SYSTEM, cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: context }]
       })

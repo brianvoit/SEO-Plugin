@@ -1,6 +1,13 @@
 // Loaded as a classic (non-module) script — declarations below are shared
 // globals across all popup-*.js files via the script order in popup.html.
 
+// ─── Claude model IDs ─────────────────────────────────────────────────────────
+// Update here when Anthropic releases new versions; every call in the extension
+// picks up the change automatically.
+const MODEL_LIGHT = 'claude-haiku-4-5-20251001'; // classification, generation, schema suggestions
+const MODEL_MID   = 'claude-sonnet-4-6';          // ad copy, negatives, enforce-limits
+const MODEL_HEAVY = 'claude-opus-4-8';             // action plan (reasoning-heavy synthesis)
+
 const DEFAULT_RANGES = {
   title: { min: 30, target: 55, max: 70 },
   meta:  { min: 70, target: 155, max: 160 }

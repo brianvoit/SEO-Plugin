@@ -958,7 +958,7 @@ priority: high = strong rich-result candidate; medium = useful; low = nice-to-ha
         'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: MODEL_LIGHT,
         max_tokens: 600,
         system,
         messages: [{ role: 'user', content: prompt }]

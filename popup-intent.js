@@ -43,7 +43,7 @@ async function classifyIntents(terms, claudeApiKey) {
       'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
+      model: MODEL_LIGHT,
       max_tokens: 2000,
       system: [{ type: 'text', text: INTENT_CLASSIFY_SYSTEM, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content }]

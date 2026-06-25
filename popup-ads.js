@@ -1043,7 +1043,7 @@ async function regenerateAdCopyLine(asset, index, input, count, btn) {
         'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model: MODEL_MID,
         max_tokens: 120,
         system,
         messages: [{ role: 'user', content: _adCopyContext || 'No additional context available.' }]
@@ -1100,7 +1100,7 @@ async function enforceAdCopyLimits(claudeApiKey, parsed) {
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true'
       },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 600, system, messages: [{ role: 'user', content }] })
+      body: JSON.stringify({ model: MODEL_MID, max_tokens: 600, system, messages: [{ role: 'user', content }] })
     });
     if (res.ok) {
       const data = await res.json();
@@ -1372,7 +1372,7 @@ async function generateAdCopy(force) {
         'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model: MODEL_MID,
         max_tokens: 1600,
         system: systemBlocks,
         messages: [{ role: 'user', content: context }]
@@ -1691,7 +1691,7 @@ async function generateNegatives(force) {
         'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model: MODEL_MID,
         max_tokens: 4096,
         system: negSystemBlocks,
         messages: [{ role: 'user', content: context }]
@@ -2365,7 +2365,7 @@ async function generateOneAdLine(asset, existing) {
       'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
+      model: MODEL_MID,
       max_tokens: 120,
       system,
       messages: [{ role: 'user', content: context }]

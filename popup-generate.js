@@ -84,7 +84,7 @@ async function generateField(field) {
         'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: MODEL_LIGHT,
         max_tokens: 200,
         system,
         messages: [{ role: 'user', content: context }]
@@ -285,7 +285,7 @@ async function generateOGField(key, bodyEl, btn) {
         'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: MODEL_LIGHT,
         max_tokens: 200,
         system,
         messages: [{ role: 'user', content: context }]
@@ -502,7 +502,7 @@ async function loadAiInsights(forceRefresh = false) {
         'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: MODEL_LIGHT,
         max_tokens: 120,
         system,
         messages: [{ role: 'user', content }]

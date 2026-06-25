@@ -5,7 +5,7 @@
 
 // Reasoning-heavy synthesis → the most capable model, distinct from the Haiku
 // used for the lightweight page insights. Change here to trade cost for depth.
-const ACTION_PLAN_MODEL = 'claude-opus-4-8';
+const ACTION_PLAN_MODEL = MODEL_HEAVY;
 const ACTION_PLAN_TTL_MS = 60 * 60 * 1000;     // 1h — GSC data shifts; stale plans mislead
 const ACTION_PLAN_RANGE = '90';                // 90-day demand window (impressions/terms)
 

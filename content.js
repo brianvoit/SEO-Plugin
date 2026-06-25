@@ -1,3 +1,7 @@
+// Content scripts run in the page context and cannot access popup-shared.js globals.
+// Update this when the model tier used for alt-text generation changes.
+const CONTENT_MODEL_LIGHT = 'claude-haiku-4-5-20251001';
+
 const OVERLAY_ATTR  = 'data-seo-overlay';
 const CONTAINER_ID  = 'seo-inspector-overlay';
 const TOOLTIP_ID    = 'seo-inspector-tooltip';
@@ -696,7 +700,7 @@ async function generateAltText(srcUrl) {
         'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: CONTENT_MODEL_LIGHT,
         max_tokens: 150,
         system,
         messages: [{ role: 'user', content: userContent }]

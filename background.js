@@ -1678,6 +1678,38 @@ async function adsSearch(accessToken, customerId, query) {
   return { rows };
 }
 
+// One mutate request to a resource-specific :mutate endpoint (sharedSets,
+// campaignSharedSets, sharedCriteria, …). Mirrors adsSearch's headers + error
+// handling. Returns { results:[{resourceName}] } or { error, detail }.
+async function adsMutate(accessToken, customerId, resource, operations) {
+  const { adsDeveloperToken, adsManagerId } = await browser.storage.local.get(['adsDeveloperToken', 'adsManagerId']);
+  if (!adsDeveloperToken) return { error: 'NO_DEV_TOKEN' };
+
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    'developer-token': adsDeveloperToken,
+    'Content-Type': 'application/json'
+  };
+  if (adsManagerId) headers['login-customer-id'] = adsDigits(adsManagerId);
+
+  let res;
+  try {
+    res = await fetch(`${GA_ADS_API}/customers/${adsDigits(customerId)}/${resource}:mutate`, {
+      method: 'POST', headers, body: JSON.stringify({ operations })
+    });
+  } catch {
+    return { error: 'NETWORK' };
+  }
+  if (res.status === 429) return { error: 'RATE_LIMITED' };
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    const msg = (Array.isArray(body) ? body[0] : body)?.error?.message;
+    return { error: 'API_ERROR', detail: msg || `HTTP ${res.status}` };
+  }
+  const data = await res.json();
+  return { results: data.results || [] };
+}
+
 // Accessible accounts. With a manager ID, list its client accounts (id + name);
 // otherwise fall back to the bare accessible-customers id list.
 async function adsListAccounts(accessToken) {
@@ -2013,6 +2045,190 @@ async function adsGetChartData({ pageUrl, range, scope }) {
   return { timeseries: adsFillTimeseries(byDate, range), totals: adsSumMetrics(res.rows || []) };
 }
 
+// Creative (RSA headlines/descriptions, with pinning) for one or more ads, plus
+// each text asset's performance rating. Google does not expose per-asset
+// impressions/clicks for RSAs — the performance_label (LOW/GOOD/BEST/LEARNING/
+// PENDING) is the signal. Returns { ads: { [adId]: {type,name,headlines,descriptions} } }.
+async function adsGetAdsDetail({ pageUrl, adIds }) {
+  const tokenResult = await adsGetAccessToken();
+  if (tokenResult.error) return { error: tokenResult.error };
+  const accessToken = tokenResult.accessToken;
+  const customerId = await adsGetAccount(gscPageHost(pageUrl));
+  if (!customerId) return { error: 'NO_ACCOUNT' };
+  const ids = [...new Set((adIds || []).map(adsDigits).filter(Boolean))];
+  if (!ids.length) return { ads: {} };
+  const idList = `(${ids.join(',')})`;
+
+  const [creativeRes, assetRes] = await Promise.all([
+    adsSearch(accessToken, customerId,
+      `SELECT ad_group_ad.ad.id, ad_group_ad.ad.type, ad_group_ad.ad.name,
+              ad_group_ad.ad.responsive_search_ad.headlines,
+              ad_group_ad.ad.responsive_search_ad.descriptions
+       FROM ad_group_ad WHERE ad_group_ad.ad.id IN ${idList}`),
+    adsSearch(accessToken, customerId,
+      `SELECT ad_group_ad.ad.id, ad_group_ad_asset_view.field_type, ad_group_ad_asset_view.performance_label,
+              ad_group_ad_asset_view.enabled, asset.text_asset.text
+       FROM ad_group_ad_asset_view WHERE ad_group_ad.ad.id IN ${idList}`)
+  ]);
+  if (creativeRes.error) return { error: creativeRes.error, detail: creativeRes.detail };
+
+  // Performance label / enabled, keyed adId → (fieldType::text). asset_view is
+  // the only place the rating lives; missing labels just render as no badge.
+  const labelMap = new Map();
+  (assetRes.rows || []).forEach(r => {
+    const adId = String(r.adGroupAd?.ad?.id || '');
+    const v = r.adGroupAdAssetView;
+    const text = r.asset?.textAsset?.text;
+    if (!adId || !v || text == null) return;
+    if (!labelMap.has(adId)) labelMap.set(adId, new Map());
+    labelMap.get(adId).set(`${v.fieldType}::${text}`, { label: v.performanceLabel || null, enabled: v.enabled !== false });
+  });
+
+  const ads = {};
+  (creativeRes.rows || []).forEach(r => {
+    const ad = r.adGroupAd?.ad || {};
+    const adId = String(ad.id || '');
+    if (!adId) return;
+    const rsa = ad.responsiveSearchAd || {};
+    const labels = labelMap.get(adId) || new Map();
+    const mapAsset = (a, fieldType) => {
+      const text = a.text || '';
+      const meta = labels.get(`${fieldType}::${text}`) || {};
+      return { text, pinned: a.pinnedField || null, label: meta.label || null, enabled: meta.enabled !== false };
+    };
+    ads[adId] = {
+      type: ad.type || '',
+      name: ad.name || '',
+      headlines: (rsa.headlines || []).map(a => mapAsset(a, 'HEADLINE')),
+      descriptions: (rsa.descriptions || []).map(a => mapAsset(a, 'DESCRIPTION'))
+    };
+  });
+
+  return { ads };
+}
+
+// ─── Negative keywords: write campaign-level exclusion lists ──────────────────
+// For each campaign, push the chosen terms into a NEGATIVE_KEYWORDS shared set
+// (exclusion list): reuse an attached list, else create one + attach it, then add
+// the terms (deduped against what's already there). Campaign-level only.
+
+const NEG_MATCH_TYPES = new Set(['BROAD', 'PHRASE', 'EXACT']);
+function negMatchType(mt) {
+  const v = String(mt || 'BROAD').toUpperCase();
+  return NEG_MATCH_TYPES.has(v) ? v : 'BROAD';
+}
+
+async function adsAddNegativesForCampaign(accessToken, cid, camp) {
+  const { campaignId, campaignName, listName, sharedSetId } = camp;
+  const out = { campaignId, campaignName, listName: listName || null, added: [], skipped: [], error: null };
+  const wanted = (camp.terms || []).filter(t => t && t.text && String(t.text).trim());
+  if (!wanted.length) return out;
+
+  // 1) Resolve the destination shared set: explicit id, else first attached
+  //    NEGATIVE_KEYWORDS list, else create a new one and attach it.
+  let sharedSetResource = sharedSetId ? `customers/${cid}/sharedSets/${adsDigits(sharedSetId)}` : null;
+
+  // Skip the find step when the caller explicitly wants a brand-new list.
+  if (!sharedSetResource && !camp.createNew) {
+    const found = await adsSearch(accessToken, cid,
+      `SELECT shared_set.id, shared_set.name FROM campaign_shared_set
+       WHERE campaign.id = ${adsDigits(campaignId)}
+         AND shared_set.type = 'NEGATIVE_KEYWORDS' AND shared_set.status = 'ENABLED'`);
+    if (found.error) { out.error = found.detail || found.error; return out; }
+    const existing = (found.rows || [])[0]?.sharedSet;
+    if (existing) {
+      sharedSetResource = `customers/${cid}/sharedSets/${adsDigits(existing.id)}`;
+      out.listName = existing.name || out.listName;
+    }
+  }
+
+  if (!sharedSetResource) {
+    const name = listName || `${campaignName || 'Campaign'} — Negatives`;
+    const created = await adsMutate(accessToken, cid, 'sharedSets',
+      [{ create: { name, type: 'NEGATIVE_KEYWORDS' } }]);
+    if (created.error) { out.error = created.detail || created.error; return out; }
+    sharedSetResource = created.results?.[0]?.resourceName;
+    if (!sharedSetResource) { out.error = 'Could not create exclusion list'; return out; }
+    out.listName = name;
+    const attached = await adsMutate(accessToken, cid, 'campaignSharedSets',
+      [{ create: { campaign: `customers/${cid}/campaigns/${adsDigits(campaignId)}`, sharedSet: sharedSetResource } }]);
+    if (attached.error) { out.error = attached.detail || attached.error; return out; }
+  }
+  out.sharedSetResource = sharedSetResource;
+
+  // 2) Read existing criteria so we skip duplicates (text + match type)
+  const setId = adsDigits(sharedSetResource.split('/').pop());
+  const existingRes = await adsSearch(accessToken, cid,
+    `SELECT shared_criterion.keyword.text, shared_criterion.keyword.match_type
+     FROM shared_criterion WHERE shared_set.id = ${setId}`);
+  if (existingRes.error) { out.error = existingRes.detail || existingRes.error; return out; }
+  const have = new Set((existingRes.rows || []).map(r =>
+    `${(r.sharedCriterion?.keyword?.text || '').toLowerCase()}::${r.sharedCriterion?.keyword?.matchType || ''}`));
+
+  // 3) Add the new terms
+  const ops = [];
+  wanted.forEach(t => {
+    const mt = negMatchType(t.matchType);
+    const text = String(t.text).trim();
+    const key = `${text.toLowerCase()}::${mt}`;
+    if (have.has(key)) { out.skipped.push({ text, matchType: mt }); return; }
+    have.add(key);
+    ops.push({ create: { sharedSet: sharedSetResource, keyword: { text, matchType: mt } } });
+    out.added.push({ text, matchType: mt });
+  });
+
+  if (ops.length) {
+    const addRes = await adsMutate(accessToken, cid, 'sharedCriteria', ops);
+    if (addRes.error) { out.error = addRes.detail || addRes.error; out.added = []; return out; }
+  }
+  return out;
+}
+
+// Existing NEGATIVE_KEYWORDS exclusion lists attached to each given campaign, so
+// the popup can offer them as destinations. Returns { byCampaign: {id:[{id,name}]} }.
+async function adsGetCampaignNegLists({ pageUrl, campaignIds }) {
+  const tokenResult = await adsGetAccessToken();
+  if (tokenResult.error) return { error: tokenResult.error };
+  const accessToken = tokenResult.accessToken;
+  const customerId = await adsGetAccount(gscPageHost(pageUrl));
+  if (!customerId) return { error: 'NO_ACCOUNT' };
+  const ids = [...new Set((campaignIds || []).map(adsDigits).filter(Boolean))];
+  if (!ids.length) return { byCampaign: {} };
+
+  const res = await adsSearch(accessToken, customerId,
+    `SELECT campaign.id, shared_set.id, shared_set.name FROM campaign_shared_set
+     WHERE campaign.id IN (${ids.join(',')})
+       AND shared_set.type = 'NEGATIVE_KEYWORDS' AND shared_set.status = 'ENABLED'`);
+  if (res.error) return { error: res.error, detail: res.detail };
+
+  const byCampaign = {};
+  (res.rows || []).forEach(r => {
+    const cid = String(r.campaign?.id || '');
+    const ss = r.sharedSet;
+    if (!cid || !ss) return;
+    (byCampaign[cid] = byCampaign[cid] || []).push({ id: String(ss.id), name: ss.name || `List ${ss.id}` });
+  });
+  return { byCampaign };
+}
+
+async function adsAddNegatives({ pageUrl, campaigns }) {
+  const tokenResult = await adsGetAccessToken();
+  if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
+  if (tokenResult.error === 'REAUTH_REQUIRED') return { connected: false, reauthRequired: true };
+  if (tokenResult.error) return { connected: true, error: tokenResult.error };
+  const accessToken = tokenResult.accessToken;
+
+  const customerId = await adsGetAccount(gscPageHost(pageUrl));
+  if (!customerId) return { connected: true, error: 'NO_ACCOUNT' };
+  const cid = adsDigits(customerId);
+
+  const results = [];
+  for (const camp of (campaigns || [])) {
+    results.push(await adsAddNegativesForCampaign(accessToken, cid, camp));
+  }
+  return { connected: true, results };
+}
+
 // ─── WebCEO (rank tracking, whitelabel-friendly) ─────────────────────────────
 // Single-endpoint JSON API: POST {method, key, id, data} to the configured base
 // URL; the response is an array whose first element carries result/errormsg/data.
@@ -2309,28 +2525,24 @@ function buildActionPlanHtml(plan, docTitle, fetchedAt) {
   return `<html><head><meta charset="utf-8"></head><body>${out.join('')}</body></html>`;
 }
 
-async function docsExportActionPlan({ plan, pageUrl, fetchedAt }) {
-  const token = await docsGetAccessToken();
-  if (token.error) return { notConnected: true, error: token.error };
-
-  let urlLabel = 'page';
+// Derive a "host/path" label for a doc title from a page URL.
+function docsUrlLabel(pageUrl) {
   try {
     const u = new URL(pageUrl);
     const h = u.hostname.replace(/^www\./, '');
     const p = u.pathname.replace(/\/$/, '');
-    urlLabel = p ? `${h}${p}` : h;
-  } catch { /* keep default */ }
+    return p ? `${h}${p}` : h;
+  } catch { return 'page'; }
+}
 
-  const date = new Date().toISOString().slice(0, 10);
-  const docTitle = `${date}: Action Plan For ${urlLabel}`;
-
-  const folderId = await docsGetOrCreateFolder(token.accessToken);
-
+// Multipart-upload an HTML body to Drive, which converts it to a native Google
+// Doc. Shared by every "Export to Google Doc" path. Returns { url } or
+// { notConnected, error } / { error, detail }.
+async function docsUploadHtmlDoc(accessToken, docTitle, html) {
+  const folderId = await docsGetOrCreateFolder(accessToken);
   const metadata = { name: docTitle, mimeType: 'application/vnd.google-apps.document' };
   if (folderId) metadata.parents = [folderId];
 
-  // Multipart upload: file metadata + HTML body. Drive converts HTML → Google Doc.
-  const html = buildActionPlanHtml(plan, docTitle, fetchedAt);
   const boundary = '----seoInspectorBoundary' + Date.now();
   const body =
     `--${boundary}\r\n` +
@@ -2344,7 +2556,7 @@ async function docsExportActionPlan({ plan, pageUrl, fetchedAt }) {
   const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${token.accessToken}`,
+      'Authorization': `Bearer ${accessToken}`,
       'Content-Type': `multipart/related; boundary=${boundary}`
     },
     body
@@ -2359,6 +2571,50 @@ async function docsExportActionPlan({ plan, pageUrl, fetchedAt }) {
   }
   const { id } = await res.json();
   return { url: `https://docs.google.com/document/d/${id}/edit` };
+}
+
+async function docsExportActionPlan({ plan, pageUrl, fetchedAt }) {
+  const token = await docsGetAccessToken();
+  if (token.error) return { notConnected: true, error: token.error };
+
+  const date = new Date().toISOString().slice(0, 10);
+  const docTitle = `${date}: Action Plan For ${docsUrlLabel(pageUrl)}`;
+  const html = buildActionPlanHtml(plan, docTitle, fetchedAt);
+  return docsUploadHtmlDoc(token.accessToken, docTitle, html);
+}
+
+// Negative keywords as nested bullets: one bullet per exclusion list, with its
+// terms (match type shown as punctuation) nested beneath. Drive maps the nested
+// <ul> to indented bullets in the Doc.
+function negFormatTerm(text, matchType) {
+  const mt = String(matchType || '').toUpperCase();
+  if (mt === 'EXACT')  return `[${text}]`;
+  if (mt === 'PHRASE') return `"${text}"`;
+  return String(text);
+}
+
+function buildNegativesHtml(lists, docTitle) {
+  const out = [`<h1>${htmlEsc(docTitle)}</h1>`];
+  const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  out.push(`<p style="color:#999999;font-size:10pt">Generated ${htmlEsc(dateStr)}</p>`);
+  out.push('<ul>');
+  (lists || []).forEach(list => {
+    out.push(`<li>${htmlEsc(list.name)}<ul>`);
+    (list.terms || []).forEach(t => out.push(`<li>${htmlEsc(negFormatTerm(t.text, t.matchType))}</li>`));
+    out.push('</ul></li>');
+  });
+  out.push('</ul>');
+  return `<html><head><meta charset="utf-8"></head><body>${out.join('')}</body></html>`;
+}
+
+async function docsExportNegatives({ lists, pageUrl }) {
+  const token = await docsGetAccessToken();
+  if (token.error) return { notConnected: true, error: token.error };
+
+  const date = new Date().toISOString().slice(0, 10);
+  const docTitle = `${date}: Negative Keywords For ${docsUrlLabel(pageUrl)}`;
+  const html = buildNegativesHtml(lists, docTitle);
+  return docsUploadHtmlDoc(token.accessToken, docTitle, html);
 }
 
 // ─── Google Search Console: message handlers ────────────────────────────────
@@ -2390,6 +2646,9 @@ browser.runtime.onMessage.addListener((message) => {
     case 'adsGetPageData':     return adsGetPageData(message);
     case 'adsGetChartData':    return adsGetChartData(message);
     case 'adsGetMoreSearchTerms': return adsGetMoreSearchTerms(message);
+    case 'adsGetAdsDetail':    return adsGetAdsDetail(message);
+    case 'adsGetCampaignNegLists': return adsGetCampaignNegLists(message);
+    case 'adsAddNegatives':    return adsAddNegatives(message);
     case 'getRedirectInfo':    return getRedirectInfo(message);
     case 'traceUrl':           return traceUrl(message);
     case 'getTargetTab':       return getTargetTab();
@@ -2406,6 +2665,7 @@ browser.runtime.onMessage.addListener((message) => {
     case 'webceoGetTrackedKeywords': return webceoGetTrackedKeywords(message);
     case 'docsConnect':          return docsConnect();
     case 'docsExportActionPlan': return docsExportActionPlan(message);
+    case 'docsExportNegatives':  return docsExportNegatives(message);
     default: return undefined;
   }
 });

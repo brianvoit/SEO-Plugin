@@ -507,6 +507,58 @@
     <div id="adcopy-body"></div>
   </div>
 
+  <!-- Refine Negatives detail panel -->
+  <div id="negatives-panel" class="hidden">
+    <div class="settings-header">
+      <button id="btn-negatives-back" class="settings-back-btn">
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="10 3 4 8 10 13"/>
+        </svg>
+        Back
+      </button>
+      <div class="settings-header-actions">
+        <button id="btn-negatives-commit" class="save-key-btn hidden" title="Add the checked terms to each campaign's exclusion list">Add to Google Ads</button>
+        <button id="btn-negatives-regen" class="save-key-btn" title="Re-run the analysis">Re-analyze</button>
+      </div>
+    </div>
+    <section class="field-section">
+      <div class="field-header">
+        <span class="field-label">REFINE NEGATIVES</span>
+        <span class="neg-header-right">
+          <button class="info-tip" type="button" title="Terms that convert, rank organically, or match this page's intent are protected and never suggested.">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7.5" x2="8" y2="11"/><circle cx="8" cy="5" r="0.55" fill="currentColor" stroke="none"/>
+            </svg>
+          </button>
+          <span id="negatives-tuned" class="adcopy-tuned"></span>
+        </span>
+      </div>
+      <div class="mode-segmented" id="negatives-range-group">
+        <button class="mode-option" data-range="30">30D</button>
+        <button class="mode-option" data-range="60">60D</button>
+        <button class="mode-option" data-range="90">90D</button>
+        <button class="mode-option" data-range="365">12M</button>
+      </div>
+    </section>
+    <div id="negatives-body"></div>
+  </div>
+
+  <!-- Ad group drill-in detail panel (ads → ad → assets) -->
+  <div id="adgroup-panel" class="hidden">
+    <div class="settings-header">
+      <button id="btn-adgroup-back" class="settings-back-btn">
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="10 3 4 8 10 13"/>
+        </svg>
+        Back
+      </button>
+    </div>
+    <section class="field-section">
+      <div class="field-header"><span class="field-label" id="adgroup-title">AD GROUP</span><span id="adgroup-subtitle" class="adcopy-tuned"></span></div>
+    </section>
+    <div id="adgroup-body"></div>
+  </div>
+
   <!-- Redirect trace tab -->
   <div id="redirect-tab" class="hidden">
     <section class="field-section">
@@ -843,7 +895,15 @@
       </section>
 
       <section class="field-section" id="ads-terms-section">
-        <div class="field-header"><span class="field-label">SEARCH TERMS</span></div>
+        <div class="field-header">
+          <span class="field-label">SEARCH TERMS</span>
+          <button class="adcopy-launch-btn" id="btn-gen-negatives" title="Find low-quality search terms to exclude, with Claude">
+            Refine Negatives
+            <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="8" cy="8" r="6.5"/><line x1="5" y1="8" x2="11" y2="8"/>
+            </svg>
+          </button>
+        </div>
         <div id="ads-terms-intent" class="gsc-intent-filters hidden"></div>
         <div id="ads-terms-table"></div>
       </section>

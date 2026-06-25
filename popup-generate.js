@@ -131,6 +131,7 @@ function clearGenResults() {
     document.getElementById(`${field}-gen-result`).classList.add('hidden');
   });
   if (typeof resetAdCopy === 'function') resetAdCopy();
+  if (typeof resetNegatives === 'function') resetNegatives();
 }
 
 // ─── Generate OG / Twitter text fields ───────────────────────────────────────

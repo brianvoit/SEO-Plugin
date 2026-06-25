@@ -11,6 +11,8 @@ const twPanel         = document.getElementById('tw-panel');
 const actionPlanPanel = document.getElementById('actionplan-panel');
 const hreflangPanel   = document.getElementById('hreflang-panel');
 const adcopyPanel     = document.getElementById('adcopy-panel');
+const negativesPanel  = document.getElementById('negatives-panel');
+const adgroupPanel    = document.getElementById('adgroup-panel');
 const searchTab     = document.getElementById('search-tab');
 const analyticsTab  = document.getElementById('analytics-tab');
 const adsTab        = document.getElementById('ads-tab');
@@ -34,6 +36,8 @@ function hideDetailPanels() {
   actionPlanPanel.classList.add('hidden');
   hreflangPanel.classList.add('hidden');
   adcopyPanel.classList.add('hidden');
+  negativesPanel.classList.add('hidden');
+  adgroupPanel.classList.add('hidden');
 }
 
 function showActiveTab() {
@@ -108,6 +112,19 @@ function showAdCopyPanel() {
   if (typeof openAdCopyPanel === 'function') openAdCopyPanel();
 }
 
+function showNegativesPanel() {
+  enterDetailPanel();
+  negativesPanel.classList.remove('hidden');
+  // Show cached recommendations for this page if present, else analyze on first open
+  if (typeof openNegativesPanel === 'function') openNegativesPanel();
+}
+
+function showAdGroupPanel() {
+  enterDetailPanel();
+  adgroupPanel.classList.remove('hidden');
+  if (typeof openAdGroupPanel === 'function') openAdGroupPanel();
+}
+
 function hideDetailPanelToTab() {
   showActiveTab();
 }
@@ -170,6 +187,11 @@ document.getElementById('btn-hreflang-back').addEventListener('click', hideDetai
 document.getElementById('btn-gen-adcopy').addEventListener('click', showAdCopyPanel);
 document.getElementById('btn-adcopy-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-adcopy-regen').addEventListener('click', () => { if (typeof generateAdCopy === 'function') generateAdCopy(true); });
+document.getElementById('btn-gen-negatives').addEventListener('click', showNegativesPanel);
+document.getElementById('btn-negatives-back').addEventListener('click', hideDetailPanelToTab);
+document.getElementById('btn-negatives-regen').addEventListener('click', () => { if (typeof generateNegatives === 'function') generateNegatives(true); });
+document.getElementById('btn-negatives-commit').addEventListener('click', () => { if (typeof commitNegatives === 'function') commitNegatives(document.getElementById('btn-negatives-commit')); });
+document.getElementById('btn-adgroup-back').addEventListener('click', hideDetailPanelToTab);
 
 // ─── Main tabs (Overview / Search / Analytics / DNS / Redirect) ──────────────
 // The status pill is also a tab trigger (data-tab="redirect"), so the handler
@@ -184,7 +206,9 @@ document.querySelectorAll('#main-tabs [data-tab]').forEach(btn => {
       || !ogPanel.classList.contains('hidden')
       || !twPanel.classList.contains('hidden')
       || !hreflangPanel.classList.contains('hidden')
-      || !adcopyPanel.classList.contains('hidden');
+      || !adcopyPanel.classList.contains('hidden')
+      || !negativesPanel.classList.contains('hidden')
+      || !adgroupPanel.classList.contains('hidden');
     if (tab === activeTab && !inPanel) return;
     activeTab = tab;
     // Settings reloads page data on exit; other panels just return to the tab

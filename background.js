@@ -2143,7 +2143,7 @@ async function adsAddNegativesForCampaign(accessToken, cid, camp) {
   }
 
   if (!sharedSetResource) {
-    const name = listName || `${campaignName || 'Campaign'} — Negatives`;
+    const name = listName || `Campaign - ${campaignName || 'Campaign'}`;
     const created = await adsMutate(accessToken, cid, 'sharedSets',
       [{ create: { name, type: 'NEGATIVE_KEYWORDS' } }]);
     if (created.error) { out.error = created.detail || created.error; return out; }
@@ -2153,6 +2153,15 @@ async function adsAddNegativesForCampaign(accessToken, cid, camp) {
     const attached = await adsMutate(accessToken, cid, 'campaignSharedSets',
       [{ create: { campaign: `customers/${cid}/campaigns/${adsDigits(campaignId)}`, sharedSet: sharedSetResource } }]);
     if (attached.error) { out.error = attached.detail || attached.error; return out; }
+    // Verify the list is actually attached to the campaign before adding keywords.
+    const setId = adsDigits(sharedSetResource.split('/').pop());
+    const verify = await adsSearch(accessToken, cid,
+      `SELECT campaign.id, shared_set.id FROM campaign_shared_set
+       WHERE campaign.id = ${adsDigits(campaignId)} AND shared_set.id = ${setId}`);
+    if (verify.error || !(verify.rows || []).length) {
+      out.error = 'Exclusion list was created but could not verify it is attached to the campaign';
+      return out;
+    }
   }
   out.sharedSetResource = sharedSetResource;
 

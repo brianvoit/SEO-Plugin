@@ -1515,6 +1515,59 @@ function resetNegatives() {
   if (body) body.replaceChildren();
 }
 
+// ─── Negatives analysis cache (survives popup close/reopen) ──────────────────
+// Keyed by page URL; cleared once terms are successfully pushed to Google Ads.
+// TTL: 24 h (stale analysis is worse than re-running).
+
+const NEG_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+async function saveNegCache() {
+  try {
+    const tab = await getActiveTab();
+    const key = (tab.url || '').split('#')[0];
+    const { negAnalysisCache } = await browser.storage.local.get('negAnalysisCache');
+    const cache = negAnalysisCache || {};
+    cache[key] = {
+      recs: _negRecs,
+      insights: _negInsights,
+      protectedCount: _negProtectedCount,
+      listChoice: _negListChoice,
+      campaignLists: _negCampaignLists,
+      fetchedAt: Date.now()
+    };
+    await browser.storage.local.set({ negAnalysisCache: cache });
+  } catch { /* best-effort */ }
+}
+
+async function loadNegCache() {
+  try {
+    const tab = await getActiveTab();
+    const key = (tab.url || '').split('#')[0];
+    const { negAnalysisCache } = await browser.storage.local.get('negAnalysisCache');
+    const entry = negAnalysisCache && negAnalysisCache[key];
+    if (!entry || !Array.isArray(entry.recs)) return false;
+    if (Date.now() - entry.fetchedAt > NEG_CACHE_TTL_MS) return false;
+    _negRecs = entry.recs;
+    _negInsights = entry.insights || null;
+    _negProtectedCount = entry.protectedCount || 0;
+    _negListChoice = entry.listChoice || {};
+    _negCampaignLists = entry.campaignLists || {};
+    return true;
+  } catch { return false; }
+}
+
+async function clearNegCache() {
+  try {
+    const tab = await getActiveTab();
+    const key = (tab.url || '').split('#')[0];
+    const { negAnalysisCache } = await browser.storage.local.get('negAnalysisCache');
+    if (negAnalysisCache && negAnalysisCache[key]) {
+      delete negAnalysisCache[key];
+      await browser.storage.local.set({ negAnalysisCache });
+    }
+  } catch { /* best-effort */ }
+}
+
 function negBodyMessage(msg, isError) {
   setNegCommitVisible(false);
   const tunedEl = document.getElementById('negatives-tuned');
@@ -1565,10 +1618,13 @@ document.querySelectorAll('#negatives-range-group .mode-option').forEach(btn => 
 });
 
 // Opening the panel: show cached recs, the in-flight state, or analyze fresh.
-function openNegativesPanel() {
+async function openNegativesPanel() {
   setNegRangeUI(adsSelectedRange);
   if (_negLoading) { negBodyMessage('Analyzing search terms…'); return; }
   if (_negRecs) { renderNegatives(); return; }
+  // Restore cached analysis (from a previous popup session) before deciding to re-run.
+  const restored = await loadNegCache();
+  if (restored) { renderNegatives(); return; }
   generateNegatives(false);
 }
 
@@ -1745,6 +1801,7 @@ async function generateNegatives(force) {
     _negInsights = insights;
     _negContext = context;
     _negResultLists = null;
+    saveNegCache();
 
     // Existing exclusion lists per campaign → destination picker (default: first
     // attached list if any, else create a new one).
@@ -1958,7 +2015,7 @@ async function commitNegatives(btn) {
       const choice = _negListChoice[c.campaignId];
       return choice
         ? { ...c, sharedSetId: choice }
-        : { ...c, createNew: true, listName: `${c.campaignName || 'Campaign'} — Negatives` };
+        : { ...c, createNew: true, listName: `Campaign - ${c.campaignName || 'Campaign'}` };
     });
 
     const res = await browser.runtime.sendMessage({ action: 'adsAddNegatives', pageUrl: tab.url, campaigns });
@@ -1967,6 +2024,9 @@ async function commitNegatives(btn) {
     }
     if (res.error) throw new Error(adsErrorMessage(res.error, res.detail));
     renderNegativesResult(res.results || [], btn);
+    // Clear the cache once terms are successfully applied (no errors in any campaign).
+    const anyError = (res.results || []).some(r => r.error);
+    if (!anyError) clearNegCache();
   } catch (err) {
     btn.disabled = false;
     btn.textContent = 'Add to Google Ads';
@@ -2000,7 +2060,7 @@ function renderNegativesResult(results, commitBtn) {
     if (r.error) { hadError = true; summaryLines.push(`${r.campaignName || 'Campaign'}: error — ${r.error}`); return; }
     const added = r.added || [], skipped = r.skipped || [];
     totalAdded += added.length;
-    if (added.length) lists.push({ name: r.listName || `${r.campaignName} — Negatives`, terms: added });
+    if (added.length) lists.push({ name: r.listName || `Campaign - ${r.campaignName}`, terms: added });
     summaryLines.push(`${r.listName || r.campaignName}: ${added.length} added${skipped.length ? `, ${skipped.length} already present` : ''}`);
   });
   _negResultLists = lists;

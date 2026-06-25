@@ -8,6 +8,8 @@ let _adsHost = null;
 let _adsData = null;                                   // last adsGetPageData response
 let _adsFilter = null;                                 // { type:'adGroup'|'keyword'|'searchTerm', ... } | null
 let _adsTermIntent = null;                             // Search Terms intent filter (null = All)
+let _adsTermSearch = '';                               // regex filter for the search-terms table
+let _adsTermSearchExclude = false;                     // false = match (include), true = exclude
 let _adsFilled = [];                                   // chart timeseries currently displayed
 let adsActiveMetrics = { impressions: true, clicks: true, cost: true, conversions: true };
 
@@ -56,9 +58,20 @@ function adsOrganicSet() {
 
 // Chips for a keyword/search term: on-page locations, an Organic pill, and a
 // "Tracked" pill when the term is tracked in the Web CEO project.
-function adsTermChips(text, organicSet) {
+function adsTermChips(text, organicSet, opts = {}) {
   const wrap = document.createElement('span');
   wrap.className = 'gsc-query-chips';
+
+  // Brand pill when the term matches this domain's branded-terms regex
+  if (opts.brand && typeof isQueryBranded === 'function' && typeof allBrandedTerms !== 'undefined'
+      && isQueryBranded(text, _adsHost ? allBrandedTerms[_adsHost] : '')) {
+    const pill = document.createElement('span');
+    pill.className = 'gsc-branded-pill';
+    pill.textContent = 'Brand';
+    pill.title = 'Matches a branded term for this domain';
+    wrap.appendChild(pill);
+  }
+
   if (organicSet.has((text || '').toLowerCase().trim())) {
     const pill = document.createElement('span');
     pill.className = 'gsc-branded-pill ads-organic-pill';
@@ -66,13 +79,36 @@ function adsTermChips(text, organicSet) {
     pill.title = 'This page also ranks for this term organically (Search Console)';
     wrap.appendChild(pill);
   }
-  if (typeof webceoIsTracked === 'function' && webceoIsTracked(text)) {
+
+  // Terms get an interactive "+ Track" chip (or a "Tracked" pill once added),
+  // mirroring the Search tab. Keywords keep the static Tracked pill.
+  if (opts.track) {
+    const tracked = typeof webceoIsTracked === 'function' && webceoIsTracked(text);
+    const chip = document.createElement('button');
+    if (tracked) {
+      chip.className = 'gsc-track-chip gsc-track-chip--done';
+      chip.textContent = 'Tracked';
+      chip.disabled = true;
+      chip.title = 'Tracked in your Web CEO project';
+    } else {
+      chip.className = 'gsc-track-chip';
+      chip.textContent = '+ Track';
+      chip.title = 'Track this keyword in your Web CEO project';
+      chip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const intent = typeof intentOf === 'function' ? intentOf(text) : null;
+        if (typeof trackQueryInWebceo === 'function') trackQueryInWebceo(text, chip, intent);
+      });
+    }
+    wrap.appendChild(chip);
+  } else if (typeof webceoIsTracked === 'function' && webceoIsTracked(text)) {
     const pill = document.createElement('span');
     pill.className = 'gsc-branded-pill ads-tracked-pill';
     pill.textContent = 'Tracked';
     pill.title = 'Tracked in your Web CEO project';
     wrap.appendChild(pill);
   }
+
   (typeof gscQueryLocations === 'function' ? gscQueryLocations(text, pageData) : []).forEach(loc => {
     const chip = document.createElement('span');
     chip.className = 'gsc-chip';
@@ -131,6 +167,15 @@ function adsKeywordVisible(kw) {
   if (f.type === 'searchTerm') return kw.adGroupId === f.adGroupId && (kw.text || '').toLowerCase() === (f.keyword || '').toLowerCase();
   return kw.adGroupId === f.adGroupId;   // adGroup filter
 }
+// Regex filter for the Search Terms table (invalid regex → no filtering)
+function adsTermSearchMatch(text) {
+  if (!_adsTermSearch) return true;
+  let re;
+  try { re = new RegExp(_adsTermSearch, 'i'); } catch { return true; }
+  const m = re.test(text || '');
+  return _adsTermSearchExclude ? !m : m;
+}
+
 function adsTermVisible(t) {
   const f = _adsFilter;
   if (!f) return true;
@@ -291,7 +336,8 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
 
     const visible = rows.filter(r =>
       (withQs ? adsKeywordVisible(r) : adsTermVisible(r)) &&
-      (!intentFilter || intentOf(r.text) === intentFilter));
+      (!intentFilter || intentOf(r.text) === intentFilter) &&
+      (withQs || adsTermSearchMatch(r.text)));
     const sorted = visible.sort((a, b) => {
       if (sort.column === 'text') {
         const av = (a.text || '').toLowerCase(), bv = (b.text || '').toLowerCase();
@@ -335,7 +381,7 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
         label.className = 'ads-term-text';
       }
       term.appendChild(label);
-      const chips = adsTermChips(r.text, organic);
+      const chips = adsTermChips(r.text, organic, withQs ? {} : { track: true, brand: true });
       if (chips) term.appendChild(chips);
       row.appendChild(term);
 
@@ -522,8 +568,8 @@ function renderAdsAll() {
 
   const tt = document.getElementById('ads-terms-table'); tt._currency = _adsData.currency;
   const terms = _adsData.searchTerms || [];
-  // Intent chips count over the cross-filter-visible terms (all intents), then narrow
-  const xfTerms = terms.filter(adsTermVisible);
+  // Intent chips count over the cross-filter + regex-visible terms (all intents), then narrow
+  const xfTerms = terms.filter(t => adsTermVisible(t) && adsTermSearchMatch(t.text));
   renderIntentChips(document.getElementById('ads-terms-intent'), xfTerms, t => t.text, _adsTermIntent, (intent) => {
     _adsTermIntent = intent;
     renderAdsAll();
@@ -551,6 +597,18 @@ document.getElementById('btn-ads-clear-filter').addEventListener('click', () => 
   _adsFilter = null;
   renderAdsAll();
   refreshAdsChart();
+});
+
+// Search Terms regex filter (mirrors the Search tab's query search)
+document.getElementById('ads-terms-search').addEventListener('input', e => {
+  _adsTermSearch = e.target.value;
+  e.target.classList.toggle('is-invalid', !!_adsTermSearch && typeof isValidRegex === 'function' && !isValidRegex(_adsTermSearch));
+  if (_adsData) renderAdsAll();
+});
+document.getElementById('btn-ads-terms-search-mode').addEventListener('click', () => {
+  _adsTermSearchExclude = !_adsTermSearchExclude;
+  document.getElementById('btn-ads-terms-search-mode').textContent = _adsTermSearchExclude ? 'Excl.' : 'Match';
+  if (_adsData) renderAdsAll();
 });
 
 // Keep the chart sized to its container (popup width / settings collapse)

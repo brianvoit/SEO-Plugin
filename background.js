@@ -2486,7 +2486,8 @@ function buildActionPlanHtml(plan, docTitle, fetchedAt) {
     const color = EFFORT_COLOR[tier.effort];
     recs.forEach(rec => {
       out.push(`<p style="font-size:12pt"><b>${htmlEsc(rec.change)}</b></p>`);
-      const impactStr = rec.impact ? `${tier.title} · ${rec.impact} impact` : tier.title;
+      const ch = rec.channel === 'both' ? 'SEO + Paid' : rec.channel === 'paid' ? 'Paid' : 'SEO';
+      const impactStr = (rec.impact ? `${tier.title} · ${rec.impact} impact` : tier.title) + ` · ${ch}`;
       out.push(`<p style="color:${color};font-size:10pt">${htmlEsc(impactStr)}</p>`);
       if (rec.evidence) out.push(`<p style="color:${GRAY}"><i>${htmlEsc(rec.evidence)}</i></p>`);
     });

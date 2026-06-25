@@ -2129,7 +2129,8 @@ body.settings-open #update-footer { margin-top: auto; }
   white-space: nowrap;
   transition: background .1s, color .1s;
 }
-.gsc-query-row:hover .gsc-track-chip { display: inline-block; }
+.gsc-query-row:hover .gsc-track-chip,
+.ads-row:hover .gsc-track-chip { display: inline-block; }
 .gsc-track-chip:hover { background: var(--accent); color: #fff; }
 /* the result stays visible even after the pointer leaves the row */
 .gsc-track-chip--done { display: inline-block; border-color: var(--hint-green); color: var(--hint-green); cursor: default; }
@@ -2274,6 +2275,10 @@ body.settings-open #update-footer { margin-top: auto; }
 .ap-tag-impact--high   { background: var(--accent-tint, var(--heading-tag-bg)); color: var(--accent); }
 .ap-tag-impact--medium { color: var(--text-muted); border: 1px solid var(--border); }
 .ap-tag-impact--low    { color: var(--text-none); border: 1px solid var(--border); }
+/* Channel: SEO (accent), Paid (Google-Ads orange), Both (purple) */
+.ap-channel--seo  { color: #fff; background: var(--accent); text-transform: none; }
+.ap-channel--paid { color: #fff; background: #ea8600; text-transform: none; }
+.ap-channel--both { color: #fff; background: #8b5cf6; text-transform: none; }
 
 .ap-rec-evidence {
   font-size: 11.5px; color: var(--text-muted); line-height: 1.45;

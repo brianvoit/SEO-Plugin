@@ -181,6 +181,7 @@ document.getElementById('btn-og-back').addEventListener('click', hideDetailPanel
 document.getElementById('btn-tw').addEventListener('click', showTwPanel);
 document.getElementById('btn-tw-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-actionplan').addEventListener('click', showActionPlanPanel);
+document.getElementById('btn-ads-actionplan').addEventListener('click', showActionPlanPanel);
 document.getElementById('btn-actionplan-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-hreflang').addEventListener('click', showHreflangPanel);
 document.getElementById('btn-hreflang-back').addEventListener('click', hideDetailPanelToTab);

@@ -35,7 +35,14 @@ async function gatherActionPlanData(tab) {
     send({ action: 'webceoGetTrackedKeywords', pageUrl: tab.url }),
     send({ action: 'gaGetPageData',           pageUrl: tab.url, range: ACTION_PLAN_RANGE, measurementId })
   ]);
-  return { gsc, ads, webceo, tracked, ga };
+
+  // Per-ad RSA asset ratings (Low/Good/Best) — flags weak ad copy. Best-effort;
+  // batched server-side into 2 queries regardless of ad count.
+  let adAssets = null;
+  if (ads && ads.connected && Array.isArray(ads.ads) && ads.ads.length) {
+    adAssets = await send({ action: 'adsGetAdsDetail', pageUrl: tab.url, adIds: ads.ads.map(a => a.adId) });
+  }
+  return { gsc, ads, webceo, tracked, ga, adAssets };
 }
 
 // GSC queries split into the two bands that drive surgical wins.
@@ -157,15 +164,64 @@ function actionPlanContext(g) {
     const terms = (g.ads.searchTerms || []).filter(t => (t.conversions || 0) > 0)
       .sort((a, b) => b.conversions - a.conversions).slice(0, 10);
     const kws = (g.ads.keywords || []).slice(0, 10);
-    if (terms.length || kws.length) {
-      lines.push('\n## ADS (what you pay for — money-backed intent)');
+    // Wasted spend: paid clicks that cost money but never converted
+    const wasted = (g.ads.searchTerms || [])
+      .filter(t => (t.cost || 0) > 0 && (t.conversions || 0) === 0)
+      .sort((a, b) => b.cost - a.cost).slice(0, 10);
+    // Low quality score → usually an ad↔landing-page relevance gap
+    const lowQs = (g.ads.keywords || [])
+      .filter(k => k.qualityScore != null && k.qualityScore <= 4)
+      .sort((a, b) => a.qualityScore - b.qualityScore).slice(0, 8);
+    // Campaigns bleeding impression share to budget or rank
+    const isLost = (g.ads.campaigns || [])
+      .filter(c => (c.lostBudget || 0) >= 0.1 || (c.lostRank || 0) >= 0.1)
+      .slice(0, 6);
+    // Weak ad creative: LOW-rated RSA assets
+    const weakAds = [];
+    const adsById = (g.adAssets && g.adAssets.ads) || {};
+    (g.ads.ads || []).forEach(a => {
+      const d = adsById[a.adId];
+      if (!d) return;
+      const lowH = (d.headlines || []).filter(h => h.label === 'LOW');
+      const lowD = (d.descriptions || []).filter(x => x.label === 'LOW');
+      if (lowH.length || lowD.length) weakAds.push({ ad: a, lowH, lowD });
+    });
+
+    if (terms.length || kws.length || wasted.length || lowQs.length || isLost.length || weakAds.length) {
+      lines.push('\n## ADS (what you pay for — money-backed intent; paid fixes often also lift organic relevance and Quality Score)');
+      const cur = g.ads.currency || '';
+      const money = (n) => `${cur ? cur + ' ' : '$'}${Math.ceil(n || 0)}`;
       if (terms.length) {
-        lines.push('Converting search terms:');
+        lines.push('Converting search terms (protect these):');
         terms.forEach(t => lines.push(`  "${t.text}" — ${(+t.conversions).toFixed(1)} conv, ${t.clicks} clicks`));
       }
       if (kws.length) {
         lines.push('Bid keywords:');
         kws.forEach(k => lines.push(`  "${k.text}"${k.qualityScore != null ? ` (QS ${k.qualityScore})` : ''}`));
+      }
+      if (wasted.length) {
+        lines.push('Wasted spend — cost, zero conversions (negative-keyword / relevance candidates):');
+        wasted.forEach(t => lines.push(`  "${t.text}" — ${money(t.cost)}, ${t.clicks} clicks, 0 conv`));
+      }
+      if (lowQs.length) {
+        lines.push('Low quality-score keywords (page relevance / ad-copy gap):');
+        lowQs.forEach(k => lines.push(`  "${k.text}" — QS ${k.qualityScore}`));
+      }
+      if (isLost.length) {
+        lines.push('Campaigns losing impression share:');
+        isLost.forEach(c => {
+          const parts = [];
+          if (c.lostBudget != null) parts.push(`${Math.round(c.lostBudget * 100)}% to budget`);
+          if (c.lostRank != null) parts.push(`${Math.round(c.lostRank * 100)}% to rank`);
+          lines.push(`  "${c.name}" — IS ${c.impressionShare != null ? Math.round(c.impressionShare * 100) + '%' : 'n/a'}${parts.length ? ' (lost ' + parts.join(', ') + ')' : ''}`);
+        });
+      }
+      if (weakAds.length) {
+        lines.push('Weak ad creative — LOW-rated assets (rewrite candidates):');
+        weakAds.slice(0, 5).forEach(w => {
+          const ex = [...w.lowH.slice(0, 2).map(h => `"${h.text}"`), ...w.lowD.slice(0, 1).map(d => `"${d.text}"`)];
+          lines.push(`  ${w.ad.adName || 'Ad ' + w.ad.adId}: ${w.lowH.length} headline(s), ${w.lowD.length} description(s) rated LOW — e.g. ${ex.join(', ')}`);
+        });
       }
     }
   }
@@ -236,12 +292,14 @@ Rules:
 - Prioritize the page-2 band (queries ranking 5–20 with real impressions) and high-impression/low-CTR queries — those are the highest-ROI fixes.
 - Name content the page is missing because the market asks for it (queries, converting ad terms) but it appears nowhere in the headings.
 - Use GA4 behavioral signals (read-time gap, bounce, exits) for experience/structure fixes.
+- When ADS data is present, also act on it: recommend negative keywords for high-cost zero-conversion search terms; flag low quality-score keywords and tie them to landing-page relevance; flag LOW-rated ad assets as ad-copy rewrites; address campaigns losing impression share.
 - effort is one of: "surgical" (minutes — tweak a title/heading/sentence), "moderate" (an hour — add a section/FAQ/schema), "rewrite" (major — reposition intent or restructure the page).
 - impact is one of: "high", "medium", "low".
+- channel is one of: "seo" (organic-only change), "paid" (a bid, negative-keyword, or ad-copy change), "both" (one change that helps organic relevance AND paid Quality Score — e.g. adding page content the converting paid terms demand). Prefer "both" when a single page change does double duty.
 - Return 3–8 recommendations total. Order by impact within each effort tier.
 
 Respond with ONLY a compact JSON object, no prose, no code fences, exactly:
-{"recommendations":[{"change":"…","evidence":"…","effort":"surgical|moderate|rewrite","impact":"high|medium|low"}],"contentGaps":["…","…"],"intentGap":{"pageIntent":"…","trafficIntent":"…","divergence":true,"summary":"…","suggestions":["…","…","…","…","…","…","…","…"]}}
+{"recommendations":[{"change":"…","evidence":"…","effort":"surgical|moderate|rewrite","impact":"high|medium|low","channel":"seo|paid|both"}],"contentGaps":["…","…"],"intentGap":{"pageIntent":"…","trafficIntent":"…","divergence":true,"summary":"…","suggestions":["…","…","…","…","…","…","…","…"]}}
 - "change": the action to take (imperative, specific).
 - "evidence": the data behind it, citing the actual numbers.
 - "contentGaps": short topic labels (2–4 words) the page should cover but doesn't. 0–8 items.
@@ -262,15 +320,17 @@ function actionPlanParse(text) {
 
 const _EFFORTS = ['surgical', 'moderate', 'rewrite'];
 const _IMPACTS = ['high', 'medium', 'low'];
+const _CHANNELS = ['seo', 'paid', 'both'];
 
 function normalizeActionPlan(raw) {
   if (!raw || !Array.isArray(raw.recommendations)) return null;
   const recommendations = raw.recommendations.map(r => {
     const effort = _EFFORTS.includes(String(r.effort).toLowerCase()) ? String(r.effort).toLowerCase() : 'moderate';
     const impact = _IMPACTS.includes(String(r.impact).toLowerCase()) ? String(r.impact).toLowerCase() : 'medium';
+    const channel = _CHANNELS.includes(String(r.channel).toLowerCase()) ? String(r.channel).toLowerCase() : 'seo';
     const change = String(r.change || '').trim();
     const evidence = String(r.evidence || '').trim();
-    return change ? { change, evidence, effort, impact } : null;
+    return change ? { change, evidence, effort, impact, channel } : null;
   }).filter(Boolean);
   if (!recommendations.length) return null;
   const contentGaps = Array.isArray(raw.contentGaps)
@@ -429,6 +489,11 @@ function actionPlanRecCard(rec) {
 
   const tags = document.createElement('div');
   tags.className = 'ap-rec-tags';
+  const channel = rec.channel || 'seo';
+  const chTag = document.createElement('span');
+  chTag.className = `ap-tag ap-channel--${channel}`;
+  chTag.textContent = channel === 'both' ? 'SEO + Paid' : channel === 'paid' ? 'Paid' : 'SEO';
+  tags.appendChild(chTag);
   const effortTag = document.createElement('span');
   effortTag.className = `ap-tag ap-tag--${rec.effort}`;
   effortTag.textContent = rec.effort;
@@ -776,7 +841,8 @@ async function exportActionPlanRtf() {
     if (!recs.length) return;
     parts.push(`{\\b\\fs26 ${rtfEscape(tier.title)}}\\par`);
     recs.forEach(r => {
-      parts.push(`{\\b ${rtfEscape(r.change)}}  {\\i [${rtfEscape(r.effort)} \\u183? ${rtfEscape(r.impact)} impact]}\\par`);
+      const ch = r.channel === 'both' ? 'SEO + Paid' : r.channel === 'paid' ? 'Paid' : 'SEO';
+      parts.push(`{\\b ${rtfEscape(r.change)}}  {\\i [${rtfEscape(r.effort)} \\u183? ${rtfEscape(r.impact)} impact \\u183? ${rtfEscape(ch)}]}\\par`);
       if (r.evidence) parts.push(`${rtfEscape(r.evidence)}\\par`);
       parts.push('\\par');
     });
@@ -820,15 +886,13 @@ async function exportActionPlanRtf() {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// Set the nav-row state on the Overview (chevron + star; "N recs" once generated)
+// Set the nav-row state on the Overview + Ads tabs ("N recs" once generated)
 function refreshActionPlanNav() {
-  const status = document.getElementById('actionplan-status');
-  if (!status) return;
-  if (_actionPlan && _actionPlan.recommendations.length) {
-    status.textContent = `${_actionPlan.recommendations.length} recs`;
-    status.classList.remove('hidden');
-  } else {
-    status.textContent = '';
-    status.classList.add('hidden');
-  }
+  const n = (_actionPlan && _actionPlan.recommendations.length) || 0;
+  ['actionplan-status', 'ads-actionplan-status'].forEach(id => {
+    const status = document.getElementById(id);
+    if (!status) return;
+    status.textContent = n ? `${n} recs` : '';
+    status.classList.toggle('hidden', !n);
+  });
 }

@@ -24,13 +24,14 @@ let _intentEnabled = false;        // false when no Claude key (chip rows hidden
 function intentOf(term) { return _intentMap[String(term || '').trim().toLowerCase()] || null; }
 function intentEnabled() { return _intentEnabled; }
 
-async function classifyIntents(terms, claudeApiKey) {
-  const system = `You classify search queries by search intent. For each numbered query choose exactly one label:
+const INTENT_CLASSIFY_SYSTEM = `You classify search queries by search intent. For each numbered query choose exactly one label:
 - Informational: seeking knowledge or answers.
 - Navigational: looking for a specific site, brand, or page.
 - Commercial: researching or comparing options before a purchase decision.
 - Transactional: ready to act — buy, book, sign up, or contact.
 Respond with ONLY a compact JSON object mapping each query's number (as a string) to its label, e.g. {"0":"Commercial","1":"Informational"}. No prose, no code fences.`;
+
+async function classifyIntents(terms, claudeApiKey) {
   const content = terms.map((t, i) => `${i}: ${t}`).join('\n');
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -44,7 +45,7 @@ Respond with ONLY a compact JSON object mapping each query's number (as a string
     body: JSON.stringify({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 2000,
-      system,
+      system: [{ type: 'text', text: INTENT_CLASSIFY_SYSTEM, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content }]
     })
   });

@@ -938,29 +938,33 @@ const ADS_GEN_ASSETS = [
   { key: 'descriptions',  label: 'Descriptions',   max: 90, one: 'description' },
 ];
 
+const AD_COPY_SYSTEM_BASE = [
+  'You are an expert Google Ads copywriter. Write responsive display ad assets for an ad that drives traffic to the landing page described below.',
+  '',
+  'Return ONLY a compact JSON object — no prose, no code fences — of exactly this shape:',
+  '{"headlines":[15 strings],"longHeadlines":[5 strings],"descriptions":[5 strings]}',
+  '',
+  'Hard character limits. Count every character including spaces and NEVER exceed:',
+  '- headlines: exactly 15, each at most 30 characters',
+  '- longHeadlines: exactly 5, each at most 90 characters',
+  '- descriptions: exactly 5, each 70 to 90 characters and NEVER more than 90. Count each one; if it would exceed 90, rewrite it shorter before responding.',
+  '',
+  'Style and policy:',
+  '- Never use em dashes or en dashes. Use commas or periods instead.',
+  '- Never use exclamation marks anywhere.',
+  '- Use title or sentence case, never ALL CAPS (standard acronyms or trademarks excepted).',
+  '- No repeated or gimmicky punctuation, no emoji, no phone numbers.',
+  '- No misleading claims or unverifiable superlatives like "#1", "best", or "guaranteed".',
+  '',
+  'Make every asset specific to this page\'s actual offering. Do not invent facts.',
+  '- Prioritize the real paid search terms, then the tracked keywords and matching organic queries; weave the most relevant ones in naturally without keyword-stuffing.',
+  '- Vary the angle across the options (benefit, feature, proof, call to action, audience, urgency, question); avoid near-duplicate headlines.',
+].join('\n');
+
+// Returns only the page-specific suffix (intent + sentiment + brand terms).
+// The cacheable base lives in AD_COPY_SYSTEM_BASE above.
 function buildAdCopySystem(insights, brandTerms) {
-  const lines = [
-    'You are an expert Google Ads copywriter. Write responsive display ad assets for an ad that drives traffic to the landing page described below.',
-    '',
-    'Return ONLY a compact JSON object — no prose, no code fences — of exactly this shape:',
-    '{"headlines":[15 strings],"longHeadlines":[5 strings],"descriptions":[5 strings]}',
-    '',
-    'Hard character limits. Count every character including spaces and NEVER exceed:',
-    '- headlines: exactly 15, each at most 30 characters',
-    '- longHeadlines: exactly 5, each at most 90 characters',
-    '- descriptions: exactly 5, each 70 to 90 characters and NEVER more than 90. Count each one; if it would exceed 90, rewrite it shorter before responding.',
-    '',
-    'Style and policy:',
-    '- Never use em dashes or en dashes. Use commas or periods instead.',
-    '- Never use exclamation marks anywhere.',
-    '- Use title or sentence case, never ALL CAPS (standard acronyms or trademarks excepted).',
-    '- No repeated or gimmicky punctuation, no emoji, no phone numbers.',
-    '- No misleading claims or unverifiable superlatives like "#1", "best", or "guaranteed".',
-    '',
-    'Make every asset specific to this page\'s actual offering. Do not invent facts.',
-    '- Prioritize the real paid search terms, then the tracked keywords and matching organic queries; weave the most relevant ones in naturally without keyword-stuffing.',
-    '- Vary the angle across the options (benefit, feature, proof, call to action, audience, urgency, question); avoid near-duplicate headlines.',
-  ];
+  const lines = [];
   if (insights?.intent && typeof OG_INTENT_GUIDANCE !== 'undefined' && OG_INTENT_GUIDANCE[insights.intent]) {
     lines.push(`- Search intent is ${insights.intent}: ${OG_INTENT_GUIDANCE[insights.intent]}`);
   }
@@ -1355,7 +1359,9 @@ async function generateAdCopy(force) {
     if (!claudeApiKey) throw new Error('No Claude API key — add one in Settings (⚙).');
 
     const { context, insights, brandTerms } = await buildAdCopyGrounding();
-    const system = buildAdCopySystem(insights, brandTerms);
+    const systemDynamic = buildAdCopySystem(insights, brandTerms);
+    const systemBlocks = [{ type: 'text', text: AD_COPY_SYSTEM_BASE, cache_control: { type: 'ephemeral' } }];
+    if (systemDynamic) systemBlocks.push({ type: 'text', text: systemDynamic });
 
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -1368,7 +1374,7 @@ async function generateAdCopy(force) {
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
         max_tokens: 1600,
-        system,
+        system: systemBlocks,
         messages: [{ role: 'user', content: context }]
       })
     });
@@ -1547,25 +1553,29 @@ function openNegativesPanel() {
   generateNegatives(false);
 }
 
+const NEGATIVES_SYSTEM_BASE = [
+  'You are a Google Ads search-term analyst. From the candidate search terms below, identify ONLY the ones that are irrelevant to this landing page or clearly low-quality and wasteful, and should be added as NEGATIVE keywords.',
+  '',
+  'Return ONLY a JSON array (no prose, no code fences). Each element is exactly:',
+  '{"index": <number from the candidate list>, "term": "<the term>", "reason": "<short reason, 12 words max>", "matchType": "BROAD|PHRASE|EXACT", "confidence": "high|medium|low"}',
+  '',
+  'Only include terms you would actually exclude. If a term is plausibly relevant to the page, leave it out entirely.',
+  'Match type guidance:',
+  '- EXACT: one specific junk query to block verbatim.',
+  '- PHRASE: a wasteful phrase whose close variants should also be blocked.',
+  '- BROAD: an entire irrelevant theme or word that should never trigger this page.',
+  'Be conservative: excluding a relevant term is worse than missing a junk one.',
+  'confidence = how sure you are the term is irrelevant or wasteful for THIS page:',
+  '- high: clearly unrelated to the page\'s product or service, or obvious junk. Safe to exclude.',
+  '- medium: probably irrelevant, but a human should glance at it first.',
+  '- low: borderline; only weak signals that it is irrelevant.',
+  'Never use em dashes or en dashes in the reason text.',
+].join('\n');
+
+// Returns only the page-specific suffix (intent + brand terms).
+// The cacheable base lives in NEGATIVES_SYSTEM_BASE above.
 function buildNegativesSystem(insights, brandTerms) {
-  const lines = [
-    'You are a Google Ads search-term analyst. From the candidate search terms below, identify ONLY the ones that are irrelevant to this landing page or clearly low-quality and wasteful, and should be added as NEGATIVE keywords.',
-    '',
-    'Return ONLY a JSON array (no prose, no code fences). Each element is exactly:',
-    '{"index": <number from the candidate list>, "term": "<the term>", "reason": "<short reason, 12 words max>", "matchType": "BROAD|PHRASE|EXACT", "confidence": "high|medium|low"}',
-    '',
-    'Only include terms you would actually exclude. If a term is plausibly relevant to the page, leave it out entirely.',
-    'Match type guidance:',
-    '- EXACT: one specific junk query to block verbatim.',
-    '- PHRASE: a wasteful phrase whose close variants should also be blocked.',
-    '- BROAD: an entire irrelevant theme or word that should never trigger this page.',
-    'Be conservative: excluding a relevant term is worse than missing a junk one.',
-    'confidence = how sure you are the term is irrelevant or wasteful for THIS page:',
-    '- high: clearly unrelated to the page\'s product or service, or obvious junk. Safe to exclude.',
-    '- medium: probably irrelevant, but a human should glance at it first.',
-    '- low: borderline; only weak signals that it is irrelevant.',
-    'Never use em dashes or en dashes in the reason text.',
-  ];
+  const lines = [];
   if (insights?.intent && typeof OG_INTENT_GUIDANCE !== 'undefined' && OG_INTENT_GUIDANCE[insights.intent]) {
     lines.push(`The page's search intent is ${insights.intent}. Terms with a clearly different intent are strong negative candidates.`);
   }
@@ -1668,7 +1678,9 @@ async function generateNegatives(force) {
       'Candidate search terms (already filtered to drop converting, organic, and intent-matching terms):\n' + candidateLines,
     ].filter(v => v !== undefined && v !== false && v !== null && v !== '').join('\n\n');
 
-    const system = buildNegativesSystem(insights, brandTerms);
+    const negSystemDynamic = buildNegativesSystem(insights, brandTerms);
+    const negSystemBlocks = [{ type: 'text', text: NEGATIVES_SYSTEM_BASE, cache_control: { type: 'ephemeral' } }];
+    if (negSystemDynamic) negSystemBlocks.push({ type: 'text', text: negSystemDynamic });
 
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -1681,7 +1693,7 @@ async function generateNegatives(force) {
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
         max_tokens: 4096,
-        system,
+        system: negSystemBlocks,
         messages: [{ role: 'user', content: context }]
       })
     });

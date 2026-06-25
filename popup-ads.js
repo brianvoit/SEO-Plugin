@@ -62,26 +62,8 @@ function adsTermChips(text, organicSet, opts = {}) {
   const wrap = document.createElement('span');
   wrap.className = 'gsc-query-chips';
 
-  // Brand pill when the term matches this domain's branded-terms regex
-  if (opts.brand && typeof isQueryBranded === 'function' && typeof allBrandedTerms !== 'undefined'
-      && isQueryBranded(text, _adsHost ? allBrandedTerms[_adsHost] : '')) {
-    const pill = document.createElement('span');
-    pill.className = 'gsc-branded-pill';
-    pill.textContent = 'Brand';
-    pill.title = 'Matches a branded term for this domain';
-    wrap.appendChild(pill);
-  }
-
-  if (organicSet.has((text || '').toLowerCase().trim())) {
-    const pill = document.createElement('span');
-    pill.className = 'gsc-branded-pill ads-organic-pill';
-    pill.textContent = 'Organic';
-    pill.title = 'This page also ranks for this term organically (Search Console)';
-    wrap.appendChild(pill);
-  }
-
-  // Terms get an interactive "+ Track" chip (or a "Tracked" pill once added),
-  // mirroring the Search tab. Keywords keep the static Tracked pill.
+  // Track chip first — immediately after the term text. Interactive for search
+  // terms (opts.track); static Tracked pill for keywords (no opts.track).
   if (opts.track) {
     const tracked = typeof webceoIsTracked === 'function' && webceoIsTracked(text);
     const chip = document.createElement('button');
@@ -106,6 +88,14 @@ function adsTermChips(text, organicSet, opts = {}) {
     pill.className = 'gsc-branded-pill ads-tracked-pill';
     pill.textContent = 'Tracked';
     pill.title = 'Tracked in your Web CEO project';
+    wrap.appendChild(pill);
+  }
+
+  if (organicSet.has((text || '').toLowerCase().trim())) {
+    const pill = document.createElement('span');
+    pill.className = 'gsc-branded-pill ads-organic-pill';
+    pill.textContent = 'Organic';
+    pill.title = 'This page also ranks for this term organically (Search Console)';
     wrap.appendChild(pill);
   }
 
@@ -368,6 +358,35 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
       // term + chips on one line; the term text itself opens a Google search
       const term = document.createElement('span');
       term.className = 'ads-cell-term';
+
+      // Circle+ brand button at the far left of search term rows (mirrors GSC queries).
+      // For already-branded terms, an empty span keeps the grid aligned.
+      if (!withQs) {
+        const isBranded = typeof isQueryBranded === 'function'
+          && isQueryBranded(r.text, _adsHost ? (allBrandedTerms[_adsHost] || '') : '');
+        if (isBranded) {
+          term.appendChild(document.createElement('span'));
+        } else {
+          const addBtn = document.createElement('button');
+          addBtn.className = 'gsc-query-add';
+          addBtn.title = 'Mark as brand';
+          addBtn.setAttribute('aria-label', 'Mark as brand');
+          addBtn.appendChild(svgFromString('<svg viewBox=”0 0 16 16” width=”13” height=”13” fill=”none” stroke=”currentColor” stroke-width=”1.6” stroke-linecap=”round”><circle cx=”8” cy=”8” r=”6.4”/><line x1=”8” y1=”5.2” x2=”8” y2=”10.8”/><line x1=”5.2” y1=”8” x2=”10.8” y2=”8”/></svg>'));
+          addBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            if (!_adsHost || !r.text) return;
+            const termText = r.text.trim();
+            const existing = allBrandedTerms[_adsHost] || '';
+            if (typeof isQueryBranded === 'function' && isQueryBranded(termText, existing)) return;
+            const escaped = termText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            allBrandedTerms[_adsHost] = existing ? `${existing}|${escaped}` : escaped;
+            browser.storage.local.set({ brandedTerms: { ...allBrandedTerms } });
+            renderAdsAll();
+          });
+          term.appendChild(addBtn);
+        }
+      }
+
       const label = document.createElement('span');
       label.textContent = withQs ? adsFormatKeyword(r.text, r.matchType) : (r.text || '(none)');
       if (r.text) {
@@ -381,7 +400,7 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
         label.className = 'ads-term-text';
       }
       term.appendChild(label);
-      const chips = adsTermChips(r.text, organic, withQs ? {} : { track: true, brand: true });
+      const chips = adsTermChips(r.text, organic, withQs ? {} : { track: true });
       if (chips) term.appendChild(chips);
       row.appendChild(term);
 

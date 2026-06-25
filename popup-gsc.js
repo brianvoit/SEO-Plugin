@@ -1077,7 +1077,9 @@ async function refreshGscPropertyInfo() {
   }
 
   matching.forEach(siteUrl => {
-    const isActive = siteUrl === res.siteUrl;
+    // Use res.override (explicit user choice) — NOT res.siteUrl (which is auto-resolved
+    // and still returns a best-match even after the override is cleared).
+    const isActive = res.override != null && siteUrl === res.override;
     const opt = document.createElement('button');
     opt.className = 'gsc-property-option' + (isActive ? ' gsc-property-option--active' : '');
     opt.dataset.site = siteUrl;

@@ -10,6 +10,7 @@ let _adsFilter = null;                                 // { type:'adGroup'|'keyw
 let _adsTermIntent = null;                             // Search Terms intent filter (null = All)
 let _adsTermSearch = '';                               // regex filter for the search-terms table
 let _adsTermSearchExclude = false;                     // false = match (include), true = exclude
+let _adsHideBranded = true;                            // hide branded search terms (like gscHideBranded)
 let _adsFilled = [];                                   // chart timeseries currently displayed
 let adsActiveMetrics = { impressions: true, clicks: true, cost: true, conversions: true };
 
@@ -306,10 +307,13 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
     });
     container.appendChild(header);
 
+    const brandPattern = !withQs && _adsHideBranded && _adsHost
+      ? (allBrandedTerms[_adsHost] || '') : '';
     const visible = rows.filter(r =>
       (withQs ? adsKeywordVisible(r) : adsTermVisible(r)) &&
       (!intentFilter || intentOf(r.text) === intentFilter) &&
-      (withQs || adsTermSearchMatch(r.text)));
+      (withQs || adsTermSearchMatch(r.text)) &&
+      !(brandPattern && typeof isQueryBranded === 'function' && isQueryBranded(r.text, brandPattern)));
     const sorted = visible.sort((a, b) => {
       if (sort.column === 'text') {
         const av = (a.text || '').toLowerCase(), bv = (b.text || '').toLowerCase();
@@ -341,39 +345,31 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
       const term = document.createElement('span');
       term.className = 'ads-cell-term';
 
-      // Circle+ brand button at the far left of search term rows (mirrors GSC queries).
-      // For already-branded terms, an empty span keeps the grid aligned.
+      // Circle+ brand button on every search term row. Already-branded terms
+      // are a no-op (click handler checks and returns early), but showing the
+      // button on all rows keeps the grid aligned and the action always reachable.
       if (!withQs) {
-        const isBranded = typeof isQueryBranded === 'function'
-          && isQueryBranded(r.text, _adsHost ? (allBrandedTerms[_adsHost] || '') : '');
-        if (isBranded) {
-          term.appendChild(document.createElement('span'));
-        } else {
-          const addBtn = document.createElement('button');
-          addBtn.className = 'gsc-query-add';
-          addBtn.title = 'Mark as brand';
-          addBtn.setAttribute('aria-label', 'Mark as brand');
-          // Use svgEl (createElementNS) not svgFromString — DOMParser inside
-          // a render() closure can return a <parseerror> element that renders
-          // as visible XML text rather than the intended icon.
-          const circlePlus = svgEl('svg', { viewBox: '0 0 16 16', width: '13', height: '13', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6', 'stroke-linecap': 'round' });
-          circlePlus.appendChild(svgEl('circle', { cx: '8', cy: '8', r: '6.4' }));
-          circlePlus.appendChild(svgEl('line', { x1: '8', y1: '5.2', x2: '8', y2: '10.8' }));
-          circlePlus.appendChild(svgEl('line', { x1: '5.2', y1: '8', x2: '10.8', y2: '8' }));
-          addBtn.appendChild(circlePlus);
-          addBtn.addEventListener('click', e => {
-            e.stopPropagation();
-            if (!_adsHost || !r.text) return;
-            const termText = r.text.trim();
-            const existing = allBrandedTerms[_adsHost] || '';
-            if (typeof isQueryBranded === 'function' && isQueryBranded(termText, existing)) return;
-            const escaped = termText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            allBrandedTerms[_adsHost] = existing ? `${existing}|${escaped}` : escaped;
-            browser.storage.local.set({ brandedTerms: { ...allBrandedTerms } });
-            renderAdsAll();
-          });
-          term.appendChild(addBtn);
-        }
+        const addBtn = document.createElement('button');
+        addBtn.className = 'gsc-query-add';
+        addBtn.title = 'Mark as brand';
+        addBtn.setAttribute('aria-label', 'Mark as brand');
+        const circlePlus = svgEl('svg', { viewBox: '0 0 16 16', width: '13', height: '13', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6', 'stroke-linecap': 'round' });
+        circlePlus.appendChild(svgEl('circle', { cx: '8', cy: '8', r: '6.4' }));
+        circlePlus.appendChild(svgEl('line', { x1: '8', y1: '5.2', x2: '8', y2: '10.8' }));
+        circlePlus.appendChild(svgEl('line', { x1: '5.2', y1: '8', x2: '10.8', y2: '8' }));
+        addBtn.appendChild(circlePlus);
+        addBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          if (!_adsHost || !r.text) return;
+          const termText = r.text.trim();
+          const existing = allBrandedTerms[_adsHost] || '';
+          if (typeof isQueryBranded === 'function' && isQueryBranded(termText, existing)) return;
+          const escaped = termText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          allBrandedTerms[_adsHost] = existing ? `${existing}|${escaped}` : escaped;
+          browser.storage.local.set({ brandedTerms: { ...allBrandedTerms } });
+          renderAdsAll();
+        });
+        term.appendChild(addBtn);
       }
 
       const label = document.createElement('span');
@@ -948,9 +944,18 @@ document.querySelectorAll('#ads-range-group .mode-option').forEach(btn => {
   });
 });
 
+document.getElementById('btn-ads-branded-toggle').addEventListener('click', () => {
+  _adsHideBranded = !_adsHideBranded;
+  document.getElementById('btn-ads-branded-toggle').setAttribute('aria-pressed', String(_adsHideBranded));
+  browser.storage.local.set({ adsHideBranded: _adsHideBranded });
+  if (_adsData) renderAdsAll();
+});
+
 function loadAdsPrefs() {
-  return browser.storage.local.get(['adsSelectedRange', 'adsActiveMetrics']).then(({ adsSelectedRange: stored, adsActiveMetrics: metrics }) => {
+  return browser.storage.local.get(['adsSelectedRange', 'adsActiveMetrics', 'adsHideBranded']).then(({ adsSelectedRange: stored, adsActiveMetrics: metrics, adsHideBranded: storedHide }) => {
     adsSelectedRange = stored || 30;
+    _adsHideBranded = storedHide !== undefined ? storedHide : true;
+    document.getElementById('btn-ads-branded-toggle').setAttribute('aria-pressed', String(_adsHideBranded));
     setAdsRangeUI(adsSelectedRange);
     if (metrics && typeof metrics === 'object') {
       ADS_METRIC_ORDER.forEach(m => { adsActiveMetrics[m] = metrics[m] !== false; });

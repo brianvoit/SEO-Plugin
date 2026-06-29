@@ -912,12 +912,20 @@
       <section class="field-section" id="ads-terms-section">
         <div class="field-header">
           <span class="field-label">SEARCH TERMS</span>
-          <button class="adcopy-launch-btn" id="btn-gen-negatives" title="Find low-quality search terms to exclude, with Claude">
-            Refine Negatives
-            <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="8" cy="8" r="6.5"/><line x1="5" y1="8" x2="11" y2="8"/>
-            </svg>
-          </button>
+          <div class="field-header-actions">
+            <div class="alt-header-control">
+              <span class="alt-header-label">HIDE BRANDED</span>
+              <button id="btn-ads-branded-toggle" class="toggle-btn" aria-pressed="true">
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </button>
+            </div>
+            <button class="adcopy-launch-btn" id="btn-gen-negatives" title="Find low-quality search terms to exclude, with Claude">
+              Refine Negatives
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="8" cy="8" r="6.5"/><line x1="5" y1="8" x2="11" y2="8"/>
+              </svg>
+            </button>
+          </div>
         </div>
         <div class="gsc-query-search-bar" id="ads-terms-search-bar">
           <input type="text" id="ads-terms-search" class="gsc-query-search-input"

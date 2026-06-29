@@ -21,6 +21,17 @@
       </button>
     </div>
     <div class="header-actions">
+      <div class="alt-header-control" title="Follow active tab — auto-reload when switching tabs (Sidebar and Pop Out)">
+        <svg class="alt-header-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6.5 9.5a3 3 0 0 0 4.24 0l1.41-1.41a3 3 0 0 0-4.24-4.24L6.5 5.27"/>
+          <path d="M9.5 6.5a3 3 0 0 0-4.24 0L3.85 7.91a3 3 0 0 0 4.24 4.24l1.41-1.41"/>
+        </svg>
+        <button id="btn-follow-tab" class="toggle-btn" aria-pressed="true" title="Follow active tab">
+          <span class="toggle-track">
+            <span class="toggle-thumb"></span>
+          </span>
+        </button>
+      </div>
       <div class="alt-header-control" title="Toggle alt-text overlay on the page">
         <svg class="alt-header-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <rect x="1.5" y="3" width="13" height="10" rx="1.5"/>
@@ -69,18 +80,6 @@
         <button class="mode-option" data-mode="sidebar">Sidebar</button>
         <button class="mode-option" data-mode="window">Pop Out</button>
       </div>
-    </section>
-
-    <section class="field-section">
-      <div class="field-header">
-        <span class="field-label">FOLLOW ACTIVE TAB</span>
-        <button id="btn-follow-tab" class="toggle-btn" aria-pressed="true">
-          <span class="toggle-track">
-            <span class="toggle-thumb"></span>
-          </span>
-        </button>
-      </div>
-      <div class="field-hint">In Sidebar and Pop Out modes, reload data automatically as you navigate or switch tabs.</div>
     </section>
 
     <section class="field-section">

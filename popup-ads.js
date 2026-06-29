@@ -371,7 +371,14 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
           addBtn.className = 'gsc-query-add';
           addBtn.title = 'Mark as brand';
           addBtn.setAttribute('aria-label', 'Mark as brand');
-          addBtn.appendChild(svgFromString('<svg viewBox=”0 0 16 16” width=”13” height=”13” fill=”none” stroke=”currentColor” stroke-width=”1.6” stroke-linecap=”round”><circle cx=”8” cy=”8” r=”6.4”/><line x1=”8” y1=”5.2” x2=”8” y2=”10.8”/><line x1=”5.2” y1=”8” x2=”10.8” y2=”8”/></svg>'));
+          // Use svgEl (createElementNS) not svgFromString — DOMParser inside
+          // a render() closure can return a <parseerror> element that renders
+          // as visible XML text rather than the intended icon.
+          const circlePlus = svgEl('svg', { viewBox: '0 0 16 16', width: '13', height: '13', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6', 'stroke-linecap': 'round' });
+          circlePlus.appendChild(svgEl('circle', { cx: '8', cy: '8', r: '6.4' }));
+          circlePlus.appendChild(svgEl('line', { x1: '8', y1: '5.2', x2: '8', y2: '10.8' }));
+          circlePlus.appendChild(svgEl('line', { x1: '5.2', y1: '8', x2: '10.8', y2: '8' }));
+          addBtn.appendChild(circlePlus);
           addBtn.addEventListener('click', e => {
             e.stopPropagation();
             if (!_adsHost || !r.text) return;

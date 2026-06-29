@@ -24,6 +24,13 @@ document.querySelectorAll('#display-mode-group .mode-option').forEach(btn => {
 });
 
 // ─── Follow active tab (sidebar / pop-out auto-refresh) ──────────────────────
+// Button now lives in the app header (always visible). Initialize its state
+// from storage on startup so it reflects the persisted preference immediately.
+
+browser.storage.local.get('followActiveTab').then(({ followActiveTab }) => {
+  const btn = document.getElementById('btn-follow-tab');
+  if (btn) btn.setAttribute('aria-pressed', String(followActiveTab !== false));
+});
 
 document.getElementById('btn-follow-tab').addEventListener('click', () => {
   const btn = document.getElementById('btn-follow-tab');

@@ -11,6 +11,10 @@ let _adsTermIntent = null;                             // Search Terms intent fi
 let _adsTermSearch = '';                               // regex filter for the search-terms table
 let _adsTermSearchExclude = false;                     // false = match (include), true = exclude
 let _adsHideBranded = true;                            // hide branded search terms (like gscHideBranded)
+let _adsKwIntent = null;                               // keyword intent filter (null = All)
+let _adsKwSearch = '';                                 // regex filter for the keywords table
+let _adsKwSearchExclude = false;                       // false = match (include), true = exclude
+let _adsQsFilter = null;                               // QS diagnostic filter (null=All, {preset}|{ctr,lp,rel})
 let _adsFilled = [];                                   // chart timeseries currently displayed
 let adsActiveMetrics = { impressions: true, clicks: true, cost: true, conversions: true };
 
@@ -147,6 +151,34 @@ function adsTermSearchMatch(text) {
   try { re = new RegExp(_adsTermSearch, 'i'); } catch { return true; }
   const m = re.test(text || '');
   return _adsTermSearchExclude ? !m : m;
+}
+
+// Regex filter for the Keywords table (mirrors adsTermSearchMatch)
+function adsKwSearchMatch(text) {
+  if (!_adsKwSearch) return true;
+  let re;
+  try { re = new RegExp(_adsKwSearch, 'i'); } catch { return true; }
+  const m = re.test(text || '');
+  return _adsKwSearchExclude ? !m : m;
+}
+
+// QS diagnostic filter: preset names map to component conditions.
+// Keywords with null/UNKNOWN components pass through preset filters (not BELOW_AVERAGE).
+function matchesQsFilter(r, filter) {
+  if (!filter) return true;
+  const below = v => v === 'BELOW_AVERAGE';
+  if (filter.preset === 'ctr')   return below(r.searchPredictedCtr);
+  if (filter.preset === 'lp')    return below(r.postClickQualityScore);
+  if (filter.preset === 'rel')   return below(r.creativeQualityScore);
+  if (filter.preset === 'multi') {
+    return [r.searchPredictedCtr, r.postClickQualityScore, r.creativeQualityScore]
+      .filter(below).length >= 2;
+  }
+  // Custom (expanded) mode: each active component must match exactly
+  if (filter.ctr && r.searchPredictedCtr    !== filter.ctr) return false;
+  if (filter.lp  && r.postClickQualityScore !== filter.lp)  return false;
+  if (filter.rel && r.creativeQualityScore  !== filter.rel) return false;
+  return true;
 }
 
 function adsTermVisible(t) {
@@ -312,8 +344,9 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
     const visible = rows.filter(r =>
       (withQs ? adsKeywordVisible(r) : adsTermVisible(r)) &&
       (!intentFilter || intentOf(r.text) === intentFilter) &&
-      (withQs || adsTermSearchMatch(r.text)) &&
-      !(brandPattern && typeof isQueryBranded === 'function' && isQueryBranded(r.text, brandPattern)));
+      (withQs ? adsKwSearchMatch(r.text) : adsTermSearchMatch(r.text)) &&
+      !(brandPattern && typeof isQueryBranded === 'function' && isQueryBranded(r.text, brandPattern)) &&
+      (!withQs || !_adsQsFilter || matchesQsFilter(r, _adsQsFilter)));
     const sorted = visible.sort((a, b) => {
       if (sort.column === 'text') {
         const av = (a.text || '').toLowerCase(), bv = (b.text || '').toLowerCase();
@@ -417,6 +450,15 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
         const qs = document.createElement('span');
         qs.className = 'ads-cell-num';
         qs.textContent = r.qualityScore != null ? r.qualityScore : '—';
+        if (r.qualityScore != null) {
+          const fmtQs = v => v === 'ABOVE_AVERAGE' ? 'Above avg' : v === 'AVERAGE' ? 'Average' : v === 'BELOW_AVERAGE' ? 'Below avg' : '—';
+          qs.title = [
+            `Quality Score: ${r.qualityScore}/10`,
+            `Expected CTR:  ${fmtQs(r.searchPredictedCtr)}`,
+            `Ad Relevance:  ${fmtQs(r.creativeQualityScore)}`,
+            `Landing Page:  ${fmtQs(r.postClickQualityScore)}`
+          ].join('\n');
+        }
         row.appendChild(qs);
       }
 
@@ -578,6 +620,108 @@ async function refreshAdsChart() {
 }
 
 // Re-render the lists + filter bar for the current filter (no chart re-query).
+// QS diagnostic filter UI (Direction C): preset chips always shown, expandable
+// three-row dimension picker hidden by default and toggled by a chevron button.
+function renderQsFilters() {
+  const wrap = document.getElementById('ads-kw-qs-filters');
+  if (!wrap) return;
+  wrap.replaceChildren();
+
+  const kws = _adsData ? (_adsData.keywords || []) : [];
+  const hasQsData = kws.some(k => k.qualityScore != null);
+  if (!hasQsData) { wrap.classList.add('hidden'); return; }
+  wrap.classList.remove('hidden');
+
+  // ── Preset row ──────────────────────────────────────────────────────────────
+  const presets = [
+    { key: null,    label: 'All QS',             cls: '' },
+    { key: 'ctr',   label: 'CTR issue',           cls: 'ads-qs-chip--ctr' },
+    { key: 'lp',    label: 'Landing page issue',  cls: 'ads-qs-chip--lp' },
+    { key: 'rel',   label: 'Relevance issue',     cls: 'ads-qs-chip--rel' },
+    { key: 'multi', label: 'Multiple issues',     cls: 'ads-qs-chip--multi' },
+  ];
+  const activePreset = _adsQsFilter && _adsQsFilter.preset ? _adsQsFilter.preset : (_adsQsFilter ? '__custom__' : null);
+
+  const presetRow = document.createElement('div');
+  presetRow.className = 'ads-qs-presets';
+  presets.forEach(({ key, label, cls }) => {
+    const chip = document.createElement('button');
+    chip.className = 'ads-qs-chip' + (cls ? ' ' + cls : '') + (activePreset === key ? ' is-active' : '');
+    chip.textContent = label;
+    chip.addEventListener('click', () => {
+      _adsQsFilter = key ? { preset: key } : null;
+      renderAdsAll();
+    });
+    presetRow.appendChild(chip);
+  });
+
+  // Details chevron toggle
+  const chevron = document.createElement('button');
+  chevron.className = 'ads-qs-chevron';
+  chevron.title = 'Expand component filters';
+  const detailDiv = document.createElement('div');
+  detailDiv.id = 'ads-kw-qs-detail';
+  detailDiv.className = 'ads-qs-detail hidden';
+  let detailOpen = false;
+  chevron.textContent = '⌄ Details';
+  chevron.addEventListener('click', () => {
+    detailOpen = !detailOpen;
+    detailDiv.classList.toggle('hidden', !detailOpen);
+    chevron.classList.toggle('is-active', detailOpen);
+  });
+  presetRow.appendChild(chevron);
+  wrap.appendChild(presetRow);
+
+  // ── Detail rows (three-dimension picker) ────────────────────────────────────
+  const dimLabels = [
+    { key: 'ctr', label: 'Expected CTR',  field: 'searchPredictedCtr' },
+    { key: 'lp',  label: 'Landing Page',  field: 'postClickQualityScore' },
+    { key: 'rel', label: 'Ad Relevance',  field: 'creativeQualityScore' },
+  ];
+  const detailVals = [
+    { val: null,             label: 'All' },
+    { val: 'ABOVE_AVERAGE',  label: 'Above avg' },
+    { val: 'AVERAGE',        label: 'Average' },
+    { val: 'BELOW_AVERAGE',  label: 'Below avg' },
+  ];
+  const customFilter = (_adsQsFilter && !_adsQsFilter.preset) ? _adsQsFilter : {};
+
+  dimLabels.forEach(({ key, label }) => {
+    const row = document.createElement('div');
+    row.className = 'ads-qs-detail-row';
+    const lbl = document.createElement('span');
+    lbl.className = 'ads-qs-detail-label';
+    lbl.textContent = label;
+    row.appendChild(lbl);
+    const chips = document.createElement('span');
+    chips.className = 'ads-qs-detail-chips';
+    detailVals.forEach(({ val, label: vl }) => {
+      const c = document.createElement('button');
+      const active = customFilter[key] === val || (val === null && !customFilter[key]);
+      c.className = 'ads-qs-chip ads-qs-chip--sm' + (active && activePreset === '__custom__' ? ' is-active' : '');
+      c.textContent = vl;
+      c.addEventListener('click', () => {
+        const next = { ...customFilter };
+        if (val === null) delete next[key]; else next[key] = val;
+        // Only create a custom filter if at least one dimension is set
+        _adsQsFilter = (next.ctr || next.lp || next.rel) ? next : null;
+        renderAdsAll();
+      });
+      chips.appendChild(c);
+    });
+    row.appendChild(chips);
+    detailDiv.appendChild(row);
+  });
+  wrap.appendChild(detailDiv);
+
+  // Re-open detail if we're in custom mode
+  if (activePreset === '__custom__') {
+    detailOpen = true;
+    detailDiv.classList.remove('hidden');
+    chevron.classList.add('is-active');
+  }
+}
+
 function renderAdsAll() {
   if (!_adsData) return;
   const section = document.getElementById('ads-filter-section');
@@ -591,9 +735,20 @@ function renderAdsAll() {
   }
 
   renderAdsTree();
-  const kt = document.getElementById('ads-keywords-table'); kt._currency = _adsData.currency;
-  buildAdsMetricTable(kt, _adsData.keywords || [], { withQs: true });
 
+  // Keywords: intent chips + regex + QS filter
+  const kt = document.getElementById('ads-keywords-table'); kt._currency = _adsData.currency;
+  const kws = _adsData.keywords || [];
+  const xfKw = kws.filter(k => adsKeywordVisible(k) && adsKwSearchMatch(k.text));
+  renderIntentChips(document.getElementById('ads-kw-intent'), xfKw, k => k.text, _adsKwIntent, (intent) => {
+    _adsKwIntent = intent;
+    renderAdsAll();
+  });
+  renderQsFilters();
+  buildAdsMetricTable(kt, kws, { withQs: true, intentFilter: _adsKwIntent });
+  ensureIntents(kws.map(k => k.text), () => renderAdsAll());
+
+  // Search Terms: intent chips + regex
   const tt = document.getElementById('ads-terms-table'); tt._currency = _adsData.currency;
   const terms = _adsData.searchTerms || [];
   // Intent chips count over the cross-filter + regex-visible terms (all intents), then narrow
@@ -636,6 +791,18 @@ document.getElementById('ads-terms-search').addEventListener('input', e => {
 document.getElementById('btn-ads-terms-search-mode').addEventListener('click', () => {
   _adsTermSearchExclude = !_adsTermSearchExclude;
   document.getElementById('btn-ads-terms-search-mode').textContent = _adsTermSearchExclude ? 'Excl.' : 'Match';
+  if (_adsData) renderAdsAll();
+});
+
+// Keywords regex filter
+document.getElementById('ads-kw-search').addEventListener('input', e => {
+  _adsKwSearch = e.target.value;
+  e.target.classList.toggle('is-invalid', !!_adsKwSearch && typeof isValidRegex === 'function' && !isValidRegex(_adsKwSearch));
+  if (_adsData) renderAdsAll();
+});
+document.getElementById('btn-ads-kw-search-mode').addEventListener('click', () => {
+  _adsKwSearchExclude = !_adsKwSearchExclude;
+  document.getElementById('btn-ads-kw-search-mode').textContent = _adsKwSearchExclude ? 'Excl.' : 'Match';
   if (_adsData) renderAdsAll();
 });
 

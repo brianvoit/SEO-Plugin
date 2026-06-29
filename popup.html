@@ -906,6 +906,13 @@
 
       <section class="field-section" id="ads-keywords-section">
         <div class="field-header"><span class="field-label">KEYWORDS</span></div>
+        <div class="gsc-query-search-bar" id="ads-kw-search-bar">
+          <input type="text" id="ads-kw-search" class="gsc-query-search-input"
+            placeholder="Filter keywords (regex: term|term2)" autocomplete="off" spellcheck="false" />
+          <button id="btn-ads-kw-search-mode" class="gsc-query-search-mode-btn" title="Toggle include/exclude">Match</button>
+        </div>
+        <div id="ads-kw-intent" class="gsc-intent-filters hidden"></div>
+        <div id="ads-kw-qs-filters" class="hidden"></div>
         <div id="ads-keywords-table"></div>
       </section>
 

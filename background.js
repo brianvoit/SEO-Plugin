@@ -1905,6 +1905,9 @@ async function adsGetPageData({ pageUrl, range, forceRefresh }) {
     adsSearch(accessToken, customerId,
       `SELECT ad_group.id, ad_group_criterion.criterion_id, ad_group_criterion.keyword.text,
               ad_group_criterion.keyword.match_type, ad_group_criterion.quality_info.quality_score,
+              ad_group_criterion.quality_info.creative_quality_score,
+              ad_group_criterion.quality_info.post_click_quality_score,
+              ad_group_criterion.quality_info.search_predicted_ctr,
               metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
        FROM keyword_view WHERE ${dateWhere} AND ad_group.id IN ${agList}`),
     adsSearch(accessToken, customerId,
@@ -1930,7 +1933,10 @@ async function adsGetPageData({ pageUrl, range, forceRefresh }) {
   const keywords = (kwRes.rows || []).map(r => ({
     text: r.adGroupCriterion?.keyword?.text || '',
     matchType: r.adGroupCriterion?.keyword?.matchType || '',
-    qualityScore: r.adGroupCriterion?.qualityInfo?.qualityScore ?? null,
+    qualityScore:         r.adGroupCriterion?.qualityInfo?.qualityScore         ?? null,
+    creativeQualityScore:  r.adGroupCriterion?.qualityInfo?.creativeQualityScore  ?? null,
+    postClickQualityScore: r.adGroupCriterion?.qualityInfo?.postClickQualityScore ?? null,
+    searchPredictedCtr:    r.adGroupCriterion?.qualityInfo?.searchPredictedCtr    ?? null,
     adGroupId: String(r.adGroup?.id || ''),
     criterionId: String(r.adGroupCriterion?.criterionId || ''),
     ...adsMetrics(r.metrics)

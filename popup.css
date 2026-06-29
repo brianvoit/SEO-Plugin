@@ -1708,14 +1708,6 @@ body.settings-open #update-footer { margin-top: auto; }
 }
 .ads-qs-chip:hover { border-color: var(--text-muted); color: var(--text); }
 .ads-qs-chip.is-active { border-color: transparent; color: #fff; background: var(--text-muted); }
-.ads-qs-chip--ctr.is-active   { background: var(--hint-amber); }
-.ads-qs-chip--lp.is-active    { background: var(--hint-red); }
-.ads-qs-chip--rel.is-active   { background: var(--chart-impressions); }
-.ads-qs-chip--multi.is-active { background: var(--hint-red); }
-.ads-qs-chip--ctr   { color: var(--hint-amber); border-color: color-mix(in srgb, var(--hint-amber) 40%, transparent); }
-.ads-qs-chip--lp    { color: var(--hint-red);   border-color: color-mix(in srgb, var(--hint-red)   40%, transparent); }
-.ads-qs-chip--rel   { color: var(--chart-impressions); border-color: color-mix(in srgb, var(--chart-impressions) 40%, transparent); }
-.ads-qs-chip--multi { color: var(--hint-red); font-weight: 600; border-color: color-mix(in srgb, var(--hint-red) 40%, transparent); }
 .ads-qs-chevron {
   cursor: pointer; border: none; background: none; font-size: 11px;
   color: var(--text-muted); padding: 2px 4px; margin-left: 2px;

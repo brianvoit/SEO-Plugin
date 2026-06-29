@@ -1529,7 +1529,8 @@ body.settings-open #update-footer { margin-top: auto; }
 .ads-sort { cursor: pointer; user-select: none; }
 .ads-sort:hover { color: var(--text); }
 /* term + chips share one line, wrapping only when cramped */
-.ads-cell-term { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.ads-cell-term { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; min-width: 0; }
+.ads-term-spacer { flex: 1; min-width: 4px; }
 .ads-term-text { color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ads-term-link { cursor: pointer; }
 .ads-term-link:hover { color: var(--accent); text-decoration: underline; }

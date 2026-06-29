@@ -62,28 +62,10 @@ function adsTermChips(text, organicSet, opts = {}) {
   const wrap = document.createElement('span');
   wrap.className = 'gsc-query-chips';
 
-  // Track chip first — immediately after the term text. Interactive for search
-  // terms (opts.track); static Tracked pill for keywords (no opts.track).
-  if (opts.track) {
-    const tracked = typeof webceoIsTracked === 'function' && webceoIsTracked(text);
-    const chip = document.createElement('button');
-    if (tracked) {
-      chip.className = 'gsc-track-chip gsc-track-chip--done';
-      chip.textContent = 'Tracked';
-      chip.disabled = true;
-      chip.title = 'Tracked in your Web CEO project';
-    } else {
-      chip.className = 'gsc-track-chip';
-      chip.textContent = '+ Track';
-      chip.title = 'Track this keyword in your Web CEO project';
-      chip.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const intent = typeof intentOf === 'function' ? intentOf(text) : null;
-        if (typeof trackQueryInWebceo === 'function') trackQueryInWebceo(text, chip, intent);
-      });
-    }
-    wrap.appendChild(chip);
-  } else if (typeof webceoIsTracked === 'function' && webceoIsTracked(text)) {
+  // Static Tracked pill — keywords only. Search terms handle their Track chip
+  // inline in the row (before the spacer) so it appears next to the term text.
+  // When opts.track is set it means search-term context: skip the static pill.
+  if (!opts.track && typeof webceoIsTracked === 'function' && webceoIsTracked(text)) {
     const pill = document.createElement('span');
     pill.className = 'gsc-branded-pill ads-tracked-pill';
     pill.textContent = 'Tracked';
@@ -407,6 +389,35 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
         label.className = 'ads-term-text';
       }
       term.appendChild(label);
+
+      // Search terms: Track chip inline (immediately after label), then a flex
+      // spacer, then Organic + location chips pushed to the far right of the cell.
+      if (!withQs) {
+        const tracked = typeof webceoIsTracked === 'function' && webceoIsTracked(r.text);
+        const trackChip = document.createElement('button');
+        if (tracked) {
+          trackChip.className = 'gsc-track-chip gsc-track-chip--done';
+          trackChip.textContent = 'Tracked';
+          trackChip.disabled = true;
+          trackChip.title = 'Tracked in your Web CEO project';
+        } else {
+          trackChip.className = 'gsc-track-chip';
+          trackChip.textContent = '+ Track';
+          trackChip.title = 'Track this keyword in your Web CEO project';
+          trackChip.addEventListener('click', e => {
+            e.stopPropagation();
+            const intent = typeof intentOf === 'function' ? intentOf(r.text) : null;
+            if (typeof trackQueryInWebceo === 'function') trackQueryInWebceo(r.text, trackChip, intent);
+          });
+        }
+        term.appendChild(trackChip);
+        const spacer = document.createElement('span');
+        spacer.className = 'ads-term-spacer';
+        term.appendChild(spacer);
+      }
+
+      // Right-side chips: Organic + location (opts.track=true tells adsTermChips
+      // to skip the static Tracked pill since search terms handle it inline above)
       const chips = adsTermChips(r.text, organic, withQs ? {} : { track: true });
       if (chips) term.appendChild(chips);
       row.appendChild(term);

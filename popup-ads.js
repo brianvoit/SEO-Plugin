@@ -345,32 +345,29 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
       const term = document.createElement('span');
       term.className = 'ads-cell-term';
 
-      // Circle+ brand button on every search term row. Already-branded terms
-      // are a no-op (click handler checks and returns early), but showing the
-      // button on all rows keeps the grid aligned and the action always reachable.
-      if (!withQs) {
-        const addBtn = document.createElement('button');
-        addBtn.className = 'gsc-query-add';
-        addBtn.title = 'Mark as brand';
-        addBtn.setAttribute('aria-label', 'Mark as brand');
-        const circlePlus = svgEl('svg', { viewBox: '0 0 16 16', width: '13', height: '13', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6', 'stroke-linecap': 'round' });
-        circlePlus.appendChild(svgEl('circle', { cx: '8', cy: '8', r: '6.4' }));
-        circlePlus.appendChild(svgEl('line', { x1: '8', y1: '5.2', x2: '8', y2: '10.8' }));
-        circlePlus.appendChild(svgEl('line', { x1: '5.2', y1: '8', x2: '10.8', y2: '8' }));
-        addBtn.appendChild(circlePlus);
-        addBtn.addEventListener('click', e => {
-          e.stopPropagation();
-          if (!_adsHost || !r.text) return;
-          const termText = r.text.trim();
-          const existing = allBrandedTerms[_adsHost] || '';
-          if (typeof isQueryBranded === 'function' && isQueryBranded(termText, existing)) return;
-          const escaped = termText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          allBrandedTerms[_adsHost] = existing ? `${existing}|${escaped}` : escaped;
-          browser.storage.local.set({ brandedTerms: { ...allBrandedTerms } });
-          renderAdsAll();
-        });
-        term.appendChild(addBtn);
-      }
+      // Circle+ brand button on every row (keywords and search terms). Already-branded
+      // terms are a no-op; showing on all rows keeps the grid aligned.
+      const addBtn = document.createElement('button');
+      addBtn.className = 'gsc-query-add';
+      addBtn.title = 'Mark as brand';
+      addBtn.setAttribute('aria-label', 'Mark as brand');
+      const circlePlus = svgEl('svg', { viewBox: '0 0 16 16', width: '13', height: '13', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6', 'stroke-linecap': 'round' });
+      circlePlus.appendChild(svgEl('circle', { cx: '8', cy: '8', r: '6.4' }));
+      circlePlus.appendChild(svgEl('line', { x1: '8', y1: '5.2', x2: '8', y2: '10.8' }));
+      circlePlus.appendChild(svgEl('line', { x1: '5.2', y1: '8', x2: '10.8', y2: '8' }));
+      addBtn.appendChild(circlePlus);
+      addBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        if (!_adsHost || !r.text) return;
+        const termText = r.text.trim();
+        const existing = allBrandedTerms[_adsHost] || '';
+        if (typeof isQueryBranded === 'function' && isQueryBranded(termText, existing)) return;
+        const escaped = termText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        allBrandedTerms[_adsHost] = existing ? `${existing}|${escaped}` : escaped;
+        browser.storage.local.set({ brandedTerms: { ...allBrandedTerms } });
+        renderAdsAll();
+      });
+      term.appendChild(addBtn);
 
       const label = document.createElement('span');
       label.textContent = withQs ? adsFormatKeyword(r.text, r.matchType) : (r.text || '(none)');
@@ -386,35 +383,33 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
       }
       term.appendChild(label);
 
-      // Search terms: Track chip inline (immediately after label), then a flex
+      // Track chip inline (immediately after label) for both tables, then a flex
       // spacer, then Organic + location chips pushed to the far right of the cell.
-      if (!withQs) {
-        const tracked = typeof webceoIsTracked === 'function' && webceoIsTracked(r.text);
-        const trackChip = document.createElement('button');
-        if (tracked) {
-          trackChip.className = 'gsc-track-chip gsc-track-chip--done';
-          trackChip.textContent = 'Tracked';
-          trackChip.disabled = true;
-          trackChip.title = 'Tracked in your Web CEO project';
-        } else {
-          trackChip.className = 'gsc-track-chip';
-          trackChip.textContent = '+ Track';
-          trackChip.title = 'Track this keyword in your Web CEO project';
-          trackChip.addEventListener('click', e => {
-            e.stopPropagation();
-            const intent = typeof intentOf === 'function' ? intentOf(r.text) : null;
-            if (typeof trackQueryInWebceo === 'function') trackQueryInWebceo(r.text, trackChip, intent);
-          });
-        }
-        term.appendChild(trackChip);
-        const spacer = document.createElement('span');
-        spacer.className = 'ads-term-spacer';
-        term.appendChild(spacer);
+      const tracked = typeof webceoIsTracked === 'function' && webceoIsTracked(r.text);
+      const trackChip = document.createElement('button');
+      if (tracked) {
+        trackChip.className = 'gsc-track-chip gsc-track-chip--done';
+        trackChip.textContent = 'Tracked';
+        trackChip.disabled = true;
+        trackChip.title = 'Tracked in your Web CEO project';
+      } else {
+        trackChip.className = 'gsc-track-chip';
+        trackChip.textContent = '+ Track';
+        trackChip.title = 'Track this keyword in your Web CEO project';
+        trackChip.addEventListener('click', e => {
+          e.stopPropagation();
+          const intent = typeof intentOf === 'function' ? intentOf(r.text) : null;
+          if (typeof trackQueryInWebceo === 'function') trackQueryInWebceo(r.text, trackChip, intent);
+        });
       }
+      term.appendChild(trackChip);
+      const spacer = document.createElement('span');
+      spacer.className = 'ads-term-spacer';
+      term.appendChild(spacer);
 
-      // Right-side chips: Organic + location (opts.track=true tells adsTermChips
-      // to skip the static Tracked pill since search terms handle it inline above)
-      const chips = adsTermChips(r.text, organic, withQs ? {} : { track: true });
+      // Right-side chips: Organic + location only — track: true suppresses the
+      // static Tracked pill since both tables now handle it inline above.
+      const chips = adsTermChips(r.text, organic, { track: true });
       if (chips) term.appendChild(chips);
       row.appendChild(term);
 

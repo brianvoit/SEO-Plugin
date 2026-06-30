@@ -1887,7 +1887,7 @@ async function adsGetPageData({ pageUrl, range, forceRefresh }) {
   });
 
   if (!ads.length) {
-    const entry = { fetchedAt: Date.now(), account: customerId, range, path, ads: [], campaigns: [], keywords: [], searchTerms: [], timeseries: [], totals: null, previousTotals: null, currency: '' };
+    const entry = { fetchedAt: Date.now(), account: customerId, range, path, ads: [], campaigns: [], keywords: [], searchTerms: [], timeseries: [], totals: null, previousTotals: null, currency: '', adGroupImpressionShare: {} };
     cache[cacheKey] = entry; await gscPruneCache(cache); await browser.storage.local.set({ adsCache: cache });
     return { connected: true, ...entry, fromCache: false };
   }
@@ -1896,8 +1896,10 @@ async function adsGetPageData({ pageUrl, range, forceRefresh }) {
   const campList = `(${[...campaignIds].join(',')})`;
 
   // 2) campaign IS, 3) keywords (+QS, ids), 4) search terms (+triggering keyword),
-  // 5) daily timeseries per ad group, 6) previous-period totals, + currency
-  const [campRes, kwRes, stRes, tsRes, prevRes, custRes] = await Promise.all([
+  // 5) daily timeseries per ad group, 6) previous-period totals, 7) ad-group-level IS
+  // (unverified field support — adsSearch never throws, so a rejection just yields
+  // an empty rows array and the feature silently no-ops), + currency
+  const [campRes, kwRes, stRes, tsRes, prevRes, agIsRes, custRes] = await Promise.all([
     adsSearch(accessToken, customerId,
       `SELECT campaign.id, campaign.name, metrics.search_impression_share,
               metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share
@@ -1921,6 +1923,10 @@ async function adsGetPageData({ pageUrl, range, forceRefresh }) {
     adsSearch(accessToken, customerId,
       `SELECT metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
        FROM ad_group WHERE ${prevWhere} AND ad_group.id IN ${agList}`),
+    adsSearch(accessToken, customerId,
+      `SELECT ad_group.id, metrics.search_impression_share,
+              metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share
+       FROM ad_group WHERE ${dateWhere} AND ad_group.id IN ${agList}`),
     adsSearch(accessToken, customerId, 'SELECT customer.currency_code FROM customer LIMIT 1')
   ]);
 
@@ -1948,6 +1954,21 @@ async function adsGetPageData({ pageUrl, range, forceRefresh }) {
     ...adsMetrics(r.metrics)
   }));
 
+  // Ad-group-level impression share — not exposed in the UI yet; consumed by the
+  // Action Plan for page-specific (not campaign-wide) IS guidance. agIsRes.error
+  // means Google rejected the field at this resource level; rows is then empty
+  // and adGroupImpressionShare stays {} (graceful no-op, not a thrown error).
+  const adGroupImpressionShare = {};
+  (agIsRes.rows || []).forEach(r => {
+    const id = String(r.adGroup?.id || '');
+    if (!id) return;
+    adGroupImpressionShare[id] = {
+      impressionShare: r.metrics?.searchImpressionShare ?? null,
+      lostBudget: r.metrics?.searchBudgetLostImpressionShare ?? null,
+      lostRank: r.metrics?.searchRankLostImpressionShare ?? null
+    };
+  });
+
   // Per-ad-group daily rows → keep adGroupId so the popup can filter the chart
   // to one ad group client-side; the default chart sums all serving ad groups.
   const tsRows = (tsRes.rows || []).map(r => ({
@@ -1967,7 +1988,7 @@ async function adsGetPageData({ pageUrl, range, forceRefresh }) {
   // True when the search-term query hit the cap — the popup offers "Request More"
   const searchTermsLimited = (stRes.rows || []).length >= ADS_SEARCH_TERM_LIMIT;
 
-  const entry = { fetchedAt: Date.now(), account: customerId, range, path, ads, campaigns, keywords, searchTerms, searchTermsLimited, tsRows, timeseries, totals, previousTotals, currency };
+  const entry = { fetchedAt: Date.now(), account: customerId, range, path, ads, campaigns, keywords, searchTerms, searchTermsLimited, tsRows, timeseries, totals, previousTotals, currency, adGroupImpressionShare };
   cache[cacheKey] = entry; await gscPruneCache(cache); await browser.storage.local.set({ adsCache: cache });
   return { connected: true, ...entry, fromCache: false };
 }

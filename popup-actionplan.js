@@ -176,6 +176,11 @@ function actionPlanContext(g) {
     const isLost = (g.ads.campaigns || [])
       .filter(c => (c.lostBudget || 0) >= 0.1 || (c.lostRank || 0) >= 0.1)
       .slice(0, 6);
+    // Ad groups serving this specific page, bleeding impression share — more
+    // actionable than campaign-wide IS since it's scoped to this page's traffic.
+    const agIsLost = Object.entries(g.ads.adGroupImpressionShare || {})
+      .filter(([, v]) => (v.lostBudget || 0) >= 0.1 || (v.lostRank || 0) >= 0.1)
+      .slice(0, 6);
     // Weak ad creative: LOW-rated RSA assets
     const weakAds = [];
     const adsById = (g.adAssets && g.adAssets.ads) || {};
@@ -187,7 +192,7 @@ function actionPlanContext(g) {
       if (lowH.length || lowD.length) weakAds.push({ ad: a, lowH, lowD });
     });
 
-    if (terms.length || kws.length || wasted.length || lowQs.length || isLost.length || weakAds.length) {
+    if (terms.length || kws.length || wasted.length || lowQs.length || isLost.length || agIsLost.length || weakAds.length) {
       lines.push('\n## ADS (what you pay for — money-backed intent; paid fixes often also lift organic relevance and Quality Score)');
       const cur = g.ads.currency || '';
       const money = (n) => `${cur ? cur + ' ' : '$'}${Math.ceil(n || 0)}`;
@@ -214,6 +219,15 @@ function actionPlanContext(g) {
           if (c.lostBudget != null) parts.push(`${Math.round(c.lostBudget * 100)}% to budget`);
           if (c.lostRank != null) parts.push(`${Math.round(c.lostRank * 100)}% to rank`);
           lines.push(`  "${c.name}" — IS ${c.impressionShare != null ? Math.round(c.impressionShare * 100) + '%' : 'n/a'}${parts.length ? ' (lost ' + parts.join(', ') + ')' : ''}`);
+        });
+      }
+      if (agIsLost.length) {
+        lines.push('Ad groups (serving this page) losing impression share:');
+        agIsLost.forEach(([adGroupId, v]) => {
+          const parts = [];
+          if (v.lostBudget != null) parts.push(`${Math.round(v.lostBudget * 100)}% to budget`);
+          if (v.lostRank != null) parts.push(`${Math.round(v.lostRank * 100)}% to rank`);
+          lines.push(`  ad group ${adGroupId} — IS ${v.impressionShare != null ? Math.round(v.impressionShare * 100) + '%' : 'n/a'}${parts.length ? ' (lost ' + parts.join(', ') + ')' : ''}`);
         });
       }
       if (weakAds.length) {

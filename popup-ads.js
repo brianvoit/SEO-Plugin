@@ -135,11 +135,13 @@ function adsFilterLabel() {
 function adsAdGroupVisible(adGroupId) {
   const f = _adsFilter;
   if (!f) return true;
+  if (f.type === 'campaign') return f.groupIds.has(adGroupId);
   return f.adGroupId ? adGroupId === f.adGroupId : true;
 }
 function adsKeywordVisible(kw) {
   const f = _adsFilter;
   if (!f) return true;
+  if (f.type === 'campaign')   return f.groupIds.has(kw.adGroupId);
   if (f.type === 'keyword')    return kw.criterionId === f.criterionId;
   if (f.type === 'searchTerm') return kw.adGroupId === f.adGroupId && (kw.text || '').toLowerCase() === (f.keyword || '').toLowerCase();
   return kw.adGroupId === f.adGroupId;   // adGroup filter
@@ -184,6 +186,7 @@ function matchesQsFilter(r, filter) {
 function adsTermVisible(t) {
   const f = _adsFilter;
   if (!f) return true;
+  if (f.type === 'campaign')   return f.groupIds.has(t.adGroupId);
   if (f.type === 'searchTerm') return t.text === f.text && t.adGroupId === f.adGroupId;
   if (f.type === 'keyword')    return t.adGroupId === f.adGroupId && (t.keyword || '').toLowerCase() === (f.text || '').toLowerCase();
   return t.adGroupId === f.adGroupId;    // adGroup filter
@@ -192,7 +195,7 @@ function adsTermVisible(t) {
 function setAdsFilter(filter) {
   // Toggle off if the same thing is clicked again
   const same = _adsFilter && filter && _adsFilter.type === filter.type &&
-    (_adsFilter.criterionId || _adsFilter.text) === (filter.criterionId || filter.text) &&
+    (_adsFilter.criterionId || _adsFilter.text || _adsFilter.campaignId) === (filter.criterionId || filter.text || filter.campaignId) &&
     _adsFilter.adGroupId === filter.adGroupId;
   _adsFilter = same ? null : filter;
   renderAdsAll();
@@ -241,20 +244,34 @@ function renderAdsTree() {
 
   campaigns.forEach(({ campId, camp, groups }) => {
     const cRow = document.createElement('div');
-    cRow.className = 'ads-campaign';
+    const campActive = _adsFilter && _adsFilter.type === 'campaign' && _adsFilter.campaignId === campId;
+    cRow.className = 'ads-campaign' + (campActive ? ' ads-campaign--active' : '');
     const cName = document.createElement('span');
-    cName.className = 'ads-campaign-name';
+    cName.className = 'ads-campaign-name ads-term-link';
     cName.textContent = camp.name;
+    cName.title = `Filter to "${camp.name}"`;
+    cName.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const groupIds = new Set((_adsData.ads || []).filter(a => a.campaignId === campId).map(a => a.adGroupId));
+      setAdsFilter({ type: 'campaign', campaignId: campId, groupIds, label: camp.name });
+    });
     cRow.appendChild(cName);
     const is = isByCampaign.get(campId);
-    if (is && is.impressionShare != null) {
-      const chip = document.createElement('span');
-      chip.className = 'ads-is-chip';
-      chip.textContent = `IS ${adsPct(is.impressionShare)}`;
-      chip.title = `Search impression share ${adsPct(is.impressionShare)}` +
-        (is.lostRank != null ? ` · lost to rank ${adsPct(is.lostRank)}` : '') +
-        (is.lostBudget != null ? ` · lost to budget ${adsPct(is.lostBudget)}` : '');
-      cRow.appendChild(chip);
+    if (is) {
+      const pillsWrap = document.createElement('span');
+      pillsWrap.className = 'ads-is-chips';
+      const addIsChip = (label, val, tooltip) => {
+        if (val == null) return;
+        const chip = document.createElement('span');
+        chip.className = 'ads-is-chip';
+        chip.textContent = `${label} ${adsPct(val)}`;
+        chip.title = tooltip;
+        pillsWrap.appendChild(chip);
+      };
+      addIsChip('IS', is.impressionShare, 'Search impression share — the % of eligible auctions you showed in');
+      addIsChip('LR', is.lostRank,        'Impression share lost to Ad Rank (low bid or quality)');
+      addIsChip('LB', is.lostBudget,      'Impression share lost to insufficient budget');
+      if (pillsWrap.childElementCount) cRow.appendChild(pillsWrap);
     }
     root.appendChild(cRow);
 
@@ -451,7 +468,7 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
         qs.className = 'ads-cell-num';
         qs.textContent = r.qualityScore != null ? r.qualityScore : '—';
         if (r.qualityScore != null) {
-          const fmtQs = v => v === 'ABOVE_AVERAGE' ? 'Above avg' : v === 'AVERAGE' ? 'Average' : v === 'BELOW_AVERAGE' ? 'Below avg' : '—';
+          const fmtQs = v => v === 'ABOVE_AVERAGE' ? 'Above avg' : v === 'AVERAGE' ? 'Average' : v === 'BELOW_AVERAGE' ? 'Below avg' : 'No data';
           qs.title = [
             `Quality Score: ${r.qualityScore}/10`,
             `Expected CTR:  ${fmtQs(r.searchPredictedCtr)}`,
@@ -728,7 +745,7 @@ function renderAdsAll() {
   if (_adsFilter) {
     section.classList.remove('hidden');
     document.getElementById('ads-filter-type').textContent =
-      _adsFilter.type === 'adGroup' ? 'ad group' : _adsFilter.type === 'keyword' ? 'keyword' : 'search term';
+      _adsFilter.type === 'campaign' ? 'campaign' : _adsFilter.type === 'adGroup' ? 'ad group' : _adsFilter.type === 'keyword' ? 'keyword' : 'search term';
     document.getElementById('ads-filter-text').textContent = adsFilterLabel();
   } else {
     section.classList.add('hidden');
@@ -2412,9 +2429,10 @@ async function renderAdGroupDetail() {
     body.replaceChildren();
 
     const multi = ads.length > 1;
+    const groupTerms = (_adsData.searchTerms || []).filter(t => t.adGroupId === _adGroupDrillId);
     ads.slice().sort((a, b) => b.cost - a.cost).forEach(a => {
       const detail = (res.ads || {})[a.adId] || { headlines: [], descriptions: [], type: a.type, name: a.adName };
-      renderOneAd(a, detail, multi, body);
+      renderOneAd(a, detail, multi, body, groupTerms);
     });
   } catch (err) {
     body.replaceChildren();
@@ -2422,7 +2440,7 @@ async function renderAdGroupDetail() {
   }
 }
 
-function renderOneAd(ad, detail, multi, body) {
+function renderOneAd(ad, detail, multi, body, groupTerms) {
   const type = detail.type || ad.type;
 
   // With multiple ads, a bold ad header (like a campaign row); rows below indent.
@@ -2478,11 +2496,25 @@ function renderOneAd(ad, detail, multi, body) {
     return;
   }
 
-  renderAdAssetSection('Headlines', 'headlines', detail.headlines || [], body, multi);
-  renderAdAssetSection('Descriptions', 'descriptions', detail.descriptions || [], body, multi);
+  renderAdAssetSection('Headlines', 'headlines', detail.headlines || [], body, multi, groupTerms);
+  renderAdAssetSection('Descriptions', 'descriptions', detail.descriptions || [], body, multi, groupTerms);
 }
 
-function renderAdAssetSection(label, assetKey, items, body, indent) {
+// Case-insensitive: does the search term's full text appear within the asset's
+// wording? Headlines/descriptions are short marketing phrases; checking whether
+// a real user query is embedded in the copy is the literal "echoes real searches" signal.
+function countSearchTermMatches(text, terms) {
+  const t = (text || '').toLowerCase();
+  if (!t || !terms || !terms.length) return 0;
+  let count = 0;
+  terms.forEach(term => {
+    const s = (term.text || '').toLowerCase().trim();
+    if (s && t.includes(s)) count++;
+  });
+  return count;
+}
+
+function renderAdAssetSection(label, assetKey, items, body, indent, groupTerms) {
   const asset = ADS_GEN_ASSETS.find(a => a.key === assetKey);
   const section = document.createElement('section');
   section.className = 'field-section adgroup-asset-section' + (indent ? ' adgroup-indent' : '');
@@ -2512,7 +2544,8 @@ function renderAdAssetSection(label, assetKey, items, body, indent) {
   // Existing assets; LOW-rated ones get an inline generate button
   items.forEach(it => section.appendChild(makeAssetRow(
     it, asset.max,
-    it.label === 'LOW' ? (btn) => runAssetGenerate(asset, sugg, existingTexts, btn) : null
+    it.label === 'LOW' ? (btn) => runAssetGenerate(asset, sugg, existingTexts, btn) : null,
+    countSearchTermMatches(it.text, groupTerms)
   )));
 
   section.appendChild(sugg);
@@ -2541,7 +2574,7 @@ async function runAssetGenerate(asset, sugg, existingTexts, btn) {
 
 // An existing live asset: text + rating + pinned + char count. LOW assets also get
 // an inline generate button (onGenerate supplied).
-function makeAssetRow(item, max, onGenerate) {
+function makeAssetRow(item, max, onGenerate, matchCount) {
   const row = document.createElement('div');
   row.className = 'asset-row' + (item.enabled === false ? ' asset-row--off' : '');
 
@@ -2578,6 +2611,14 @@ function makeAssetRow(item, max, onGenerate) {
       '<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M8 1l1.4 4.6L14 7l-4.6 1.4L8 13l-1.4-4.6L2 7l4.6-1.4z"/></svg>'));
     gb.addEventListener('click', () => onGenerate(gb));
     badges.appendChild(gb);
+  }
+
+  if (matchCount > 0) {
+    const m = document.createElement('span');
+    m.className = 'asset-match-count';
+    m.textContent = `×${matchCount}`;
+    m.title = `Appears in ${matchCount} search term${matchCount === 1 ? '' : 's'} that triggered ads for this page`;
+    badges.appendChild(m);
   }
 
   row.appendChild(badges);

@@ -1483,7 +1483,10 @@ body.settings-open #update-footer { margin-top: auto; }
   color: var(--text);
 }
 .ads-campaign:first-child { margin-top: 0; }
-.ads-campaign-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ads-campaign-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.ads-campaign-name:hover { text-decoration: underline; }
+.ads-campaign--active .ads-campaign-name { color: var(--accent); }
+.ads-is-chips { display: flex; gap: 4px; flex-shrink: 0; }
 .ads-is-chip {
   flex-shrink: 0;
   font-size: 9px;
@@ -1748,6 +1751,7 @@ body.settings-open #update-footer { margin-top: auto; }
 .asset-perf--other { color: var(--text-muted); border: 1px solid var(--border); }
 .asset-pin { font-size: 9px; font-weight: 600; color: var(--accent); border: 1px solid var(--accent); border-radius: 8px; padding: 1px 6px; }
 .asset-count { font-size: 10px; color: var(--text-muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.asset-match-count { font-size: 9px; font-weight: 600; color: var(--hint-green); border: 1px solid var(--hint-green); border-radius: 8px; padding: 1px 6px; }
 .adgroup-suggestions { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
 
 /* ── Ranking (Web CEO) tab ─────────────────────────────────────────────────── */

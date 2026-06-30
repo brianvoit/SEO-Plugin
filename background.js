@@ -2636,7 +2636,7 @@ function buildNegativesHtml(lists, docTitle) {
   out.push(`<p style="color:#999999;font-size:10pt">Generated ${htmlEsc(dateStr)}</p>`);
   out.push('<ul>');
   (lists || []).forEach(list => {
-    out.push(`<li>${htmlEsc(list.name)}<ul>`);
+    out.push(`<li>Added Negatives to ${htmlEsc(list.campaignName || 'Campaign')} &rarr;&nbsp;&nbsp;${htmlEsc(list.name)}<ul>`);
     (list.terms || []).forEach(t => out.push(`<li>${htmlEsc(negFormatTerm(t.text, t.matchType))}</li>`));
     out.push('</ul></li>');
   });

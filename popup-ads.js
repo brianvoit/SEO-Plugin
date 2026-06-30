@@ -2248,10 +2248,28 @@ async function commitNegatives(btn) {
 function buildNegativesOutline(lists) {
   const out = [];
   lists.forEach(list => {
-    out.push(`-${list.name}`);
+    out.push(`-Added Negatives to ${list.campaignName || 'Campaign'} →  ${list.name}`);
     list.terms.forEach(t => out.push(`--${adsFormatKeyword(t.text, t.matchType)}`));
   });
   return out.join('\n');
+}
+
+// Auto-download a .txt of what was just pushed, the moment the commit succeeds —
+// no extra OAuth/connection needed, unlike the Google Doc export below.
+function downloadNegativesTxt(lists) {
+  if (!lists.length) return;
+  const now = new Date();
+  const pad2 = n => String(n).padStart(2, '0');
+  const fileStamp = `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}-${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`;
+  const blob = new Blob([buildNegativesOutline(lists)], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Negative-Keywords-${fileStamp}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function renderNegativesResult(results, commitBtn) {
@@ -2262,10 +2280,11 @@ function renderNegativesResult(results, commitBtn) {
     if (r.error) { hadError = true; summaryLines.push(`${r.campaignName || 'Campaign'}: error — ${r.error}`); return; }
     const added = r.added || [], skipped = r.skipped || [];
     totalAdded += added.length;
-    if (added.length) lists.push({ name: r.listName || `Campaign - ${r.campaignName}`, terms: added });
+    if (added.length) lists.push({ campaignName: r.campaignName, name: r.listName || `Campaign - ${r.campaignName}`, terms: added });
     summaryLines.push(`${r.listName || r.campaignName}: ${added.length} added${skipped.length ? `, ${skipped.length} already present` : ''}`);
   });
   _negResultLists = lists;
+  downloadNegativesTxt(lists);
 
   const exportWrap = document.getElementById('neg-export');
   if (exportWrap) {
@@ -2580,7 +2599,15 @@ function makeAssetRow(item, max, onGenerate, matchCount) {
 
   const text = document.createElement('div');
   text.className = 'asset-text';
-  text.textContent = item.text;
+  text.appendChild(document.createTextNode(item.text));
+  if (matchCount > 0) {
+    text.appendChild(document.createTextNode(' '));
+    const m = document.createElement('span');
+    m.className = 'asset-match-count';
+    m.textContent = `×${matchCount}`;
+    m.title = `Appears in ${matchCount} search term${matchCount === 1 ? '' : 's'} that triggered ads for this page`;
+    text.appendChild(m);
+  }
   row.appendChild(text);
 
   const badges = document.createElement('div');
@@ -2611,14 +2638,6 @@ function makeAssetRow(item, max, onGenerate, matchCount) {
       '<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M8 1l1.4 4.6L14 7l-4.6 1.4L8 13l-1.4-4.6L2 7l4.6-1.4z"/></svg>'));
     gb.addEventListener('click', () => onGenerate(gb));
     badges.appendChild(gb);
-  }
-
-  if (matchCount > 0) {
-    const m = document.createElement('span');
-    m.className = 'asset-match-count';
-    m.textContent = `×${matchCount}`;
-    m.title = `Appears in ${matchCount} search term${matchCount === 1 ? '' : 's'} that triggered ads for this page`;
-    badges.appendChild(m);
   }
 
   row.appendChild(badges);

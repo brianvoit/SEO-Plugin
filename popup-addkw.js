@@ -728,13 +728,12 @@ async function generateAddKwBlindspots(force) {
     _addkwBlindspotGenerated = true;
     _addkwBlindspotSkippedCount = skipped;
     saveAddKwCache();
-    renderAddKw();
   } catch (err) {
     _addkwBlindspotGenerated = true;
     _addkwBlindspotError = err.message;
-    renderAddKw();
   } finally {
     _addkwBlindspotLoading = false;
+    renderAddKw();
   }
 }
 

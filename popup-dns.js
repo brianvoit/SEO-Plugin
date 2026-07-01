@@ -165,7 +165,7 @@ async function loadDnsData() {
   errorEl.classList.add('hidden');
   loading.classList.remove('hidden');
 
-  const res = await browser.runtime.sendMessage({ action: 'dnsResolve', host: lookupHost });
+  const res = await sendMessageWithTimeout({ action: 'dnsResolve', host: lookupHost });
   // Ignore stale responses if the user navigated meanwhile
   if (document.getElementById('dns-host').textContent !== lookupHost) return;
   renderDnsRecords(res);

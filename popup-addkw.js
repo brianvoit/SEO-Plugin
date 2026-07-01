@@ -40,7 +40,7 @@ async function ensureAddKwAllAdGroups(pageUrl) {
   try { host = new URL(pageUrl).hostname.replace(/^www\./, ''); } catch { /* ignore */ }
   if (_addkwAllAdGroupsHost === host && _addkwAllAdGroups.length) return;
   try {
-    const res = await browser.runtime.sendMessage({ action: 'adsGetAllAdGroups', pageUrl });
+    const res = await sendMessageWithTimeout({ action: 'adsGetAllAdGroups', pageUrl });
     if (res && res.adGroups) { _addkwAllAdGroups = res.adGroups; _addkwAllAdGroupsHost = host; }
   } catch { /* picker falls back to the page's own ad groups */ }
 }
@@ -54,7 +54,7 @@ async function ensureAddKwAllKeywords(pageUrl) {
   try { host = new URL(pageUrl).hostname.replace(/^www\./, ''); } catch { /* ignore */ }
   if (_addkwAllKeywordTextsHost === host && _addkwAllKeywordTexts) return;
   try {
-    const res = await browser.runtime.sendMessage({ action: 'adsGetAllKeywords', pageUrl });
+    const res = await sendMessageWithTimeout({ action: 'adsGetAllKeywords', pageUrl });
     if (res && res.texts) { _addkwAllKeywordTexts = new Set(res.texts); _addkwAllKeywordTextsHost = host; }
   } catch { /* dedup just no-ops if unavailable */ }
 }
@@ -379,7 +379,7 @@ async function generateAddKw(force) {
       // Good adds live in the long tail too — pull the full search-term list first.
       if (_adsData.searchTermsLimited) {
         try {
-          const more = await browser.runtime.sendMessage({ action: 'adsGetMoreSearchTerms', pageUrl: tab.url, range: adsSelectedRange });
+          const more = await sendMessageWithTimeout({ action: 'adsGetMoreSearchTerms', pageUrl: tab.url, range: adsSelectedRange });
           if (more && more.searchTerms) { _adsData.searchTerms = more.searchTerms; _adsData.searchTermsLimited = more.searchTermsLimited; }
         } catch { /* best effort — analyze what we have */ }
       }
@@ -421,7 +421,7 @@ async function generateAddKw(force) {
     const addkwSystemBlocks = [{ type: 'text', text: ADDKW_SYSTEM_BASE, cache_control: { type: 'ephemeral' } }];
     if (addkwSystemDynamic) addkwSystemBlocks.push({ type: 'text', text: addkwSystemDynamic });
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const data = await claudeFetch({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -436,9 +436,6 @@ async function generateAddKw(force) {
         messages: [{ role: 'user', content: context }]
       })
     });
-    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error?.message ?? `HTTP ${res.status}`); }
-
-    const data = await res.json();
     const parsed = parseAddKwJson(data.content?.[0]?.text ?? '');
     if (!parsed) throw new Error('Could not parse the analysis response');
 
@@ -535,7 +532,7 @@ async function generateAddKw(force) {
     // limit) — volume is enrichment, never a blocker if the call fails.
     addKwBodyMessage('Estimating search volume…');
     try {
-      const idr = await browser.runtime.sendMessage({ action: 'adsGetKeywordIdeas', pageUrl: tab.url, keywords: recs.map(r => r.text) });
+      const idr = await sendMessageWithTimeout({ action: 'adsGetKeywordIdeas', pageUrl: tab.url, keywords: recs.map(r => r.text) });
       const byKeyword = (idr && idr.byKeyword) || {};
       recs.forEach(r => {
         const m = byKeyword[r.text.toLowerCase()];
@@ -614,7 +611,7 @@ async function generateAddKwBlindspots(force) {
       pageData?.bodyTextExcerpt  && `Page content excerpt: "${pageData.bodyTextExcerpt}"`,
     ].filter(v => v !== undefined && v !== false && v !== null && v !== '').join('\n\n');
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const data = await claudeFetch({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -629,9 +626,6 @@ async function generateAddKwBlindspots(force) {
         messages: [{ role: 'user', content: context }]
       })
     });
-    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error?.message ?? `HTTP ${res.status}`); }
-
-    const data = await res.json();
     const parsed = parseAddKwJson(data.content?.[0]?.text ?? '');
     if (!parsed) throw new Error('Could not parse the brainstorm response');
 
@@ -665,7 +659,7 @@ async function generateAddKwBlindspots(force) {
     });
 
     if (ideas.length) {
-      const idr = await browser.runtime.sendMessage({ action: 'adsGetKeywordIdeas', pageUrl: tab.url, keywords: ideas.map(r => r.text) });
+      const idr = await sendMessageWithTimeout({ action: 'adsGetKeywordIdeas', pageUrl: tab.url, keywords: ideas.map(r => r.text) });
       const byKeyword = (idr && idr.byKeyword) || {};
       ideas.forEach(r => {
         const m = byKeyword[r.text.toLowerCase()];
@@ -1098,7 +1092,7 @@ async function commitAddKw(btn) {
   const exportWrap = document.getElementById('addkw-export');
   try {
     const tab = await getActiveTab();
-    const res = await browser.runtime.sendMessage({ action: 'adsAddKeywords', pageUrl: tab.url, groups });
+    const res = await sendMessageWithTimeout({ action: 'adsAddKeywords', pageUrl: tab.url, groups });
     if (!res || res.connected === false) {
       throw new Error(res?.reauthRequired ? 'Google Ads connection expired — reconnect in Settings.' : 'Not connected to Google Ads.');
     }
@@ -1211,11 +1205,11 @@ async function exportAddKwToDoc(btn, groups) {
   btn.title = 'Creating Google Doc…';
 
   async function attempt() {
-    return browser.runtime.sendMessage({ action: 'docsExportAddKeywords', groups: useGroups, pageUrl });
+    return sendMessageWithTimeout({ action: 'docsExportAddKeywords', groups: useGroups, pageUrl });
   }
   let res = await attempt();
   if (res && res.notConnected) {
-    const auth = await browser.runtime.sendMessage({ action: 'docsConnect' });
+    const auth = await sendMessageWithTimeout({ action: 'docsConnect' });
     if (!auth || auth.error) { btn.disabled = false; btn.title = 'Google Docs auth failed — try again'; setTimeout(() => { btn.title = origTitle; }, 3000); return; }
     res = await attempt();
   }

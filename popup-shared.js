@@ -47,6 +47,54 @@ async function copyToClipboard(text) {
   }
 }
 
+// ─── Timeout-guarded network helpers ─────────────────────────────────────────
+// Firefox can suspend the background event page after ~30s idle. If that
+// happens mid-request — most likely when the sidebar or a pop-out window has
+// been left open for a long time — a plain sendMessage (or a stalled fetch)
+// can hang forever with no resolution or rejection, leaving whatever "…busy"
+// UI state was showing stuck indefinitely. Every background message and every
+// direct Claude call goes through one of these two wrappers so that can't
+// happen — a stuck request now fails with a clear error after a bounded time
+// instead of hanging silently.
+
+async function sendMessageWithTimeout(message, timeoutMs = 30000) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('The extension background didn\'t respond in time — try again.')), timeoutMs);
+  });
+  try {
+    return await Promise.race([browser.runtime.sendMessage(message), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Performs the full Claude Messages API round trip — fetch, status check,
+// AND body parse — and returns the parsed response body directly. The abort
+// timer stays armed for the entire round trip, not just the initial fetch()
+// call: fetch()'s promise resolves as soon as headers arrive, so a timer
+// cleared at that point wouldn't catch a response whose BODY then stalls
+// mid-stream. Doing the json() read inside the same guarded scope closes
+// that gap — the whole thing throws after timeoutMs no matter which part
+// of the request/response actually stalled.
+async function claudeFetch(options, timeoutMs = 60000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', { ...options, signal: controller.signal });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message ?? `HTTP ${res.status}`);
+    }
+    return await res.json();
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('Claude request timed out — try again.');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Build an SVG element (e.g. an icon, or a whole chart) from a markup string
 // without using innerHTML. DOMParser is not flagged by the AMO linter, and the
 // markup we pass is always numeric/escaped, so this is safe.
@@ -163,7 +211,7 @@ async function getActiveTab() {
   // background for the active tab of the last focused normal browser window.
   if (document.body.classList.contains('embed-window')) {
     try {
-      const tab = await browser.runtime.sendMessage({ action: 'getTargetTab' });
+      const tab = await sendMessageWithTimeout({ action: 'getTargetTab' });
       if (tab) return tab;
     } catch { /* fall back to the regular query */ }
   }

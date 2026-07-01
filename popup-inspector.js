@@ -257,7 +257,7 @@ function loadDomainAge(tab) {
   }
   el.textContent = '…';
   el.className = 'dates-value';
-  browser.runtime.sendMessage({ action: 'getDomainAge', host }).then(res => {
+  sendMessageWithTimeout({ action: 'getDomainAge', host }).then(res => {
     if (!res || res.error || !res.registered) {
       el.textContent = '—';
       el.className = 'dates-value dates-value--none';
@@ -1164,7 +1164,7 @@ Respond with ONLY a compact JSON object, no prose, no code fences:
 {"suggestions":[{"type":"FAQPage","why":"one sentence explaining why this type fits","priority":"high|medium|low"}]}
 priority: high = strong rich-result candidate; medium = useful; low = nice-to-have.`;
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const data = await claudeFetch({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1179,11 +1179,6 @@ priority: high = strong rich-result candidate; medium = useful; low = nice-to-ha
         messages: [{ role: 'user', content: prompt }]
       })
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error?.message ?? `HTTP ${res.status}`);
-    }
-    const data = await res.json();
     let text = (data.content?.[0]?.text || '').replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
     const parsed = JSON.parse(text);
     _schemaSuggestions = (parsed.suggestions || []).slice(0, 5).map(s => ({

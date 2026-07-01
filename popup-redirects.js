@@ -97,7 +97,7 @@ function paintRedirectBadge() {
 // Called from loadData with the active tab + its page data
 function renderRedirectStatus(tabId, pageData) {
   _redirectMeta = (pageData && pageData.metaRefresh) || null;
-  browser.runtime.sendMessage({ action: 'getRedirectInfo', tabId })
+  sendMessageWithTimeout({ action: 'getRedirectInfo', tabId })
     .then(info => { _redirectInfo = info; paintRedirectBadge(); })
     .catch(() => { _redirectInfo = null; paintRedirectBadge(); });
 }
@@ -252,7 +252,7 @@ async function ensureActiveTrace(force = false) {
   renderRedirectPanel();
 
   let res;
-  try { res = await browser.runtime.sendMessage({ action: 'traceUrl', pageUrl: url }); }
+  try { res = await sendMessageWithTimeout({ action: 'traceUrl', pageUrl: url }); }
   catch { res = { error: 'TRACE_FAILED', hops: [] }; }
   if (_activeTraceUrl !== url) return;              // navigated away while tracing
 
@@ -368,7 +368,7 @@ browser.runtime.onMessage.addListener(msg => {
   if (msg && msg.action === 'redirectUpdated') {
     getActiveTab().then(tab => {
       if (tab && tab.id === msg.tabId) {
-        browser.runtime.sendMessage({ action: 'getRedirectInfo', tabId: tab.id })
+        sendMessageWithTimeout({ action: 'getRedirectInfo', tabId: tab.id })
           .then(info => { _redirectInfo = info; paintRedirectBadge(); })
           .catch(() => {});
       }

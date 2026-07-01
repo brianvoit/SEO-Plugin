@@ -690,6 +690,10 @@ async function generateAltText(srcUrl) {
       ]
     : `Generate alt text (image inaccessible — use context only).\n\n${context}`;
 
+  // AbortController-guarded fetch — a stalled connection would otherwise hang
+  // this await forever with no error, leaving the alt-text overlay stuck.
+  const controller = new AbortController();
+  const timeoutTimer = setTimeout(() => controller.abort(), 60000);
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -704,7 +708,8 @@ async function generateAltText(srcUrl) {
         max_tokens: 150,
         system,
         messages: [{ role: 'user', content: userContent }]
-      })
+      }),
+      signal: controller.signal
     });
 
     if (!res.ok) {
@@ -718,7 +723,9 @@ async function generateAltText(srcUrl) {
 
     showGeneratorResult(altText, !!imageData, img);
   } catch (err) {
-    showGeneratorError(`Error: ${err.message}`);
+    showGeneratorError(err.name === 'AbortError' ? 'Error: Claude request timed out — try again.' : `Error: ${err.message}`);
+  } finally {
+    clearTimeout(timeoutTimer);
   }
 }
 

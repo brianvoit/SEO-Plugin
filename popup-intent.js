@@ -34,7 +34,7 @@ Respond with ONLY a compact JSON object mapping each query's number (as a string
 async function classifyIntents(terms, claudeApiKey) {
   const content = terms.map((t, i) => `${i}: ${t}`).join('\n');
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const data = await claudeFetch({
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -49,8 +49,6 @@ async function classifyIntents(terms, claudeApiKey) {
       messages: [{ role: 'user', content }]
     })
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
   const text = (data.content?.[0]?.text ?? '').replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
   const map = JSON.parse(text);
   return terms.map((t, i) => INTENTS.find(l => l.toLowerCase() === String(map[i] ?? map[String(i)] ?? '').trim().toLowerCase()) || null);

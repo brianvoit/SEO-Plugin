@@ -42,7 +42,7 @@ async function ensureWebceoTracked(onReady) {
   _webceoTrackedLoading = true;
   try {
     const tab = await getActiveTab();
-    const res = await browser.runtime.sendMessage({ action: 'webceoGetTrackedKeywords', pageUrl: tab.url });
+    const res = await sendMessageWithTimeout({ action: 'webceoGetTrackedKeywords', pageUrl: tab.url });
     _webceoTrackedSet = new Set((res && res.keywords || []).map(k => String(k).toLowerCase().trim()));
   } catch { _webceoTrackedSet = new Set(); }
   _webceoTrackedLoading = false;
@@ -340,7 +340,7 @@ function renderWebceoPanel(response) {
 async function loadWebceoData(forceRefresh = false) {
   const tab = await getActiveTab();
   try { _webceoHost = new URL(tab.url).hostname.replace(/^www\./, '').toLowerCase(); } catch { _webceoHost = null; }
-  const response = await browser.runtime.sendMessage({ action: 'webceoGetRankings', pageUrl: tab.url, historyDepth: webceoSelectedDepth, forceRefresh });
+  const response = await sendMessageWithTimeout({ action: 'webceoGetRankings', pageUrl: tab.url, historyDepth: webceoSelectedDepth, forceRefresh });
   if (response) response.pageUrl = tab.url;
   renderWebceoPanel(response);
 }
@@ -396,7 +396,7 @@ function renderWebceoProjectOptions(container, projects, selected, onSelect) {
       opt.addEventListener('click', async () => {
         container.querySelectorAll('.gsc-property-option').forEach(el =>
           el.classList.toggle('gsc-property-option--active', el === opt));
-        await browser.runtime.sendMessage({ action: 'webceoSetProject', host: _webceoHost, project: p.project });
+        await sendMessageWithTimeout({ action: 'webceoSetProject', host: _webceoHost, project: p.project });
         if (onSelect) onSelect();
       });
       container.appendChild(opt);
@@ -413,7 +413,7 @@ function renderWebceoProjectOptions(container, projects, selected, onSelect) {
 async function loadWebceoProjectPicker(container) {
   container.replaceChildren();
   const tab = await getActiveTab();
-  const res = await browser.runtime.sendMessage({ action: 'webceoResolveProject', pageUrl: tab.url });
+  const res = await sendMessageWithTimeout({ action: 'webceoResolveProject', pageUrl: tab.url });
   if (!res || !res.connected || res.error || !res.projects || !res.projects.length) return;
   _webceoHost = res.host;
   renderWebceoProjectOptions(container, res.projects, res.project, () => loadWebceoData(true));
@@ -422,7 +422,7 @@ async function loadWebceoProjectPicker(container) {
 // ─── Settings ────────────────────────────────────────────────────────────────
 
 async function refreshWebceoSettingsStatus() {
-  const status = await browser.runtime.sendMessage({ action: 'webceoGetStatus' });
+  const status = await sendMessageWithTimeout({ action: 'webceoGetStatus' });
   const badge = document.getElementById('webceo-status-badge');
   const box = document.getElementById('webceo-project-box');
 
@@ -459,7 +459,7 @@ async function refreshWebceoProjectInfo() {
   allEl.replaceChildren();
 
   const tab = await getActiveTab();
-  const res = await browser.runtime.sendMessage({ action: 'webceoResolveProject', pageUrl: tab.url });
+  const res = await sendMessageWithTimeout({ action: 'webceoResolveProject', pageUrl: tab.url });
   if (!res || !res.connected) return;
   if (res.error) {
     matchEl.textContent = webceoErrorMessage(res.error, res.detail);
@@ -476,7 +476,7 @@ async function refreshWebceoProjectInfo() {
   if (sel) {
     renderSelectedRow(allEl, sel.name,
       async () => {
-        await browser.runtime.sendMessage({ action: 'webceoSetProject', host: _webceoHost, project: null });
+        await sendMessageWithTimeout({ action: 'webceoSetProject', host: _webceoHost, project: null });
         renderWebceoProjectOptions(allEl, res.projects, null, () => refreshWebceoProjectInfo());
       }, sel.domain);
     return;
@@ -506,7 +506,7 @@ document.getElementById('btn-webceo-key-vis').addEventListener('click', () => {
 });
 
 document.getElementById('btn-webceo-key-clear').addEventListener('click', async () => {
-  await browser.runtime.sendMessage({ action: 'webceoDisconnect' });
+  await sendMessageWithTimeout({ action: 'webceoDisconnect' });
   setWebceoKeyState(false);
   refreshWebceoSettingsStatus();
 });
@@ -514,7 +514,7 @@ document.getElementById('btn-webceo-key-clear').addEventListener('click', async 
 // The "Connected" chip doubles as the disconnect control
 document.getElementById('webceo-status-badge').addEventListener('click', async (e) => {
   if (!e.currentTarget.classList.contains('gsc-status-badge--connected')) return;
-  await browser.runtime.sendMessage({ action: 'webceoDisconnect' });
+  await sendMessageWithTimeout({ action: 'webceoDisconnect' });
   setWebceoKeyState(false);
   await refreshWebceoSettingsStatus();
 });
@@ -524,7 +524,7 @@ document.getElementById('btn-webceo-save-config').addEventListener('click', asyn
   const baseUrl = document.getElementById('webceo-base-url').value.trim();
   const update = { baseUrl };
   if (!keyInput.readOnly) update.apiKey = keyInput.value.trim();
-  await browser.runtime.sendMessage({ action: 'webceoSaveConfig', ...update });
+  await sendMessageWithTimeout({ action: 'webceoSaveConfig', ...update });
   if (!keyInput.readOnly && update.apiKey) setWebceoKeyState(true);
   refreshWebceoSettingsStatus();
 });
@@ -537,7 +537,7 @@ async function trackQueryInWebceo(keyword, chip, intent) {
   try {
     const tab = await getActiveTab();
     const tags = intent ? [intent] : [];
-    res = await browser.runtime.sendMessage({ action: 'webceoAddKeywords', pageUrl: tab.url, keywords: [keyword], tags });
+    res = await sendMessageWithTimeout({ action: 'webceoAddKeywords', pageUrl: tab.url, keywords: [keyword], tags });
   } catch { res = { error: 'NETWORK' }; }
   if (!chip) return;
   if (res && res.ok) {

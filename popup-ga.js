@@ -227,7 +227,7 @@ function renderInternalLinks(links) {
 
 async function loadInternalLinkChips(links) {
   if (!_gaHost) return;
-  const send = msg => browser.runtime.sendMessage(msg).catch(() => null);
+  const send = msg => sendMessageWithTimeout(msg).catch(() => null);
 
   // Collect unique destination paths → indices of rows that share that destination
   const destMap = new Map();
@@ -300,7 +300,7 @@ function hideGaChannelFilterBar() {
 
 async function applyGaChannelFilter(channel) {
   const tab = await getActiveTab();
-  const response = await browser.runtime.sendMessage({
+  const response = await sendMessageWithTimeout({
     action: 'gaGetChannelData', pageUrl: tab.url, range: gaSelectedRange, channel
   });
   if (_gaSelectedChannel !== channel) return;            // user changed selection meanwhile
@@ -386,7 +386,7 @@ async function loadGaData(forceRefresh = false) {
   const pageUrl = tab.url;
   try { _gaHost = new URL(pageUrl).hostname.replace(/^www\./, '').toLowerCase(); } catch { _gaHost = null; }
 
-  const response = await browser.runtime.sendMessage({
+  const response = await sendMessageWithTimeout({
     action: 'gaGetPageData', pageUrl, range: gaSelectedRange, forceRefresh, measurementId: gaDetectedId()
   });
   renderGaPanel(response);
@@ -459,7 +459,7 @@ function renderGaPropertyOptions(container, properties, selected, onSelect, opts
       opt.addEventListener('click', async () => {
         container.querySelectorAll('.gsc-property-option').forEach(el =>
           el.classList.toggle('gsc-property-option--active', el === opt));
-        await browser.runtime.sendMessage({ action: 'gaSetProperty', host: _gaHost, property: p.property });
+        await sendMessageWithTimeout({ action: 'gaSetProperty', host: _gaHost, property: p.property });
         if (onSelect) onSelect();
       });
       container.appendChild(opt);
@@ -489,7 +489,7 @@ async function loadGaPropertyPicker() {
   emptyEl.classList.add('hidden');
 
   const tab = await getActiveTab();
-  const res = await browser.runtime.sendMessage({ action: 'gaResolveProperty', pageUrl: tab.url, measurementId: gaDetectedId() });
+  const res = await sendMessageWithTimeout({ action: 'gaResolveProperty', pageUrl: tab.url, measurementId: gaDetectedId() });
   if (!res || !res.connected) return;
   if (res.error) {
     emptyEl.textContent = res.error === 'API_ERROR'
@@ -511,7 +511,7 @@ async function loadGaPropertyPicker() {
 // ─── Settings: connection + property info ─────────────────────────────────────
 
 async function refreshGaSettingsStatus() {
-  const status = await browser.runtime.sendMessage({ action: 'gaGetStatus' });
+  const status = await sendMessageWithTimeout({ action: 'gaGetStatus' });
 
   const badge         = document.getElementById('ga-status-badge');
   const setupForm     = document.getElementById('ga-setup-form');
@@ -541,7 +541,7 @@ async function refreshGaPropertyInfo() {
   allEl.replaceChildren();
 
   const tab = await getActiveTab();
-  const res = await browser.runtime.sendMessage({ action: 'gaResolveProperty', pageUrl: tab.url, measurementId: gaDetectedId() });
+  const res = await sendMessageWithTimeout({ action: 'gaResolveProperty', pageUrl: tab.url, measurementId: gaDetectedId() });
   if (!res || !res.connected) {
     matchEl.textContent = 'Not connected';
     matchEl.className = 'gsc-property-match gsc-property-match--none';
@@ -570,7 +570,7 @@ async function refreshGaPropertyInfo() {
   if (sel) {
     renderSelectedRow(allEl, sel.displayName,
       async () => {
-        await browser.runtime.sendMessage({ action: 'gaSetProperty', host: _gaHost, property: null });
+        await sendMessageWithTimeout({ action: 'gaSetProperty', host: _gaHost, property: null });
         renderGaPropertyOptions(allEl, res.properties, null, null, { detectedProperty: res.detectedProperty, detectedId: res.detectedId });
       }, sel.property.replace('properties/', '#'));
     return;
@@ -613,7 +613,7 @@ document.getElementById('btn-ga-connect').addEventListener('click', async () => 
   btn.disabled = true;
   btn.textContent = 'Connecting…';
   try {
-    const result = await browser.runtime.sendMessage({ action: 'gaConnect' });
+    const result = await sendMessageWithTimeout({ action: 'gaConnect' });
     if (result.error) {
       if (result.error !== 'FLOW_CANCELLED') {
         errorEl.textContent = gscConnectErrorMessage(result.error);
@@ -631,7 +631,7 @@ document.getElementById('btn-ga-connect').addEventListener('click', async () => 
 // The "Connected" chip doubles as the disconnect control (hover → red Disconnect)
 document.getElementById('ga-status-badge').addEventListener('click', async (e) => {
   if (!e.currentTarget.classList.contains('gsc-status-badge--connected')) return;
-  await browser.runtime.sendMessage({ action: 'gaDisconnect' });
+  await sendMessageWithTimeout({ action: 'gaDisconnect' });
   await refreshGaSettingsStatus();
 });
 

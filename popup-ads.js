@@ -112,7 +112,7 @@ async function ensureAdsKeywordSet(onReady) {
   _adsKeywordLoading = true;
   try {
     const tab = await getActiveTab();
-    const res = await browser.runtime.sendMessage({ action: 'adsGetPageData', pageUrl: tab.url, range: adsSelectedRange });
+    const res = await sendMessageWithTimeout({ action: 'adsGetPageData', pageUrl: tab.url, range: adsSelectedRange });
     const set = new Set();
     if (res && res.keywords) res.keywords.forEach(k => { if (k.text) set.add(k.text.toLowerCase().trim()); });
     _adsKeywordSet = set;
@@ -521,7 +521,7 @@ async function requestMoreAdsSearchTerms(btn) {
   btn.textContent = 'Loading…';
   try {
     const tab = await getActiveTab();
-    const res = await browser.runtime.sendMessage({ action: 'adsGetMoreSearchTerms', pageUrl: tab.url, range: adsSelectedRange });
+    const res = await sendMessageWithTimeout({ action: 'adsGetMoreSearchTerms', pageUrl: tab.url, range: adsSelectedRange });
     if (res && res.searchTerms) {
       _adsData.searchTerms = res.searchTerms;
       _adsData.searchTermsLimited = res.searchTermsLimited;
@@ -625,7 +625,7 @@ async function refreshAdsChart() {
       : { type: 'searchTerm', text: f.text };
     try {
       const tab = await getActiveTab();
-      const res = await browser.runtime.sendMessage({ action: 'adsGetChartData', pageUrl: tab.url, range: adsSelectedRange, scope });
+      const res = await sendMessageWithTimeout({ action: 'adsGetChartData', pageUrl: tab.url, range: adsSelectedRange, scope });
       if (res && res.timeseries) { ts = res.timeseries; totals = res.totals; prev = null; }
     } catch { /* fall through to the default below */ }
     if (!ts) { ts = _adsData.timeseries || []; totals = _adsData.totals; prev = _adsData.previousTotals; }
@@ -893,7 +893,7 @@ function renderAdsPanel(response) {
 async function loadAdsData(forceRefresh = false) {
   const tab = await getActiveTab();
   try { _adsHost = new URL(tab.url).hostname.replace(/^www\./, '').toLowerCase(); } catch { _adsHost = null; }
-  const response = await browser.runtime.sendMessage({ action: 'adsGetPageData', pageUrl: tab.url, range: adsSelectedRange, forceRefresh });
+  const response = await sendMessageWithTimeout({ action: 'adsGetPageData', pageUrl: tab.url, range: adsSelectedRange, forceRefresh });
   renderAdsPanel(response);
 }
 
@@ -930,7 +930,7 @@ function renderAdsAccountOptions(container, accounts, selected, onSelect) {
       opt.addEventListener('click', async () => {
         container.querySelectorAll('.gsc-property-option').forEach(el =>
           el.classList.toggle('gsc-property-option--active', el === opt));
-        await browser.runtime.sendMessage({ action: 'adsSetAccount', host: _adsHost, account: acc.id });
+        await sendMessageWithTimeout({ action: 'adsSetAccount', host: _adsHost, account: acc.id });
         if (onSelect) onSelect();
       });
       container.appendChild(opt);
@@ -948,7 +948,7 @@ async function loadAdsAccountPicker(container, emptyEl, _unusedSearch, onSelect)
   container.replaceChildren();
   if (emptyEl) emptyEl.classList.add('hidden');
   const tab = await getActiveTab();
-  const res = await browser.runtime.sendMessage({ action: 'adsResolveAccount', pageUrl: tab.url });
+  const res = await sendMessageWithTimeout({ action: 'adsResolveAccount', pageUrl: tab.url });
   if (!res || !res.connected) return;
   if (res.error) {
     if (emptyEl) { emptyEl.textContent = adsErrorMessage(res.error, res.detail); emptyEl.classList.remove('hidden'); }
@@ -965,7 +965,7 @@ async function loadAdsAccountPicker(container, emptyEl, _unusedSearch, onSelect)
 // ─── Settings ────────────────────────────────────────────────────────────────
 
 async function refreshAdsSettingsStatus() {
-  const status = await browser.runtime.sendMessage({ action: 'adsGetStatus' });
+  const status = await sendMessageWithTimeout({ action: 'adsGetStatus' });
   const badge   = document.getElementById('ads-status-badge');
   const setup   = document.getElementById('ads-setup-form');
   const info    = document.getElementById('ads-connected-info');
@@ -999,7 +999,7 @@ async function refreshAdsAccountInfo() {
   allEl.replaceChildren();
 
   const tab = await getActiveTab();
-  const res = await browser.runtime.sendMessage({ action: 'adsResolveAccount', pageUrl: tab.url });
+  const res = await sendMessageWithTimeout({ action: 'adsResolveAccount', pageUrl: tab.url });
   if (!res || !res.connected) return;
   if (res.error) {
     matchEl.textContent = res.error === 'NO_DEV_TOKEN' ? 'Add a developer token above to list accounts' : adsErrorMessage(res.error, res.detail);
@@ -1017,7 +1017,7 @@ async function refreshAdsAccountInfo() {
   if (sel) {
     renderSelectedRow(allEl, sel.name,
       async () => {
-        await browser.runtime.sendMessage({ action: 'adsSetAccount', host: _adsHost, account: null });
+        await sendMessageWithTimeout({ action: 'adsSetAccount', host: _adsHost, account: null });
         renderAdsAccountOptions(allEl, res.accounts, null, null);
       }, formatAdsId(sel.id));
     return;
@@ -1031,7 +1031,7 @@ document.getElementById('btn-ads-connect').addEventListener('click', async () =>
   errorEl.classList.add('hidden');
   btn.disabled = true; btn.textContent = 'Connecting…';
   try {
-    const result = await browser.runtime.sendMessage({ action: 'adsConnect' });
+    const result = await sendMessageWithTimeout({ action: 'adsConnect' });
     if (result.error) {
       if (result.error !== 'FLOW_CANCELLED') {
         errorEl.textContent = gscConnectErrorMessage(result.error);
@@ -1048,7 +1048,7 @@ document.getElementById('btn-ads-connect').addEventListener('click', async () =>
 // The "Connected" chip doubles as the disconnect control (hover → red Disconnect)
 document.getElementById('ads-status-badge').addEventListener('click', async (e) => {
   if (!e.currentTarget.classList.contains('gsc-status-badge--connected')) return;
-  await browser.runtime.sendMessage({ action: 'adsDisconnect' });
+  await sendMessageWithTimeout({ action: 'adsDisconnect' });
   setAdsTokenState(false);   // return the token field to its editable state
   await refreshAdsSettingsStatus();
 });
@@ -1255,7 +1255,7 @@ async function regenerateAdCopyLine(asset, index, input, count, btn) {
     });
 
     const system = buildAdLineSystem(asset, _adCopyInsights, _adCopyBrandTerms, existing);
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const data = await claudeFetch({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1270,9 +1270,6 @@ async function regenerateAdCopyLine(asset, index, input, count, btn) {
         messages: [{ role: 'user', content: _adCopyContext || 'No additional context available.' }]
       })
     });
-    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error?.message ?? `HTTP ${res.status}`); }
-
-    const data = await res.json();
     let out = sanitizeAdText((data.content?.[0]?.text ?? '').trim().replace(/^["']|["']$/g, ''));
     if (!out) throw new Error('empty');
     if (out.length > asset.max) out = adcopyHardTrim(out, asset.max);
@@ -1313,7 +1310,7 @@ async function enforceAdCopyLimits(claudeApiKey, parsed) {
   try {
     const system = 'Rewrite each ad asset to fit within its character limit while keeping its meaning, intent, and tone. Never use em dashes, en dashes, or exclamation marks. Return ONLY a JSON array of the rewritten strings, in the same order, no prose.';
     const content = over.map((o, n) => `${n}. (max ${o.max} characters) ${o.text}`).join('\n');
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const data = await claudeFetch({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1323,19 +1320,16 @@ async function enforceAdCopyLimits(claudeApiKey, parsed) {
       },
       body: JSON.stringify({ model: MODEL_MID, max_tokens: 600, system, messages: [{ role: 'user', content }] })
     });
-    if (res.ok) {
-      const data = await res.json();
-      let raw = (data.content?.[0]?.text ?? '').trim().replace(/```json/gi, '').replace(/```/g, '').trim();
-      const s = raw.indexOf('['), e = raw.lastIndexOf(']');
-      if (s !== -1 && e > s) raw = raw.slice(s, e + 1);
-      const arr = JSON.parse(raw);
-      over.forEach((o, n) => {
-        let fixed = sanitizeAdText(arr[n]);
-        if (!fixed || fixed.length > o.max) fixed = adcopyHardTrim(fixed || o.text, o.max);
-        parsed[o.key][o.i] = fixed;
-      });
-      return parsed;
-    }
+    let raw = (data.content?.[0]?.text ?? '').trim().replace(/```json/gi, '').replace(/```/g, '').trim();
+    const s = raw.indexOf('['), e = raw.lastIndexOf(']');
+    if (s !== -1 && e > s) raw = raw.slice(s, e + 1);
+    const arr = JSON.parse(raw);
+    over.forEach((o, n) => {
+      let fixed = sanitizeAdText(arr[n]);
+      if (!fixed || fixed.length > o.max) fixed = adcopyHardTrim(fixed || o.text, o.max);
+      parsed[o.key][o.i] = fixed;
+    });
+    return parsed;
   } catch { /* fall through to deterministic trim */ }
 
   over.forEach(o => { parsed[o.key][o.i] = adcopyHardTrim(o.text, o.max); });
@@ -1523,7 +1517,7 @@ async function buildAdCopyGrounding() {
   // Tracked keywords for this domain's Web CEO project
   let trackedKeywords = [];
   try {
-    const res = await browser.runtime.sendMessage({ action: 'webceoGetTrackedKeywords', pageUrl: tab.url });
+    const res = await sendMessageWithTimeout({ action: 'webceoGetTrackedKeywords', pageUrl: tab.url });
     trackedKeywords = (res && res.keywords || []).map(k => String(k).trim()).filter(Boolean).slice(0, 15);
   } catch { /* best-effort */ }
 
@@ -1584,7 +1578,7 @@ async function generateAdCopy(force) {
     const systemBlocks = [{ type: 'text', text: AD_COPY_SYSTEM_BASE, cache_control: { type: 'ephemeral' } }];
     if (systemDynamic) systemBlocks.push({ type: 'text', text: systemDynamic });
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const data = await claudeFetch({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1599,13 +1593,6 @@ async function generateAdCopy(force) {
         messages: [{ role: 'user', content: context }]
       })
     });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error?.message ?? `HTTP ${res.status}`);
-    }
-
-    const data = await res.json();
     // Robust JSON extraction: strip code fences, then take the outermost {…}.
     let raw = (data.content?.[0]?.text ?? '').trim();
     raw = raw.replace(/```json/gi, '').replace(/```/g, '').trim();
@@ -1882,7 +1869,7 @@ async function generateNegatives(force) {
     // Negatives live in the long tail — pull the full search-term list first.
     if (_adsData.searchTermsLimited) {
       try {
-        const more = await browser.runtime.sendMessage({ action: 'adsGetMoreSearchTerms', pageUrl: tab.url, range: adsSelectedRange });
+        const more = await sendMessageWithTimeout({ action: 'adsGetMoreSearchTerms', pageUrl: tab.url, range: adsSelectedRange });
         if (more && more.searchTerms) { _adsData.searchTerms = more.searchTerms; _adsData.searchTermsLimited = more.searchTermsLimited; }
       } catch { /* best effort — analyze what we have */ }
     }
@@ -1959,7 +1946,7 @@ async function generateNegatives(force) {
     const negSystemBlocks = [{ type: 'text', text: NEGATIVES_SYSTEM_BASE, cache_control: { type: 'ephemeral' } }];
     if (negSystemDynamic) negSystemBlocks.push({ type: 'text', text: negSystemDynamic });
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const data = await claudeFetch({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1974,9 +1961,6 @@ async function generateNegatives(force) {
         messages: [{ role: 'user', content: context }]
       })
     });
-    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error?.message ?? `HTTP ${res.status}`); }
-
-    const data = await res.json();
     const parsed = parseNegativesJson(data.content?.[0]?.text ?? '');
     if (!parsed) throw new Error('Could not parse the analysis response');
 
@@ -2012,7 +1996,7 @@ async function generateNegatives(force) {
     const campIds = [...new Set(recs.map(r => r.campaignId).filter(Boolean))];
     if (campIds.length) {
       try {
-        const lr = await browser.runtime.sendMessage({ action: 'adsGetCampaignNegLists', pageUrl: tab.url, campaignIds: campIds });
+        const lr = await sendMessageWithTimeout({ action: 'adsGetCampaignNegLists', pageUrl: tab.url, campaignIds: campIds });
         if (lr && lr.byCampaign) _negCampaignLists = lr.byCampaign;
       } catch { /* best effort — default to creating a new list */ }
     }
@@ -2295,7 +2279,7 @@ async function commitNegatives(btn) {
         : { ...c, createNew: true, listName: `Campaign - ${c.campaignName || 'Campaign'}` };
     });
 
-    const res = await browser.runtime.sendMessage({ action: 'adsAddNegatives', pageUrl: tab.url, campaigns });
+    const res = await sendMessageWithTimeout({ action: 'adsAddNegatives', pageUrl: tab.url, campaigns });
     if (!res || res.connected === false) {
       throw new Error(res?.reauthRequired ? 'Google Ads connection expired — reconnect in Settings.' : 'Not connected to Google Ads.');
     }
@@ -2423,11 +2407,11 @@ async function exportNegativesToDoc(btn, lists) {
   btn.textContent = 'Creating…';
 
   async function attempt() {
-    return browser.runtime.sendMessage({ action: 'docsExportNegatives', lists: useLists, pageUrl });
+    return sendMessageWithTimeout({ action: 'docsExportNegatives', lists: useLists, pageUrl });
   }
   let res = await attempt();
   if (res && res.notConnected) {
-    const auth = await browser.runtime.sendMessage({ action: 'docsConnect' });
+    const auth = await sendMessageWithTimeout({ action: 'docsConnect' });
     if (!auth || auth.error) { btn.disabled = false; btn.textContent = orig; btn.title = 'Google Docs auth failed — try again'; return; }
     res = await attempt();
   }
@@ -2521,7 +2505,7 @@ async function renderAdGroupDetail() {
 
   try {
     const tab = await getActiveTab();
-    const res = await browser.runtime.sendMessage({ action: 'adsGetAdsDetail', pageUrl: tab.url, adIds: ads.map(a => a.adId) });
+    const res = await sendMessageWithTimeout({ action: 'adsGetAdsDetail', pageUrl: tab.url, adIds: ads.map(a => a.adId) });
     if (!res || res.error) throw new Error(adsErrorMessage(res?.error || 'API_ERROR', res?.detail));
     if (_adGroupDrillId == null) return;   // panel closed mid-load
     body.replaceChildren();
@@ -2787,7 +2771,7 @@ async function generateOneAdLine(asset, existing) {
   if (!claudeApiKey) throw new Error('No Claude API key — add one in Settings (⚙).');
   const { context, insights, brandTerms } = await buildAdCopyGrounding();
   const system = buildAdLineSystem(asset, insights, brandTerms, existing);
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const data = await claudeFetch({
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -2802,8 +2786,6 @@ async function generateOneAdLine(asset, existing) {
       messages: [{ role: 'user', content: context }]
     })
   });
-  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error?.message ?? `HTTP ${res.status}`); }
-  const data = await res.json();
   let out = sanitizeAdText((data.content?.[0]?.text ?? '').trim().replace(/^["']|["']$/g, ''));
   if (!out) throw new Error('empty');
   if (out.length > asset.max) out = adcopyHardTrim(out, asset.max);

@@ -75,7 +75,7 @@ async function generateField(field) {
 - Target length: ${ranges.min}-${ranges.max} characters, ideally close to ${ranges.target} characters.
 - Return only the ${fieldLabel} text, nothing else — no quotes, no labels, no explanation.${intentLine}${sentimentLine}${keywordLine}`;
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const data = await claudeFetch({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -91,12 +91,6 @@ async function generateField(field) {
       })
     });
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error?.message ?? `HTTP ${res.status}`);
-    }
-
-    const data = await res.json();
     const suggestion = data.content?.[0]?.text?.trim();
     if (!suggestion) throw new Error('Empty response from Claude');
 
@@ -277,7 +271,7 @@ async function generateOGField(key, bodyEl, btn) {
 
     const system = buildOGSystemPrompt(key, cfg, insights, brandTerms);
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await claudeFetch({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -293,12 +287,6 @@ async function generateOGField(key, bodyEl, btn) {
       })
     });
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error?.message ?? `HTTP ${res.status}`);
-    }
-
-    const resp = await res.json();
     const suggestion = (resp.content?.[0]?.text ?? '').trim();
     if (!suggestion) throw new Error('Empty response from Claude');
 
@@ -494,7 +482,7 @@ async function loadAiInsights(forceRefresh = false) {
   ].filter(Boolean).join('\n\n');
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const data = await claudeFetch({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -509,11 +497,6 @@ async function loadAiInsights(forceRefresh = false) {
         messages: [{ role: 'user', content }]
       })
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error?.message ?? `HTTP ${res.status}`);
-    }
-    const data = await res.json();
     const text = (data.content?.[0]?.text ?? '').replace(/^```(?:json)?|```$/g, '').trim();
     const values = normalizeAiInsights(JSON.parse(text));
     if (!values) throw new Error('Unexpected labels in response');

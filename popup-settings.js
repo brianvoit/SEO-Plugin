@@ -17,7 +17,7 @@ document.querySelectorAll('#display-mode-group .mode-option').forEach(btn => {
       // Pop Out: open (or focus) the window right away so the choice is visible.
       // The toolbar icon reopens it afterwards. Skip if we're already inside it.
       if (mode === 'window' && !document.body.classList.contains('embed-window')) {
-        browser.runtime.sendMessage({ action: 'openPopout' }).catch(() => {});
+        sendMessageWithTimeout({ action: 'openPopout' }).catch(() => {});
       }
     });
   });

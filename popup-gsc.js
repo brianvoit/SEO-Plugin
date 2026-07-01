@@ -593,7 +593,7 @@ function gscVisibleCount() {
 // Fetch the next page of queries and append (dedup by query); returns # added
 async function fetchMoreGscQueries() {
   if (_gscQueriesExhausted || !_gscPageUrl) return 0;
-  const res = await browser.runtime.sendMessage({
+  const res = await sendMessageWithTimeout({
     action: 'gscGetMoreQueries', pageUrl: _gscPageUrl, range: gscSelectedRange, startRow: _gscQueries.length
   });
   if (!res || !res.connected || res.error) return 0;
@@ -623,7 +623,7 @@ async function refreshGscChartForBranded() {
   if (_gscSelectedQuery) return;
   const pattern = gscBrandedPattern();
   if (gscHideBranded && pattern) {
-    const res = await browser.runtime.sendMessage({
+    const res = await sendMessageWithTimeout({
       action: 'gscGetChartData', pageUrl: _gscPageUrl, range: gscSelectedRange, excludeRegex: pattern
     });
     if (res && res.connected && !res.error) {
@@ -719,7 +719,7 @@ function hideGscQueryFilterBar() {
 
 async function applyGscQueryFilter(query) {
   showGscQueryFilterBar(query);
-  const response = await browser.runtime.sendMessage({ action: 'gscGetQueryData', pageUrl: _gscPageUrl, range: gscSelectedRange, query });
+  const response = await sendMessageWithTimeout({ action: 'gscGetQueryData', pageUrl: _gscPageUrl, range: gscSelectedRange, query });
   if (_gscSelectedQuery !== query) return;
   if (!response.connected || response.error) return;
   renderGscCharts(response.timeseries, response.totals, response.previousTotals, gscSelectedRange);
@@ -735,7 +735,7 @@ async function applyGscIntentChartFilter(intent) {
     .filter(q => intentOf(q.query) === intent)
     .map(q => q.query);
   if (!list.length) return;
-  const res = await browser.runtime.sendMessage({ action: 'gscGetQueriesData', pageUrl: _gscPageUrl, range: gscSelectedRange, queries: list });
+  const res = await sendMessageWithTimeout({ action: 'gscGetQueriesData', pageUrl: _gscPageUrl, range: gscSelectedRange, queries: list });
   // Bail if the user moved on (cleared the intent or picked a single query) mid-fetch
   if (_gscIntentFilter !== intent || _gscSelectedQuery) return;
   if (!res || !res.connected || res.error) return;
@@ -923,7 +923,7 @@ async function loadGscData(forceRefresh = false) {
     if (data?.canonical) pageUrl = data.canonical;
   } catch { /* fall back to tab.url */ }
 
-  const response = await browser.runtime.sendMessage({ action: 'gscGetPageData', pageUrl, range: gscSelectedRange, forceRefresh });
+  const response = await sendMessageWithTimeout({ action: 'gscGetPageData', pageUrl, range: gscSelectedRange, forceRefresh });
   renderGscPanel(response, pageUrl);
 }
 
@@ -1005,7 +1005,7 @@ document.querySelectorAll('#gsc-metric-toggles .gsc-metric-toggle').forEach(btn 
 // ─── Google Search Console: settings connection ──────────────────────────────
 
 async function refreshGscSettingsStatus() {
-  const status = await browser.runtime.sendMessage({ action: 'gscGetStatus' });
+  const status = await sendMessageWithTimeout({ action: 'gscGetStatus' });
   document.getElementById('gsc-redirect-uri').value = status.redirectUri;
 
   const badge         = document.getElementById('gsc-status-badge');
@@ -1054,7 +1054,7 @@ async function refreshGscPropertyInfo() {
     if (data?.canonical) pageUrl = data.canonical;
   } catch { /* fall back to tab.url */ }
 
-  const res = await browser.runtime.sendMessage({ action: 'gscResolveProperty', pageUrl });
+  const res = await sendMessageWithTimeout({ action: 'gscResolveProperty', pageUrl });
   if (!res || !res.connected) {
     matchEl.textContent = 'Not connected';
     matchEl.className = 'gsc-property-match gsc-property-match--none';
@@ -1097,7 +1097,7 @@ async function refreshGscPropertyInfo() {
       row.className = 'gsc-property-row';
       row.appendChild(opt);
       row.appendChild(propertyTrashButton('Unlink this domain from this property', async () => {
-        await browser.runtime.sendMessage({ action: 'gscSetProperty', host: _gscPropHost, siteUrl: null });
+        await sendMessageWithTimeout({ action: 'gscSetProperty', host: _gscPropHost, siteUrl: null });
         refreshGscPropertyInfo();
       }));
       allEl.appendChild(row);
@@ -1112,7 +1112,7 @@ async function selectGscProperty(siteUrl) {
   document.querySelectorAll('#gsc-property-all .gsc-property-option').forEach(el => {
     el.classList.toggle('gsc-property-option--active', el.dataset.site === siteUrl);
   });
-  await browser.runtime.sendMessage({ action: 'gscSetProperty', host: _gscPropHost, siteUrl });
+  await sendMessageWithTimeout({ action: 'gscSetProperty', host: _gscPropHost, siteUrl });
 }
 
 document.getElementById('btn-copy-redirect-uri').addEventListener('click', async (e) => {
@@ -1139,7 +1139,7 @@ document.getElementById('btn-gsc-connect').addEventListener('click', async () =>
   btn.disabled = true;
   btn.textContent = 'Connecting…';
   try {
-    const result = await browser.runtime.sendMessage({ action: 'gscConnect' });
+    const result = await sendMessageWithTimeout({ action: 'gscConnect' });
     if (result.error) {
       if (result.error !== 'FLOW_CANCELLED') {
         errorEl.textContent = gscConnectErrorMessage(result.error);
@@ -1157,7 +1157,7 @@ document.getElementById('btn-gsc-connect').addEventListener('click', async () =>
 // The "Connected" chip doubles as the disconnect control (hover → red Disconnect)
 document.getElementById('gsc-status-badge').addEventListener('click', async (e) => {
   if (!e.currentTarget.classList.contains('gsc-status-badge--connected')) return;
-  await browser.runtime.sendMessage({ action: 'gscDisconnect' });
+  await sendMessageWithTimeout({ action: 'gscDisconnect' });
   await refreshGscSettingsStatus();
 });
 

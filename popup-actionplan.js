@@ -25,7 +25,7 @@ let _actionPlanError = '';
 // ─── Data gathering (best-effort; any source may be absent) ───────────────────
 
 async function gatherActionPlanData(tab) {
-  const send = (msg) => browser.runtime.sendMessage(msg).catch(() => null);
+  const send = (msg) => sendMessageWithTimeout(msg).catch(() => null);
   const measurementId = (typeof gaDetectedId === 'function') ? gaDetectedId() : undefined;
 
   const [gsc, ads, webceo, tracked, ga] = await Promise.all([
@@ -416,7 +416,7 @@ async function loadActionPlan(forceRefresh = false) {
     const sources = actionPlanSources(gathered);
     const context = actionPlanContext(gathered);
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const data = await claudeFetch({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -431,11 +431,6 @@ async function loadActionPlan(forceRefresh = false) {
         messages: [{ role: 'user', content: context }]
       })
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error?.message ?? `HTTP ${res.status}`);
-    }
-    const data = await res.json();
     const plan = normalizeActionPlan(actionPlanParse(data.content?.[0]?.text));
     if (!plan) throw new Error('Could not parse a plan from the response.');
 
@@ -802,7 +797,7 @@ async function exportToGoogleDocs(btn) {
   btn.title = 'Creating Google Doc…';
 
   async function attempt() {
-    return browser.runtime.sendMessage({
+    return sendMessageWithTimeout({
       action: 'docsExportActionPlan',
       plan: _actionPlan,
       pageUrl,
@@ -813,7 +808,7 @@ async function exportToGoogleDocs(btn) {
   let res = await attempt();
 
   if (res && res.notConnected) {
-    const auth = await browser.runtime.sendMessage({ action: 'docsConnect' });
+    const auth = await sendMessageWithTimeout({ action: 'docsConnect' });
     if (!auth || auth.error) {
       btn.disabled = false;
       btn.title = 'Google Docs auth failed — try again';

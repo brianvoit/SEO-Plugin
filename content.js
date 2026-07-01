@@ -120,6 +120,27 @@ function getHreflang() {
   return { tags, pageLanguage };
 }
 
+function getFavicon() {
+  const icons = [];
+  document.querySelectorAll(
+    'link[rel~="icon"], link[rel="apple-touch-icon"], link[rel="apple-touch-icon-precomposed"], link[rel="mask-icon"]'
+  ).forEach(el => {
+    const rel   = (el.getAttribute('rel')   || '').trim().toLowerCase();
+    const href  = el.href || '';                                // resolved absolute
+    const type  = (el.getAttribute('type')  || '').trim().toLowerCase();
+    const sizes = (el.getAttribute('sizes') || '').trim().toLowerCase();
+    if (href) icons.push({ rel, href, type, sizes });
+  });
+  const manEl = document.querySelector('link[rel="manifest"]');
+  let origin = '';
+  try { origin = new URL(document.baseURI).origin; } catch { /* ignore */ }
+  return {
+    icons,
+    manifestHref: manEl ? (manEl.href || null) : null,
+    defaultIcoUrl: origin ? origin + '/favicon.ico' : null      // legacy fallback probe
+  };
+}
+
 function getInternalLinks() {
   const seen = new Set();
   const links = [];
@@ -221,6 +242,7 @@ function getPageData() {
     gaMeasurementIds: getGaMeasurementIds(),
     hreflang:         hl.tags,
     pageLanguage:     hl.pageLanguage,
+    favicon:          getFavicon(),
     internalLinks:    getInternalLinks(),
     externalLinkCount: getExternalLinkCount()
   };

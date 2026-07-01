@@ -522,12 +522,14 @@ async function refreshGaSettingsStatus() {
     badge.className = 'gsc-status-badge gsc-status-badge--connected';
     setupForm.classList.add('hidden');
     connectedInfo.classList.remove('hidden');
+    setAccountEmail('ga-account-email', status.email);
     refreshGaPropertyInfo();
   } else {
     badge.textContent = 'Not connected';
     badge.className = 'gsc-status-badge gsc-status-badge--disconnected';
     setupForm.classList.remove('hidden');
     connectedInfo.classList.add('hidden');
+    setAccountEmail('ga-account-email', null);
   }
   return status;
 }

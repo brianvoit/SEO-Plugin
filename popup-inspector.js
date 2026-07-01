@@ -738,6 +738,302 @@ function renderHreflangDetail() {
   content.appendChild(checkSec);
 }
 
+// ─── Render: favicon ─────────────────────────────────────────────────────────
+
+// Live reachability results for the current favicon set, cached so re-opening
+// the panel doesn't re-probe. Keyed by a signature of the declared icon URLs.
+let _faviconLive = null;      // { results: { url: {ok,status,contentType,isImage} }, manifest }
+let _faviconLiveSig = null;
+let _faviconLoading = false;
+
+function faviconSignature(fav) {
+  if (!fav) return '';
+  return JSON.stringify([(fav.icons || []).map(i => i.href), fav.manifestHref, fav.defaultIcoUrl]);
+}
+
+function faviconIsStandard(i) { return (i.rel || '').split(/\s+/).includes('icon'); }
+function faviconIsApple(i)    { return /apple-touch-icon/.test(i.rel || ''); }
+function faviconIsMask(i)     { return (i.rel || '').split(/\s+/).includes('mask-icon'); }
+function faviconIsSvg(i) {
+  if (i.type === 'image/svg+xml') return true;
+  if (faviconIsMask(i)) return true;   // mask-icon is always SVG
+  try { return new URL(i.href).pathname.toLowerCase().endsWith('.svg'); }
+  catch { return /\.svg(\?|$)/i.test(i.href || ''); }
+}
+function faviconSizeTokens(i) { return (i.sizes || '').split(/\s+/).filter(Boolean); }
+
+// Distinct raster (non-scalable) sizes declared across standard icons.
+function faviconRasterSizes(icons) {
+  const set = new Set();
+  icons.filter(faviconIsStandard).forEach(i => faviconSizeTokens(i).forEach(s => { if (s !== 'any') set.add(s); }));
+  return set;
+}
+
+// Overview status dot: green = standard + apple + (svg or >=2 raster sizes);
+// amber = something present but incomplete; red = nothing declared.
+function faviconStaticLevel(fav) {
+  const icons = (fav && fav.icons) || [];
+  if (!icons.length && !(fav && fav.manifestHref)) return 'error';
+  const hasStd   = icons.some(faviconIsStandard);
+  const hasApple = icons.some(faviconIsApple);
+  const hasSvg   = icons.some(faviconIsSvg);
+  if (hasStd && hasApple && (hasSvg || faviconRasterSizes(icons).size >= 2)) return 'ok';
+  if (hasStd || hasApple || hasSvg || (fav && fav.manifestHref)) return 'warning';
+  return 'error';
+}
+
+function renderFavicon(data) {
+  const fav = data.favicon || null;
+  const btn = document.getElementById('btn-favicon');
+  const summary = document.getElementById('favicon-summary');
+  const icons = (fav && fav.icons) || [];
+
+  // The panel is useful even when nothing is declared (checklist + /favicon.ico
+  // probe + torch), so keep it openable whenever we have a favicon object.
+  btn.disabled = !fav;
+
+  if (!fav || (!icons.length && !fav.manifestHref)) {
+    summary.textContent = 'Missing';
+    setNavStatus('favicon-status', 'error');
+    return;
+  }
+  summary.textContent = icons.length ? `${icons.length} icon${icons.length !== 1 ? 's' : ''}` : 'Manifest only';
+  setNavStatus('favicon-status', faviconStaticLevel(fav));
+}
+
+// Human-readable actual pixel size of a probed icon (null until the live check
+// resolves, or if it couldn't be measured).
+function faviconActualSize(live, href) {
+  const r = live && live.results ? live.results[href] : null;
+  if (!r) return null;
+  if (r.width && r.height) return r.scalable ? `${r.width}×${r.height} (SVG)` : `${r.width}×${r.height}`;
+  if (r.scalable) return 'Scalable (SVG)';
+  return null;
+}
+
+// Per-declared-icon live status chip (pending until the reachability check
+// resolves).
+function faviconIconChip(live, href) {
+  const chip = document.createElement('span');
+  const r = live && live.results ? live.results[href] : null;
+  if (!r) { chip.className = 'hl-chip hl-chip--pending'; chip.textContent = '…'; return chip; }
+  if (r.ok && r.isImage) { chip.className = 'hl-chip hl-chip--ok'; chip.textContent = '✓'; chip.title = `${r.status} · ${r.contentType}`; return chip; }
+  if (r.ok && !r.isImage) { chip.className = 'hl-chip hl-chip--warn'; chip.textContent = '!'; chip.title = `Loads but content-type is "${r.contentType || 'unknown'}", not an image`; return chip; }
+  chip.className = 'hl-chip hl-chip--err'; chip.textContent = '✗'; chip.title = r.status ? `HTTP ${r.status}` : 'Failed to load';
+  return chip;
+}
+
+// Validation checklist rows: { label, level: 'pass'|'warn'|'fail' }.
+function buildFaviconChecks(fav, live) {
+  const icons = (fav && fav.icons) || [];
+  const checks = [];
+  const std = icons.filter(faviconIsStandard);
+  const apple = icons.filter(faviconIsApple);
+  const raster = faviconRasterSizes(icons);
+  const icoLive = fav && fav.defaultIcoUrl && live && live.results ? live.results[fav.defaultIcoUrl] : null;
+
+  // 1. Standard favicon present (declared, or a working /favicon.ico)
+  const icoWorks = !!(icoLive && icoLive.ok && icoLive.isImage);
+  checks.push({
+    label: std.length ? 'Standard favicon declared (<link rel="icon">)'
+      : icoWorks ? 'No <link rel="icon">, but /favicon.ico loads'
+      : 'No standard favicon (<link rel="icon"> or /favicon.ico)',
+    level: std.length ? 'pass' : icoWorks ? 'warn' : 'fail'
+  });
+
+  // 2. Declared icon URLs actually load as images (live)
+  if (icons.length && live && live.results) {
+    const declared = icons.map(i => i.href);
+    const broken   = declared.filter(h => { const r = live.results[h]; return !r || !r.ok; });
+    const notImage = declared.filter(h => { const r = live.results[h]; return r && r.ok && !r.isImage; });
+    checks.push({
+      label: broken.length ? `${broken.length} declared icon${broken.length !== 1 ? 's' : ''} failed to load`
+        : notImage.length ? `${notImage.length} icon${notImage.length !== 1 ? 's' : ''} not served as an image`
+        : 'All declared icons return 200 and an image type',
+      level: broken.length ? 'fail' : notImage.length ? 'warn' : 'pass'
+    });
+  }
+
+  // 3. Scalable SVG icon (recommended, not required)
+  checks.push({
+    label: icons.some(faviconIsSvg) ? 'Scalable SVG icon present' : 'No scalable SVG icon (recommended)',
+    level: icons.some(faviconIsSvg) ? 'pass' : 'warn'
+  });
+
+  // 4. 16x16 and 32x32 declared
+  const has16 = raster.has('16x16'), has32 = raster.has('32x32');
+  checks.push({
+    label: has16 && has32 ? '16x16 and 32x32 sizes declared'
+      : raster.size ? 'Missing a recommended 16x16 or 32x32 size'
+      : 'No explicit raster sizes declared (16x16 / 32x32)',
+    level: has16 && has32 ? 'pass' : 'warn'
+  });
+
+  // 5. Apple touch icon 180x180 (iOS)
+  const apple180 = apple.some(i => faviconSizeTokens(i).includes('180x180'));
+  checks.push({
+    label: apple180 ? 'Apple touch icon 180x180 present'
+      : apple.length ? 'Apple touch icon present but not 180x180'
+      : 'No apple-touch-icon (iOS home screen)',
+    level: apple180 ? 'pass' : 'warn'
+  });
+
+  // 6. Web app manifest icons 192 + 512 (PWA)
+  if (fav && fav.manifestHref) {
+    const m = live && live.manifest;
+    const ok = !!(m && m.ok && m.has192 && m.has512);
+    checks.push({
+      label: ok ? 'Web app manifest has 192x192 and 512x512 icons'
+        : (m && m.ok) ? 'Web app manifest is missing a 192x192 or 512x512 icon'
+        : 'Web app manifest referenced but could not be read',
+      level: ok ? 'pass' : 'warn'
+    });
+  } else {
+    checks.push({ label: 'No web app manifest (optional, for PWA install)', level: 'warn' });
+  }
+
+  return checks;
+}
+
+function renderFaviconDetail() {
+  const content = document.getElementById('favicon-detail-content');
+  if (!content) return;
+  content.replaceChildren();
+
+  const fav   = (pageData && pageData.favicon) || null;
+  const icons = (fav && fav.icons) || [];
+  const sig   = faviconSignature(fav);
+  const live  = (fav && _faviconLiveSig === sig) ? _faviconLive : null;
+
+  // ── Declared icons ──
+  const tableSec = document.createElement('section');
+  tableSec.className = 'field-section';
+  const th = document.createElement('div');
+  th.className = 'field-header';
+  const tl = document.createElement('span');
+  tl.className = 'field-label';
+  tl.textContent = 'DECLARED ICONS';
+  th.appendChild(tl);
+  tableSec.appendChild(th);
+
+  if (!icons.length) {
+    const hint = document.createElement('div');
+    hint.className = 'field-hint hint-muted';
+    hint.textContent = 'No <link> icon tags on this page.';
+    tableSec.appendChild(hint);
+  } else {
+    icons.forEach(i => {
+      const row = document.createElement('div');
+      row.className = 'hl-row';
+
+      const tag = document.createElement('span');
+      tag.className = 'hl-lang';
+      tag.textContent = faviconSizeTokens(i)[0]
+        || (faviconIsApple(i) ? 'apple' : faviconIsMask(i) ? 'mask' : faviconIsSvg(i) ? 'svg' : 'icon');
+      tag.title = [i.rel, i.type, i.sizes].filter(Boolean).join(' · ');
+
+      const hrefEl = document.createElement('span');
+      hrefEl.className = 'hl-href favicon-href';
+      try { const u = new URL(i.href); hrefEl.textContent = u.pathname + (u.search || ''); }
+      catch { hrefEl.textContent = i.href || '(empty)'; }
+      const actual = faviconActualSize(live, i.href);
+      hrefEl.title = (actual ? `Actual size: ${actual}\n` : '') + 'Open in new tab: ' + i.href;
+      if (i.href) hrefEl.addEventListener('click', () => browser.tabs.create({ url: i.href }));
+      if (actual) tag.title = `${tag.title}\nActual size: ${actual}`;
+
+      row.append(tag, hrefEl, faviconIconChip(live, i.href));
+      tableSec.appendChild(row);
+    });
+  }
+  content.appendChild(tableSec);
+
+  // ── Validation checklist ──
+  const checkSec = document.createElement('section');
+  checkSec.className = 'field-section';
+  const ch = document.createElement('div');
+  ch.className = 'field-header';
+  const cl = document.createElement('span');
+  cl.className = 'field-label';
+  cl.textContent = 'VALIDATION';
+  ch.appendChild(cl);
+  checkSec.appendChild(ch);
+
+  buildFaviconChecks(fav, live).forEach(c => {
+    const row = document.createElement('div');
+    row.className = `hl-check hl-check--${c.level}`;
+    const icon = document.createElement('span');
+    icon.className = 'hl-check-icon';
+    icon.textContent = c.level === 'pass' ? '✓' : c.level === 'warn' ? '!' : '✗';
+    const label = document.createElement('span');
+    label.className = 'hl-check-label';
+    label.textContent = c.label;
+    row.append(icon, label);
+    checkSec.appendChild(row);
+  });
+  content.appendChild(checkSec);
+
+  // ── Torch button ──
+  const torchSec = document.createElement('section');
+  torchSec.className = 'field-section favicon-torch-row';
+  const torchBtn = document.createElement('button');
+  torchBtn.className = 'adcopy-launch-btn';
+  torchBtn.id = 'btn-favicon-torch';
+  torchBtn.textContent = 'Wipe Favicon Cache';
+  torchBtn.title = 'Force a fresh favicon for this site: replaces this site’s cached favicon copies, then hard-reloads the tab. Other sites are unaffected.';
+  torchBtn.addEventListener('click', () => torchFavicon(torchBtn));
+  torchSec.appendChild(torchBtn);
+  const torchHint = document.createElement('div');
+  torchHint.className = 'field-hint hint-muted';
+  torchHint.textContent = 'Re-fetches this site’s favicon files and hard-reloads the tab so the new one shows.';
+  torchSec.appendChild(torchHint);
+  content.appendChild(torchSec);
+
+  // Kick off the live reachability check once per favicon set.
+  if (fav && _faviconLiveSig !== sig && !_faviconLoading) faviconRunLiveCheck(fav, sig);
+}
+
+async function faviconRunLiveCheck(fav, sig) {
+  _faviconLoading = true;
+  try {
+    const res = await sendMessageWithTimeout({
+      action: 'validateFavicon',
+      icons: fav.icons, manifestHref: fav.manifestHref, defaultIcoUrl: fav.defaultIcoUrl
+    });
+    _faviconLive = res || null;
+  } catch {
+    _faviconLive = null;   // sig still set below → no refetch loop; checks fall back to static
+  } finally {
+    _faviconLiveSig = sig;
+    _faviconLoading = false;
+    const panel = document.getElementById('favicon-panel');
+    if (panel && !panel.classList.contains('hidden')) renderFaviconDetail();
+  }
+}
+
+async function torchFavicon(btn) {
+  const fav = (pageData && pageData.favicon) || null;
+  const urls = [];
+  if (fav) {
+    (fav.icons || []).forEach(i => { if (i.href) urls.push(i.href); });
+    if (fav.defaultIcoUrl) urls.push(fav.defaultIcoUrl);
+    if (_faviconLive && _faviconLive.manifest && Array.isArray(_faviconLive.manifest.icons)) {
+      _faviconLive.manifest.icons.forEach(ic => { if (ic.href) urls.push(ic.href); });
+    }
+    if (fav.manifestHref) urls.push(fav.manifestHref);
+  }
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Clearing — reloading…';
+  try {
+    const tab = await getActiveTab();
+    await sendMessageWithTimeout({ action: 'clearFaviconCache', tabId: tab && tab.id, urls });
+    _faviconLive = null; _faviconLiveSig = null;   // re-probe fresh copies on next open
+  } catch {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
 // ─── Render: structured data ─────────────────────────────────────────────────
 
 // Required vs recommended properties per Schema.org type, per Google's
@@ -1238,6 +1534,7 @@ function render(data, expandMeta = false) {
   renderOpenGraph(data);
   renderStructuredData(data);
   renderHreflang(data);
+  renderFavicon(data);
   renderDates(data);
   renderOverlayToggle(data.altOverlayActive);
 }

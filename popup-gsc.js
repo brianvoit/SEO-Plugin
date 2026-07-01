@@ -1018,6 +1018,7 @@ async function refreshGscSettingsStatus() {
     badge.className = 'gsc-status-badge gsc-status-badge--connected';
     setupForm.classList.add('hidden');
     connectedInfo.classList.remove('hidden');
+    setAccountEmail('gsc-account-email', status.email);
     if (status.connectedAt) {
       connectedTip.title = `Connected since ${formatDate(new Date(status.connectedAt))}`;
       connectedTip.classList.remove('hidden');
@@ -1030,6 +1031,7 @@ async function refreshGscSettingsStatus() {
     setupForm.classList.remove('hidden');
     connectedInfo.classList.add('hidden');
     connectedTip.classList.add('hidden');
+    setAccountEmail('gsc-account-email', null);
   }
 
   return status;

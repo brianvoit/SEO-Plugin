@@ -421,11 +421,54 @@ function getGoogleRedirectUri() {
   return `http://127.0.0.1/mozoauth2/${subdomain}`;
 }
 
+// Pull the account email out of an OpenID Connect id_token (a JWT). The middle
+// segment is a base64url-encoded JSON payload; we only read the "email" claim.
+function googleEmailFromIdToken(idToken) {
+  try {
+    let payload = String(idToken || '').split('.')[1];
+    if (!payload) return null;
+    payload = payload.replace(/-/g, '+').replace(/_/g, '/');
+    while (payload.length % 4) payload += '=';   // atob needs padding
+    const claims = JSON.parse(atob(payload));
+    return claims.email || null;
+  } catch { return null; }
+}
+
+// Backfill the account email for a grant that doesn't have one stored yet, by
+// asking Google's OpenID userinfo endpoint. Only works if the grant actually
+// includes the email scope (grants made before we requested it must reconnect).
+const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v3/userinfo';
+
+async function googleEnsureEmail(authKey) {
+  const stored = await browser.storage.local.get(authKey);
+  const auth = stored[authKey];
+  if (!auth) return null;
+  if (auth.email) return auth.email;
+
+  const tok = await googleGetAccessToken(authKey);
+  if (tok.error || !tok.accessToken) return null;
+  try {
+    const res = await fetch(GOOGLE_USERINFO_URL, { headers: { Authorization: `Bearer ${tok.accessToken}` } });
+    if (!res.ok) return null;
+    const info = await res.json();
+    if (info && info.email) {
+      await browser.storage.local.set({ [authKey]: { ...auth, email: info.email } });
+      return info.email;
+    }
+  } catch { /* offline or scope missing — reconnect will capture it */ }
+  return null;
+}
+
 async function googleOAuthConnect(scope, authKey) {
   const { gscClientId, gscClientSecret } = await browser.storage.local.get(['gscClientId', 'gscClientSecret']);
   if (!gscClientId) return { error: 'NO_CLIENT_ID' };
 
   const redirectUri = getGoogleRedirectUri();
+
+  // Request the OpenID email claim alongside the API scope so we can show which
+  // account each integration is connected to. Deduped in case a caller already
+  // includes them.
+  const fullScope = Array.from(new Set((scope + ' openid email').split(/\s+/).filter(Boolean))).join(' ');
 
   const codeVerifier = googleBase64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
   const challengeBytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codeVerifier)));
@@ -436,7 +479,7 @@ async function googleOAuthConnect(scope, authKey) {
   authUrl.searchParams.set('client_id', gscClientId);
   authUrl.searchParams.set('redirect_uri', redirectUri);
   authUrl.searchParams.set('response_type', 'code');
-  authUrl.searchParams.set('scope', scope);
+  authUrl.searchParams.set('scope', fullScope);
   authUrl.searchParams.set('code_challenge', codeChallenge);
   authUrl.searchParams.set('code_challenge_method', 'S256');
   authUrl.searchParams.set('access_type', 'offline');
@@ -478,6 +521,7 @@ async function googleOAuthConnect(scope, authKey) {
       refreshToken: tokenData.refresh_token,
       expiresAt: Date.now() + tokenData.expires_in * 1000,
       scope: tokenData.scope,
+      email: googleEmailFromIdToken(tokenData.id_token),
       connectedAt: Date.now()
     }
   });
@@ -544,7 +588,8 @@ async function gscGetStatus() {
   return {
     connected: !!gscAuth,
     redirectUri: getGoogleRedirectUri(),
-    connectedAt: gscAuth?.connectedAt ?? null
+    connectedAt: gscAuth?.connectedAt ?? null,
+    email: gscAuth ? await googleEnsureEmail('gscAuth') : null
   };
 }
 
@@ -1090,7 +1135,8 @@ async function gaGetStatus() {
   return {
     connected: !!gaAuth,
     redirectUri: getGoogleRedirectUri(),
-    connectedAt: gaAuth?.connectedAt ?? null
+    connectedAt: gaAuth?.connectedAt ?? null,
+    email: gaAuth ? await googleEnsureEmail('gaAuth') : null
   };
 }
 
@@ -1604,6 +1650,113 @@ async function dnsResolve({ host }) {
   return entry;
 }
 
+// ─── Favicon: live reachability check + site-scoped cache "torch" ─────────────
+
+const FAVICON_FETCH_TIMEOUT_MS = 8000;
+
+// Read the intrinsic width/height out of raw SVG markup (width/height attrs, or
+// the viewBox as a fallback). Returns null when the SVG is purely scalable.
+function faviconSvgDimensions(text) {
+  const tag = (text || '').match(/<svg[^>]*>/i);
+  if (!tag) return null;
+  const s = tag[0];
+  const w = s.match(/\bwidth\s*=\s*["']?\s*([\d.]+)/i);
+  const h = s.match(/\bheight\s*=\s*["']?\s*([\d.]+)/i);
+  if (w && h) return { width: Math.round(+w[1]), height: Math.round(+h[1]) };
+  const vb = s.match(/viewBox\s*=\s*["']\s*[\d.]+\s+[\d.]+\s+([\d.]+)\s+([\d.]+)/i);
+  if (vb) return { width: Math.round(+vb[1]), height: Math.round(+vb[2]) };
+  return null;
+}
+
+// Fetch one URL and report status, whether it's a real image, and the actual
+// pixel dimensions of the file. Never throws.
+async function faviconProbe(url) {
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), FAVICON_FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { method: 'GET', cache: 'no-store', credentials: 'omit', signal: abort.signal });
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    const isImage = /^\s*image\//.test(contentType);
+    const isSvg = /svg/.test(contentType) || /\.svg(\?|$)/i.test(url);
+    const out = { url, ok: res.ok, status: res.status, contentType, isImage, width: null, height: null, scalable: false };
+
+    if (res.ok) {
+      try {
+        if (isSvg) {
+          out.scalable = true;
+          const dims = faviconSvgDimensions(await res.text());
+          if (dims) { out.width = dims.width; out.height = dims.height; }
+        } else if (isImage) {
+          const bmp = await createImageBitmap(await res.blob());
+          out.width = bmp.width; out.height = bmp.height;
+          bmp.close();
+        }
+      } catch { /* measurement failed — status/type still reported */ }
+    }
+    return out;
+  } catch (err) {
+    return { url, ok: false, status: 0, contentType: '', isImage: false, width: null, height: null, scalable: false, error: String((err && err.message) || err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Live-check every declared icon URL (+ the legacy /favicon.ico) and parse the
+// web app manifest for its icon set. All best-effort; a failed fetch just
+// reports status 0.
+async function validateFavicon({ icons, manifestHref, defaultIcoUrl }) {
+  const urls = [];
+  (icons || []).forEach(i => { if (i && i.href && !urls.includes(i.href)) urls.push(i.href); });
+  if (defaultIcoUrl && !urls.includes(defaultIcoUrl)) urls.push(defaultIcoUrl);
+
+  const probes = await Promise.all(urls.map(u => faviconProbe(u)));
+  const results = {};
+  probes.forEach(p => { results[p.url] = p; });
+
+  let manifest = null;
+  if (manifestHref) {
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), FAVICON_FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(manifestHref, { cache: 'no-store', credentials: 'omit', signal: abort.signal });
+      if (res.ok) {
+        const m = await res.json();
+        const micons = (Array.isArray(m.icons) ? m.icons : []).map(ic => {
+          let href = '';
+          try { href = new URL(ic.src, manifestHref).href; } catch { href = ic.src || ''; }
+          const sizes = String(ic.sizes || '').trim().toLowerCase();
+          return { href, sizes, type: String(ic.type || '').trim().toLowerCase() };
+        });
+        const hasSize = (dim) => micons.some(ic => ic.sizes.split(/\s+/).includes(dim));
+        manifest = { ok: true, icons: micons, has192: hasSize('192x192'), has512: hasSize('512x512') };
+      } else {
+        manifest = { ok: false, icons: [], has192: false, has512: false, status: res.status };
+      }
+    } catch (err) {
+      manifest = { ok: false, icons: [], has192: false, has512: false, error: String((err && err.message) || err) };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  return { results, manifest };
+}
+
+// "Torch" this site's favicon: re-fetch each favicon URL with cache:'reload' so
+// the browser replaces exactly those HTTP-cache entries with fresh copies
+// (site-scoped — other sites are untouched), then hard-reload the tab bypassing
+// cache so Firefox re-requests and re-paints the new favicon. Uses only fetch +
+// tabs, so no browsingData permission is required.
+async function clearFaviconCache({ tabId, urls }) {
+  await Promise.all((urls || []).map(u =>
+    fetch(u, { cache: 'reload', credentials: 'omit' }).catch(() => {})
+  ));
+  if (tabId != null) {
+    try { await browser.tabs.reload(tabId, { bypassCache: true }); } catch { /* tab gone — ignore */ }
+  }
+  return { ok: true };
+}
+
 // ─── Google Ads (GAQL) ────────────────────────────────────────────────────────
 // Needs an OAuth grant (scope adwords), a developer token (from the Ads account
 // API Center, approved by Google for production data), and — for MCC setups —
@@ -1627,7 +1780,8 @@ async function adsGetStatus() {
     hasDevToken: !!adsDeveloperToken,
     managerId: adsManagerId || null,
     redirectUri: getGoogleRedirectUri(),
-    connectedAt: adsAuth?.connectedAt ?? null
+    connectedAt: adsAuth?.connectedAt ?? null,
+    email: adsAuth ? await googleEnsureEmail('adsAuth') : null
   };
 }
 
@@ -2665,6 +2819,20 @@ async function docsConnect() {
   return googleOAuthConnect(GOOGLE_DOCS_SCOPE, 'docsAuth');
 }
 
+async function docsGetStatus() {
+  const { docsAuth } = await browser.storage.local.get('docsAuth');
+  return {
+    connected: !!docsAuth,
+    redirectUri: getGoogleRedirectUri(),
+    connectedAt: docsAuth?.connectedAt ?? null,
+    email: docsAuth ? await googleEnsureEmail('docsAuth') : null
+  };
+}
+
+function docsDisconnect() {
+  return googleDisconnect('docsAuth', ['docsFolderID']);
+}
+
 async function docsGetAccessToken() {
   return googleGetAccessToken('docsAuth');
 }
@@ -2914,6 +3082,8 @@ browser.runtime.onMessage.addListener((message) => {
     case 'openPopout':         return openPopoutWindow();
     case 'getDomainAge':       return getDomainAge(message);
     case 'dnsResolve':         return dnsResolve(message);
+    case 'validateFavicon':    return validateFavicon(message);
+    case 'clearFaviconCache':  return clearFaviconCache(message);
     case 'webceoGetStatus':      return webceoGetStatus();
     case 'webceoSaveConfig':     return webceoSaveConfig(message);
     case 'webceoDisconnect':     return webceoDisconnect();
@@ -2923,6 +3093,8 @@ browser.runtime.onMessage.addListener((message) => {
     case 'webceoAddKeywords':    return webceoAddKeywords(message);
     case 'webceoGetTrackedKeywords': return webceoGetTrackedKeywords(message);
     case 'docsConnect':          return docsConnect();
+    case 'docsGetStatus':        return docsGetStatus();
+    case 'docsDisconnect':       return docsDisconnect();
     case 'docsExportActionPlan': return docsExportActionPlan(message);
     case 'docsExportNegatives':  return docsExportNegatives(message);
     case 'docsExportAddKeywords': return docsExportAddKeywords(message);

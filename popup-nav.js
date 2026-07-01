@@ -10,6 +10,7 @@ const ogPanel         = document.getElementById('og-panel');
 const twPanel         = document.getElementById('tw-panel');
 const actionPlanPanel = document.getElementById('actionplan-panel');
 const hreflangPanel   = document.getElementById('hreflang-panel');
+const faviconPanel    = document.getElementById('favicon-panel');
 const adcopyPanel     = document.getElementById('adcopy-panel');
 const negativesPanel  = document.getElementById('negatives-panel');
 const addkwPanel      = document.getElementById('addkw-panel');
@@ -36,6 +37,7 @@ function hideDetailPanels() {
   twPanel.classList.add('hidden');
   actionPlanPanel.classList.add('hidden');
   hreflangPanel.classList.add('hidden');
+  faviconPanel.classList.add('hidden');
   adcopyPanel.classList.add('hidden');
   negativesPanel.classList.add('hidden');
   addkwPanel.classList.add('hidden');
@@ -107,6 +109,12 @@ function showHreflangPanel() {
   if (typeof renderHreflangDetail === 'function') renderHreflangDetail();
 }
 
+function showFaviconPanel() {
+  enterDetailPanel();
+  faviconPanel.classList.remove('hidden');
+  if (typeof renderFaviconDetail === 'function') renderFaviconDetail();
+}
+
 function showAdCopyPanel() {
   enterDetailPanel();
   adcopyPanel.classList.remove('hidden');
@@ -172,6 +180,7 @@ function showSettings() {
   });
   refreshGaSettingsStatus();
   refreshAdsSettingsStatus();
+  refreshDocsSettingsStatus();
   refreshWebceoSettingsStatus();
   loadBrandedTerms();
 }
@@ -199,6 +208,8 @@ document.getElementById('btn-ads-actionplan').addEventListener('click', showActi
 document.getElementById('btn-actionplan-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-hreflang').addEventListener('click', showHreflangPanel);
 document.getElementById('btn-hreflang-back').addEventListener('click', hideDetailPanelToTab);
+document.getElementById('btn-favicon').addEventListener('click', showFaviconPanel);
+document.getElementById('btn-favicon-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-gen-adcopy').addEventListener('click', showAdCopyPanel);
 document.getElementById('btn-adcopy-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-adcopy-regen').addEventListener('click', () => { if (typeof generateAdCopy === 'function') generateAdCopy(true); });
@@ -229,6 +240,7 @@ document.querySelectorAll('#main-tabs [data-tab]').forEach(btn => {
       || !ogPanel.classList.contains('hidden')
       || !twPanel.classList.contains('hidden')
       || !hreflangPanel.classList.contains('hidden')
+      || !faviconPanel.classList.contains('hidden')
       || !adcopyPanel.classList.contains('hidden')
       || !negativesPanel.classList.contains('hidden')
       || !addkwPanel.classList.contains('hidden')

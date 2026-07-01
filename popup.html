@@ -149,6 +149,7 @@
               <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7.5" x2="8" y2="11"/><circle cx="8" cy="5" r="0.55" fill="currentColor" stroke="none"/>
             </svg>
           </button>
+          <span class="setup-account-email hidden" id="gsc-account-email"></span>
           <button type="button" id="gsc-status-badge" class="gsc-status-badge"></button>
         </div>
       </div>
@@ -196,6 +197,7 @@
       <div class="field-header">
         <span class="field-label">GOOGLE ANALYTICS</span>
         <div class="field-header-actions">
+          <span class="setup-account-email hidden" id="ga-account-email"></span>
           <button type="button" id="ga-status-badge" class="gsc-status-badge"></button>
         </div>
       </div>
@@ -220,6 +222,8 @@
       <div class="field-header">
         <span class="field-label">GOOGLE ADS</span>
         <div class="field-header-actions">
+          <button id="btn-ads-edit-config" class="ads-link setup-edit-link hidden">Edit</button>
+          <span class="setup-account-email hidden" id="ads-account-email"></span>
           <button type="button" id="ads-status-badge" class="gsc-status-badge"></button>
         </div>
       </div>
@@ -261,10 +265,6 @@
         <button id="btn-ads-save-config" class="save-key-btn">Save</button>
         </div>
 
-        <div id="ads-config-collapsed" class="ads-config-collapsed hidden">
-          <button id="btn-ads-edit-config" class="ads-link">Edit</button>
-        </div>
-
         <div class="gsc-property-box" id="ads-account-box">
           <span class="wp-field-label" style="display:block;margin-bottom:6px">Account for this domain</span>
           <span class="gsc-property-match hidden" id="ads-account-match"></span>
@@ -275,8 +275,31 @@
 
     <section class="field-section">
       <div class="field-header">
+        <span class="field-label">GOOGLE DRIVE</span>
+        <div class="field-header-actions">
+          <span class="setup-account-email hidden" id="docs-account-email"></span>
+          <button type="button" id="docs-status-badge" class="gsc-status-badge"></button>
+        </div>
+      </div>
+
+      <div id="docs-setup-form">
+        <div class="field-hint">Used for exporting Action Plans, negatives, and keyword lists to Google Docs. Uses the OAuth client configured under Google Search Console above. Enable the "Google Drive API" in the same Google Cloud project.</div>
+        <div class="wp-form-actions">
+          <button id="btn-docs-connect" class="save-key-btn">Connect Google Drive</button>
+        </div>
+        <div id="docs-connect-error" class="field-hint hint-red hidden"></div>
+      </div>
+
+      <div id="docs-connected-info" class="hidden">
+        <div class="field-hint hint-muted">Exports are saved to a "SEO Plans" folder in this account's Google Drive.</div>
+      </div>
+    </section>
+
+    <section class="field-section">
+      <div class="field-header">
         <span class="field-label">WEB CEO</span>
         <div class="field-header-actions">
+          <button id="btn-webceo-edit-config" class="ads-link setup-edit-link hidden">Edit</button>
           <button type="button" id="webceo-status-badge" class="gsc-status-badge"></button>
         </div>
       </div>
@@ -307,10 +330,6 @@
         <input type="text" id="webceo-base-url" class="wp-input" placeholder="https://seo.plaudit.com/api/" autocomplete="off" spellcheck="false" />
       </label>
       <button id="btn-webceo-save-config" class="save-key-btn">Save</button>
-      </div>
-
-      <div id="webceo-config-collapsed" class="ads-config-collapsed hidden">
-        <button id="btn-webceo-edit-config" class="ads-link">Edit</button>
       </div>
 
       <div class="gsc-property-box" id="webceo-project-box">
@@ -474,6 +493,19 @@
       </button>
     </div>
     <div id="hreflang-detail-content"></div>
+  </div>
+
+  <!-- Favicon detail panel -->
+  <div id="favicon-panel" class="hidden">
+    <div class="settings-header">
+      <button id="btn-favicon-back" class="settings-back-btn">
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="10 3 4 8 10 13"/>
+        </svg>
+        Back
+      </button>
+    </div>
+    <div id="favicon-detail-content"></div>
   </div>
 
   <!-- AI Action Plan detail panel -->
@@ -1347,6 +1379,20 @@
         <div class="field-nav-right">
           <span class="field-nav-status hidden" id="hreflang-status"></span>
           <span id="hreflang-summary" class="field-nav-summary"></span>
+          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 3 11 8 6 13"/>
+          </svg>
+        </div>
+      </button>
+    </section>
+
+    <!-- Favicon -->
+    <section class="field-section">
+      <button class="field-nav-btn" id="btn-favicon" disabled>
+        <span class="field-label">FAVICON</span>
+        <div class="field-nav-right">
+          <span class="field-nav-status hidden" id="favicon-status"></span>
+          <span id="favicon-summary" class="field-nav-summary"></span>
           <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 3 11 8 6 13"/>
           </svg>

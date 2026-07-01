@@ -447,7 +447,8 @@ async function refreshWebceoSettingsStatus() {
 
 function setWebceoConfigCollapsed(collapsed) {
   document.getElementById('webceo-config-fields').classList.toggle('hidden', collapsed);
-  document.getElementById('webceo-config-collapsed').classList.toggle('hidden', !collapsed);
+  // The "Edit" link (now in the section header) shows only while collapsed.
+  document.getElementById('btn-webceo-edit-config').classList.toggle('hidden', !collapsed);
 }
 
 document.getElementById('btn-webceo-edit-config').addEventListener('click', () => setWebceoConfigCollapsed(false));

@@ -219,6 +219,22 @@ async function getActiveTab() {
   return tab;
 }
 
+// Show the connected Google account email to the left of a "Connected" chip.
+// Hidden when there's no email (e.g. an older connection made before the email
+// scope was added — reconnect to populate it).
+function setAccountEmail(elId, email) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (email) {
+    el.textContent = email;
+    el.title = email;
+    el.classList.remove('hidden');
+  } else {
+    el.textContent = '';
+    el.classList.add('hidden');
+  }
+}
+
 // Small trash button used to unlink a domain from its chosen property/account
 // (clears the per-domain override; the Google account stays connected).
 function propertyTrashButton(title, onClick) {

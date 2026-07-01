@@ -1508,6 +1508,7 @@ body.settings-open #update-footer { margin-top: auto; }
 }
 .ads-config-collapsed-text { display: inline-flex; align-items: center; gap: 5px; }
 .ads-config-collapsed .ads-link { background: none; border: none; padding: 0; font-size: 11px; }
+.setup-edit-link { background: none; border: none; padding: 0; font-size: 11px; font-family: inherit; margin-right: 6px; }
 
 .ads-campaign {
   display: flex;
@@ -2166,6 +2167,10 @@ body.settings-open #update-footer { margin-top: auto; }
 .ga-next-link { cursor: pointer; }
 .ga-next-link:hover { color: var(--accent); text-decoration: underline; }
 
+.setup-account-email {
+  font-size: 11px; color: var(--text-muted);
+  max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .gsc-status-badge {
   font-size: 10px; font-weight: 700; padding: 2px 10px; border-radius: 10px;
   text-transform: uppercase; letter-spacing: .05em;
@@ -2173,6 +2178,10 @@ body.settings-open #update-footer { margin-top: auto; }
   min-width: 94px; text-align: center; cursor: default; background: none;
 }
 .gsc-status-badge--connected    { background: var(--hint-green); color: #fff; cursor: pointer; position: relative; }
+/* Dark mode's green fill is light, so switch to dark text for readable contrast */
+@media (prefers-color-scheme: dark) {
+  .gsc-status-badge--connected { color: #0a2e17; }
+}
 .gsc-status-badge--disconnected { background: var(--bg-section); color: var(--text-muted); border-color: var(--border); }
 /* Connected chip → hover reveals a red "Disconnect" affordance */
 .gsc-status-badge--connected:hover { background: var(--bg); border-color: var(--hint-red); color: transparent; }
@@ -2497,6 +2506,12 @@ body.settings-open #update-footer { margin-top: auto; }
 .hl-check--fail .hl-check-icon { color: var(--hint-red); }
 .hl-check-label { color: var(--text); line-height: 1.4; }
 .hl-check--fail .hl-check-label { color: var(--hint-red); }
+.hl-check--warn .hl-check-icon { color: var(--hint-amber); }
+.hl-chip--err     { color: var(--hint-red);   background: color-mix(in srgb, var(--hint-red) 12%, transparent); }
+.hl-chip--pending { color: var(--text-muted); background: color-mix(in srgb, var(--text-muted) 12%, transparent); }
+.favicon-torch-row { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.favicon-href { cursor: pointer; }
+.favicon-href:hover { color: var(--accent); text-decoration: underline; }
 
 /* ── Internal links (Analytics tab) ────────────────────────────────────────── */
 .ga-link-row {

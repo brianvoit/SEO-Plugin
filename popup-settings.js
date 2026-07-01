@@ -328,3 +328,59 @@ function saveRanges() {
 
 ['title-min','title-target','title-max','meta-min','meta-target','meta-max']
   .forEach(id => document.getElementById(id).addEventListener('input', saveRanges));
+
+// ─── Google Drive (Docs export) connection ──────────────────────────────────
+// Shares the Google OAuth client configured under Search Console; its own grant
+// (docsAuth) so the export destination account is explicit and switchable.
+
+async function refreshDocsSettingsStatus() {
+  const status = await sendMessageWithTimeout({ action: 'docsGetStatus' });
+  const badge = document.getElementById('docs-status-badge');
+  const setup = document.getElementById('docs-setup-form');
+  const info  = document.getElementById('docs-connected-info');
+
+  if (status.connected) {
+    badge.textContent = 'Connected';
+    badge.className = 'gsc-status-badge gsc-status-badge--connected';
+    setup.classList.add('hidden');
+    info.classList.remove('hidden');
+    setAccountEmail('docs-account-email', status.email);
+  } else {
+    badge.textContent = 'Not connected';
+    badge.className = 'gsc-status-badge gsc-status-badge--disconnected';
+    setup.classList.remove('hidden');
+    info.classList.add('hidden');
+    setAccountEmail('docs-account-email', null);
+  }
+  return status;
+}
+
+document.getElementById('btn-docs-connect').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-docs-connect');
+  const errorEl = document.getElementById('docs-connect-error');
+  errorEl.classList.add('hidden');
+
+  btn.disabled = true;
+  btn.textContent = 'Connecting…';
+  try {
+    const result = await sendMessageWithTimeout({ action: 'docsConnect' });
+    if (result.error) {
+      if (result.error !== 'FLOW_CANCELLED') {
+        errorEl.textContent = gscConnectErrorMessage(result.error);
+        errorEl.classList.remove('hidden');
+      }
+    } else {
+      await refreshDocsSettingsStatus();
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Connect Google Drive';
+  }
+});
+
+// The "Connected" chip doubles as the disconnect control (hover → red Disconnect)
+document.getElementById('docs-status-badge').addEventListener('click', async (e) => {
+  if (!e.currentTarget.classList.contains('gsc-status-badge--connected')) return;
+  await sendMessageWithTimeout({ action: 'docsDisconnect' });
+  await refreshDocsSettingsStatus();
+});

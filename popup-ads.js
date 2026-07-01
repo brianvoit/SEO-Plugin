@@ -975,6 +975,7 @@ async function refreshAdsSettingsStatus() {
     badge.className = 'gsc-status-badge gsc-status-badge--connected';
     setup.classList.add('hidden');
     info.classList.remove('hidden');
+    setAccountEmail('ads-account-email', status.email);
     browser.storage.local.get(['adsDeveloperToken', 'adsManagerId']).then(({ adsDeveloperToken, adsManagerId }) => {
       setAdsTokenState(!!adsDeveloperToken);
       document.getElementById('ads-manager-id').value = adsManagerId || '';
@@ -988,6 +989,8 @@ async function refreshAdsSettingsStatus() {
     badge.className = 'gsc-status-badge gsc-status-badge--disconnected';
     setup.classList.remove('hidden');
     info.classList.add('hidden');
+    setAccountEmail('ads-account-email', null);
+    document.getElementById('btn-ads-edit-config').classList.add('hidden');
   }
   return status;
 }
@@ -1057,7 +1060,8 @@ document.getElementById('ads-status-badge').addEventListener('click', async (e) 
 // just a "saved · Edit" summary above the account picker.
 function setAdsConfigCollapsed(collapsed) {
   document.getElementById('ads-config-fields').classList.toggle('hidden', collapsed);
-  document.getElementById('ads-config-collapsed').classList.toggle('hidden', !collapsed);
+  // The "Edit" link (now in the section header) shows only while collapsed.
+  document.getElementById('btn-ads-edit-config').classList.toggle('hidden', !collapsed);
 }
 
 document.getElementById('btn-ads-edit-config').addEventListener('click', () => setAdsConfigCollapsed(false));

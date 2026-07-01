@@ -435,7 +435,7 @@ async function generateAddKw(force) {
         system: addkwSystemBlocks,
         messages: [{ role: 'user', content: context }]
       })
-    });
+    }, 120000);
     const parsed = parseAddKwJson(data.content?.[0]?.text ?? '');
     if (!parsed) throw new Error('Could not parse the analysis response');
 
@@ -625,7 +625,7 @@ async function generateAddKwBlindspots(force) {
         system: [{ type: 'text', text: ADDKW_BLINDSPOT_SYSTEM, cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: context }]
       })
-    });
+    }, 120000);
     const parsed = parseAddKwJson(data.content?.[0]?.text ?? '');
     if (!parsed) throw new Error('Could not parse the brainstorm response');
 

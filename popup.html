@@ -155,34 +155,7 @@
       </div>
 
       <div id="gsc-setup-form">
-        <label class="wp-field">
-          <span class="wp-field-label">OAuth Client ID</span>
-          <input type="text" id="gsc-client-id" class="wp-input" placeholder="xxxxxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false" />
-        </label>
-        <label class="wp-field">
-          <span class="wp-field-label">OAuth Client Secret (optional)</span>
-          <input type="password" id="gsc-client-secret" class="wp-input" placeholder="Leave blank for Desktop app clients" autocomplete="off" spellcheck="false" />
-        </label>
-        <label class="wp-field">
-          <span class="wp-field-label">Redirect URI — register this in Google Cloud Console</span>
-          <div class="api-key-row">
-            <input type="text" id="gsc-redirect-uri" class="api-key-input" readonly />
-            <button id="btn-copy-redirect-uri" class="icon-btn" title="Copy redirect URI">
-              <svg id="gsc-redirect-icon-copy" class="icon-copy" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="5" y="4" width="9" height="11" rx="1.5"/>
-                <path d="M3 12H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1"/>
-              </svg>
-              <svg id="gsc-redirect-icon-check" class="icon-check hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="2 8 6 12 14 4"/>
-              </svg>
-            </button>
-          </div>
-        </label>
-        <div class="wp-form-actions">
-          <button id="btn-gsc-connect" class="save-key-btn">Connect Google Search Console</button>
-        </div>
-        <div id="gsc-connect-error" class="field-hint hint-red hidden"></div>
-        <div class="field-hint">Create an OAuth Client (type "Desktop app") in Google Cloud Console, enable the "Google Search Console API", and add the redirect URI above. Credentials are stored locally and used only to talk directly to Google.</div>
+        <div class="field-hint">Enable the "Google Search Console API" in your Google Cloud project.</div>
       </div>
 
       <div id="gsc-connected-info" class="hidden">
@@ -203,10 +176,7 @@
       </div>
 
       <div id="ga-setup-form">
-        <div class="field-hint">Uses the OAuth client configured under Google Search Console above. Enable the "Google Analytics Admin API" and "Google Analytics Data API" in the same Google Cloud project.</div>
-        <div class="wp-form-actions">
-          <button id="btn-ga-connect" class="save-key-btn">Connect Google Analytics</button>
-        </div>
+        <div class="field-hint">Enable the "Google Analytics Admin API" and "Google Analytics Data API" in your Google Cloud project.</div>
         <div id="ga-connect-error" class="field-hint hint-red hidden"></div>
       </div>
 
@@ -229,10 +199,7 @@
       </div>
 
       <div id="ads-setup-form">
-        <div class="field-hint">Uses the OAuth client configured under Google Search Console above. Enable the "Google Ads API" in the same Google Cloud project.</div>
-        <div class="wp-form-actions">
-          <button id="btn-ads-connect" class="save-key-btn">Connect Google Ads</button>
-        </div>
+        <div class="field-hint">Enable the "Google Ads API" in your Google Cloud project.</div>
         <div id="ads-connect-error" class="field-hint hint-red hidden"></div>
       </div>
 
@@ -277,22 +244,22 @@
       <div class="field-header">
         <span class="field-label">GOOGLE DRIVE</span>
         <div class="field-header-actions">
+          <button class="info-tip" type="button" title="Exports (Action Plans, negatives, keyword lists) are saved to a &quot;SEO Plans&quot; folder in this account's Google Drive.">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7.5" x2="8" y2="11"/><circle cx="8" cy="5" r="0.55" fill="currentColor" stroke="none"/>
+            </svg>
+          </button>
           <span class="setup-account-email hidden" id="docs-account-email"></span>
           <button type="button" id="docs-status-badge" class="gsc-status-badge"></button>
         </div>
       </div>
 
       <div id="docs-setup-form">
-        <div class="field-hint">Used for exporting Action Plans, negatives, and keyword lists to Google Docs. Uses the OAuth client configured under Google Search Console above. Enable the "Google Drive API" in the same Google Cloud project.</div>
-        <div class="wp-form-actions">
-          <button id="btn-docs-connect" class="save-key-btn">Connect Google Drive</button>
-        </div>
+        <div class="field-hint">Used for exporting Action Plans, negatives, and keyword lists to Google Docs. Enable the "Google Drive API" in your Google Cloud project.</div>
         <div id="docs-connect-error" class="field-hint hint-red hidden"></div>
       </div>
 
-      <div id="docs-connected-info" class="hidden">
-        <div class="field-hint hint-muted">Exports are saved to a "SEO Plans" folder in this account's Google Drive.</div>
-      </div>
+      <div id="docs-connected-info" class="hidden"></div>
     </section>
 
     <section class="field-section">
@@ -430,6 +397,39 @@
           <button id="btn-save-brand-domain" class="save-key-btn">Save</button>
         </div>
       </div>
+    </section>
+
+    <!-- OAuth Client — shared across Search Console, Analytics, Ads, and Drive.
+         Collapsed by default; toggled via "OAuth Client" in the footer. -->
+    <section class="field-section hidden" id="oauth-client-section">
+      <div class="field-header">
+        <span class="field-label">OAUTH CLIENT</span>
+      </div>
+      <div class="field-hint">Shared by Search Console, Analytics, Ads, and Drive. Create an OAuth Client (type "Desktop app") in Google Cloud Console, enable the API for whichever services you connect, and add the redirect URI below. Credentials are stored locally and used only to talk directly to Google.</div>
+      <label class="wp-field">
+        <span class="wp-field-label">OAuth Client ID</span>
+        <input type="text" id="gsc-client-id" class="wp-input" placeholder="xxxxxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false" />
+      </label>
+      <label class="wp-field">
+        <span class="wp-field-label">OAuth Client Secret (optional)</span>
+        <input type="password" id="gsc-client-secret" class="wp-input" placeholder="Leave blank for Desktop app clients" autocomplete="off" spellcheck="false" />
+      </label>
+      <label class="wp-field">
+        <span class="wp-field-label">Redirect URI — register this in Google Cloud Console</span>
+        <div class="api-key-row">
+          <input type="text" id="gsc-redirect-uri" class="api-key-input" readonly />
+          <button id="btn-copy-redirect-uri" class="icon-btn" title="Copy redirect URI">
+            <svg id="gsc-redirect-icon-copy" class="icon-copy" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="5" y="4" width="9" height="11" rx="1.5"/>
+              <path d="M3 12H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1"/>
+            </svg>
+            <svg id="gsc-redirect-icon-check" class="icon-check hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="2 8 6 12 14 4"/>
+            </svg>
+          </button>
+        </div>
+      </label>
+      <div id="gsc-connect-error" class="field-hint hint-red hidden"></div>
     </section>
 
   </div>
@@ -1440,6 +1440,7 @@
   <!-- Update footer -->
   <footer id="update-footer" class="hidden">
     <span id="update-version" class="update-version"></span>
+    <button id="btn-oauth-client-toggle" class="update-check-btn">OAuth Client</button>
     <span id="update-status" class="update-status hidden"></span>
     <button id="btn-check-update" class="update-check-btn">Check for updates</button>
   </footer>

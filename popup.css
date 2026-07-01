@@ -2169,7 +2169,8 @@ body.settings-open #update-footer { margin-top: auto; }
 
 .setup-account-email {
   font-size: 11px; color: var(--text-muted);
-  max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 210px; margin-right: 8px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .gsc-status-badge {
   font-size: 10px; font-weight: 700; padding: 2px 10px; border-radius: 10px;
@@ -2182,7 +2183,8 @@ body.settings-open #update-footer { margin-top: auto; }
 @media (prefers-color-scheme: dark) {
   .gsc-status-badge--connected { color: #0a2e17; }
 }
-.gsc-status-badge--disconnected { background: var(--bg-section); color: var(--text-muted); border-color: var(--border); }
+.gsc-status-badge--disconnected { background: var(--bg-section); color: var(--accent); border-color: var(--accent); cursor: pointer; }
+.gsc-status-badge.is-busy { pointer-events: none; opacity: .7; }
 /* Connected chip → hover reveals a red "Disconnect" affordance */
 .gsc-status-badge--connected:hover { background: var(--bg); border-color: var(--hint-red); color: transparent; }
 .gsc-status-badge--connected:hover::after {

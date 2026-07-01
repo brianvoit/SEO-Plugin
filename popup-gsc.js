@@ -90,7 +90,11 @@ const GSC_CONNECT_ERRORS = {
   NO_CLIENT_ID: 'Enter an OAuth Client ID first.',
   STATE_MISMATCH: 'Authorization response did not match — please try again.',
   NO_CODE: 'Google did not return an authorization code.',
-  TOKEN_EXCHANGE_FAILED: 'Could not exchange the authorization code for tokens. Check your Client ID/Secret.'
+  TOKEN_EXCHANGE_FAILED: 'Could not exchange the authorization code for tokens. Check your Client ID/Secret.',
+  ADS_SCOPE_MISSING: 'Google Ads permission was not granted. Reconnect and keep the "Google Ads" box checked, using an account that has access to this Ads account.',
+  GSC_SCOPE_MISSING: 'Search Console permission was not granted by Google — reconnect and keep all permission boxes checked. If it keeps happening, this account may need to be added as a test user on the OAuth consent screen in Google Cloud Console.',
+  GA_SCOPE_MISSING: 'Analytics permission was not granted by Google — reconnect and keep all permission boxes checked. If it keeps happening, this account may need to be added as a test user on the OAuth consent screen in Google Cloud Console.',
+  DOCS_SCOPE_MISSING: 'Drive permission was not granted by Google — reconnect and keep all permission boxes checked. If it keeps happening, this account may need to be added as a test user on the OAuth consent screen in Google Cloud Console.'
 };
 
 function gscConnectErrorMessage(error) {
@@ -1026,7 +1030,7 @@ async function refreshGscSettingsStatus() {
       connectedTip.classList.add('hidden');
     }
   } else {
-    badge.textContent = 'Not connected';
+    badge.textContent = 'Connect';
     badge.className = 'gsc-status-badge gsc-status-badge--disconnected';
     setupForm.classList.remove('hidden');
     connectedInfo.classList.add('hidden');
@@ -1122,8 +1126,8 @@ document.getElementById('btn-copy-redirect-uri').addEventListener('click', async
   flashCopyBtn(e.currentTarget);
 });
 
-document.getElementById('btn-gsc-connect').addEventListener('click', async () => {
-  const btn = document.getElementById('btn-gsc-connect');
+async function connectGsc() {
+  const badge = document.getElementById('gsc-status-badge');
   const errorEl = document.getElementById('gsc-connect-error');
   errorEl.classList.add('hidden');
 
@@ -1133,32 +1137,38 @@ document.getElementById('btn-gsc-connect').addEventListener('click', async () =>
   if (!clientId) {
     errorEl.textContent = gscConnectErrorMessage('NO_CLIENT_ID');
     errorEl.classList.remove('hidden');
+    if (typeof revealOauthClientSection === 'function') revealOauthClientSection();
     return;
   }
 
   await browser.storage.local.set({ gscClientId: clientId, gscClientSecret: clientSecret });
 
-  btn.disabled = true;
-  btn.textContent = 'Connecting…';
+  badge.textContent = 'Connecting…';
+  badge.classList.add('is-busy');
   try {
     const result = await sendMessageWithTimeout({ action: 'gscConnect' });
     if (result.error) {
       if (result.error !== 'FLOW_CANCELLED') {
         errorEl.textContent = gscConnectErrorMessage(result.error);
         errorEl.classList.remove('hidden');
+        if (typeof revealOauthClientSection === 'function') revealOauthClientSection();
       }
+      badge.textContent = 'Connect';
     } else {
       await refreshGscSettingsStatus();
     }
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Connect Google Search Console';
+    badge.classList.remove('is-busy');
   }
-});
+}
 
-// The "Connected" chip doubles as the disconnect control (hover → red Disconnect)
+// The chip is a 3-state control: "Connect" when disconnected (click → connect),
+// "Connected" otherwise (hover → red "Disconnect", click → disconnect).
 document.getElementById('gsc-status-badge').addEventListener('click', async (e) => {
-  if (!e.currentTarget.classList.contains('gsc-status-badge--connected')) return;
+  if (e.currentTarget.classList.contains('gsc-status-badge--disconnected')) {
+    connectGsc();
+    return;
+  }
   await sendMessageWithTimeout({ action: 'gscDisconnect' });
   await refreshGscSettingsStatus();
 });

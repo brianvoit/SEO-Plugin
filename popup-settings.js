@@ -346,7 +346,7 @@ async function refreshDocsSettingsStatus() {
     info.classList.remove('hidden');
     setAccountEmail('docs-account-email', status.email);
   } else {
-    badge.textContent = 'Not connected';
+    badge.textContent = 'Connect';
     badge.className = 'gsc-status-badge gsc-status-badge--disconnected';
     setup.classList.remove('hidden');
     info.classList.add('hidden');
@@ -355,32 +355,52 @@ async function refreshDocsSettingsStatus() {
   return status;
 }
 
-document.getElementById('btn-docs-connect').addEventListener('click', async () => {
-  const btn = document.getElementById('btn-docs-connect');
+async function connectDocs() {
+  const badge = document.getElementById('docs-status-badge');
   const errorEl = document.getElementById('docs-connect-error');
   errorEl.classList.add('hidden');
 
-  btn.disabled = true;
-  btn.textContent = 'Connecting…';
+  badge.textContent = 'Connecting…';
+  badge.classList.add('is-busy');
   try {
     const result = await sendMessageWithTimeout({ action: 'docsConnect' });
     if (result.error) {
       if (result.error !== 'FLOW_CANCELLED') {
         errorEl.textContent = gscConnectErrorMessage(result.error);
         errorEl.classList.remove('hidden');
+        if (typeof revealOauthClientSection === 'function') revealOauthClientSection();
       }
+      badge.textContent = 'Connect';
     } else {
       await refreshDocsSettingsStatus();
     }
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Connect Google Drive';
+    badge.classList.remove('is-busy');
   }
-});
+}
 
-// The "Connected" chip doubles as the disconnect control (hover → red Disconnect)
+// The chip is a 3-state control: "Connect" when disconnected (click → connect),
+// "Connected" otherwise (hover → red "Disconnect", click → disconnect).
 document.getElementById('docs-status-badge').addEventListener('click', async (e) => {
-  if (!e.currentTarget.classList.contains('gsc-status-badge--connected')) return;
+  if (e.currentTarget.classList.contains('gsc-status-badge--disconnected')) {
+    connectDocs();
+    return;
+  }
   await sendMessageWithTimeout({ action: 'docsDisconnect' });
   await refreshDocsSettingsStatus();
+});
+
+// ─── OAuth Client (shared across Search Console, Analytics, Ads, and Drive) ──
+// Not tied to any single integration, so it lives collapsed at the bottom of
+// the Setup screen and is toggled from the footer rather than living under
+// one integration's header.
+
+function revealOauthClientSection() {
+  const sec = document.getElementById('oauth-client-section');
+  sec.classList.remove('hidden');
+  sec.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+document.getElementById('btn-oauth-client-toggle').addEventListener('click', () => {
+  document.getElementById('oauth-client-section').classList.toggle('hidden');
 });

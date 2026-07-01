@@ -761,6 +761,11 @@ function faviconIsSvg(i) {
   catch { return /\.svg(\?|$)/i.test(i.href || ''); }
 }
 function faviconSizeTokens(i) { return (i.sizes || '').split(/\s+/).filter(Boolean); }
+function faviconIsIco(i) {
+  if (/vnd\.microsoft\.icon|x-icon/.test(i.type || '')) return true;
+  try { return new URL(i.href).pathname.toLowerCase().endsWith('.ico'); }
+  catch { return /\.ico(\?|$)/i.test(i.href || ''); }
+}
 
 // Distinct raster (non-scalable) sizes declared across standard icons.
 function faviconRasterSizes(icons) {
@@ -806,6 +811,7 @@ function renderFavicon(data) {
 function faviconActualSize(live, href) {
   const r = live && live.results ? live.results[href] : null;
   if (!r) return null;
+  if (r.icoSizes && r.icoSizes.length) return r.icoSizes.map(s => `${s.width}×${s.height}`).join(', ');
   if (r.width && r.height) return r.scalable ? `${r.width}×${r.height} (SVG)` : `${r.width}×${r.height}`;
   if (r.scalable) return 'Scalable (SVG)';
   return null;
@@ -823,73 +829,96 @@ function faviconIconChip(live, href) {
   return chip;
 }
 
-// Validation checklist rows: { label, level: 'pass'|'warn'|'fail' }.
+// Validation checklist rows, grouped to mirror realfavicongenerator.net's
+// checker report: { group, label, level: 'pass'|'warn'|'fail' }.
 function buildFaviconChecks(fav, live) {
   const icons = (fav && fav.icons) || [];
   const checks = [];
   const std = icons.filter(faviconIsStandard);
   const apple = icons.filter(faviconIsApple);
   const raster = faviconRasterSizes(icons);
-  const icoLive = fav && fav.defaultIcoUrl && live && live.results ? live.results[fav.defaultIcoUrl] : null;
+  const push = (group, label, level) => checks.push({ group, label, level });
 
-  // 1. Standard favicon present (declared, or a working /favicon.ico)
+  // ── Classic & SVG favicon ──
+  const G1 = 'CLASSIC & SVG FAVICON';
+  const icoIcon = icons.find(faviconIsIco);
+  const icoUrl = icoIcon ? icoIcon.href : (fav && fav.defaultIcoUrl);
+  const icoLive = icoUrl && live && live.results ? live.results[icoUrl] : null;
   const icoWorks = !!(icoLive && icoLive.ok && icoLive.isImage);
-  checks.push({
-    label: std.length ? 'Standard favicon declared (<link rel="icon">)'
-      : icoWorks ? 'No <link rel="icon">, but /favicon.ico loads'
-      : 'No standard favicon (<link rel="icon"> or /favicon.ico)',
-    level: std.length ? 'pass' : icoWorks ? 'warn' : 'fail'
-  });
 
-  // 2. Declared icon URLs actually load as images (live)
+  push(G1, std.length ? 'Standard favicon declared (<link rel="icon">)'
+    : icoWorks ? 'No <link rel="icon">, but /favicon.ico loads'
+    : 'No standard favicon (<link rel="icon"> or /favicon.ico)',
+    std.length ? 'pass' : icoWorks ? 'warn' : 'fail');
+
+  push(G1, icons.some(faviconIsSvg) ? 'SVG favicon present' : 'No SVG favicon',
+    icons.some(faviconIsSvg) ? 'pass' : 'warn');
+
+  const has96 = raster.has('96x96');
+  push(G1, has96 ? '96x96 desktop PNG favicon declared' : 'No 96x96 desktop PNG favicon', has96 ? 'pass' : 'warn');
+
+  push(G1, icoIcon ? 'ICO favicon is declared' : 'No .ico favicon declared (browsers still request /favicon.ico as a fallback)',
+    icoIcon ? 'pass' : 'warn');
+
+  if (live) {
+    push(G1, icoWorks ? 'ICO favicon found' : 'ICO favicon not found (checked ' + (icoIcon ? 'declared icon' : '/favicon.ico') + ')',
+      icoWorks ? 'pass' : 'warn');
+
+    if (icoWorks) {
+      const icoDims = new Set((icoLive.icoSizes || []).map(s => `${s.width}x${s.height}`));
+      const wantIco = ['16x16', '32x32', '48x48'];
+      const missingIco = wantIco.filter(d => !icoDims.has(d));
+      push(G1, missingIco.length ? `ICO favicon is missing expected sizes (${missingIco.join(', ')})` : 'ICO favicon has the expected sizes (48x48, 32x32, 16x16)',
+        missingIco.length ? 'warn' : 'pass');
+    }
+  }
+
   if (icons.length && live && live.results) {
     const declared = icons.map(i => i.href);
     const broken   = declared.filter(h => { const r = live.results[h]; return !r || !r.ok; });
     const notImage = declared.filter(h => { const r = live.results[h]; return r && r.ok && !r.isImage; });
-    checks.push({
-      label: broken.length ? `${broken.length} declared icon${broken.length !== 1 ? 's' : ''} failed to load`
-        : notImage.length ? `${notImage.length} icon${notImage.length !== 1 ? 's' : ''} not served as an image`
-        : 'All declared icons return 200 and an image type',
-      level: broken.length ? 'fail' : notImage.length ? 'warn' : 'pass'
-    });
+    push(G1, broken.length ? `${broken.length} declared icon${broken.length !== 1 ? 's' : ''} failed to load`
+      : notImage.length ? `${notImage.length} icon${notImage.length !== 1 ? 's' : ''} not served as an image`
+      : 'All declared icons return 200 and an image type',
+      broken.length ? 'fail' : notImage.length ? 'warn' : 'pass');
   }
 
-  // 3. Scalable SVG icon (recommended, not required)
-  checks.push({
-    label: icons.some(faviconIsSvg) ? 'Scalable SVG icon present' : 'No scalable SVG icon (recommended)',
-    level: icons.some(faviconIsSvg) ? 'pass' : 'warn'
-  });
-
-  // 4. 16x16 and 32x32 declared
   const has16 = raster.has('16x16'), has32 = raster.has('32x32');
-  checks.push({
-    label: has16 && has32 ? '16x16 and 32x32 sizes declared'
-      : raster.size ? 'Missing a recommended 16x16 or 32x32 size'
-      : 'No explicit raster sizes declared (16x16 / 32x32)',
-    level: has16 && has32 ? 'pass' : 'warn'
-  });
+  push(G1, has16 && has32 ? '16x16 and 32x32 sizes declared'
+    : raster.size ? 'Missing a recommended 16x16 or 32x32 size'
+    : 'No explicit raster sizes declared (16x16 / 32x32)',
+    has16 && has32 ? 'pass' : 'warn');
 
-  // 5. Apple touch icon 180x180 (iOS)
+  // ── Touch icon ──
+  const G2 = 'TOUCH ICON';
   const apple180 = apple.some(i => faviconSizeTokens(i).includes('180x180'));
-  checks.push({
-    label: apple180 ? 'Apple touch icon 180x180 present'
-      : apple.length ? 'Apple touch icon present but not 180x180'
-      : 'No apple-touch-icon (iOS home screen)',
-    level: apple180 ? 'pass' : 'warn'
-  });
+  push(G2, apple180 ? 'Apple touch icon 180x180 present'
+    : apple.length ? 'Apple touch icon present but not 180x180'
+    : 'No apple-touch-icon (iOS home screen)',
+    apple180 ? 'pass' : 'warn');
 
-  // 6. Web app manifest icons 192 + 512 (PWA)
+  push(G2, fav && fav.appleWebAppTitle ? 'Touch web app title declared' : 'No touch web app title declared',
+    fav && fav.appleWebAppTitle ? 'pass' : 'warn');
+
+  // ── Web app manifest ──
+  const G3 = 'WEB APP MANIFEST';
   if (fav && fav.manifestHref) {
     const m = live && live.manifest;
-    const ok = !!(m && m.ok && m.has192 && m.has512);
-    checks.push({
-      label: ok ? 'Web app manifest has 192x192 and 512x512 icons'
-        : (m && m.ok) ? 'Web app manifest is missing a 192x192 or 512x512 icon'
-        : 'Web app manifest referenced but could not be read',
-      level: ok ? 'pass' : 'warn'
-    });
+    if (!m) {
+      push(G3, 'Web app manifest referenced', 'pass');
+    } else if (!m.ok) {
+      push(G3, 'Web app manifest referenced but could not be read', 'warn');
+    } else {
+      push(G3, 'Web app manifest referenced', 'pass');
+      push(G3, m.name ? 'Web app manifest has a name' : 'Web app manifest has no name', m.name ? 'pass' : 'warn');
+      push(G3, m.shortName ? 'Web app manifest has a short_name' : 'Web app manifest has no short_name', m.shortName ? 'pass' : 'warn');
+      push(G3, m.has192 ? 'Web app manifest has a 192x192 icon' : 'Web app manifest has no 192x192 icon', m.has192 ? 'pass' : 'warn');
+      push(G3, m.has512 ? 'Web app manifest has a 512x512 icon' : 'Web app manifest has no 512x512 icon', m.has512 ? 'pass' : 'warn');
+      push(G3, m.backgroundColor && m.themeColor ? 'Web app manifest declares background and theme color' : 'Web app manifest is missing a background_color or theme_color',
+        m.backgroundColor && m.themeColor ? 'pass' : 'warn');
+    }
   } else {
-    checks.push({ label: 'No web app manifest (optional, for PWA install)', level: 'warn' });
+    push(G3, 'No web app manifest (optional, for PWA install)', 'warn');
   }
 
   return checks;
@@ -947,30 +976,38 @@ function renderFaviconDetail() {
   }
   content.appendChild(tableSec);
 
-  // ── Validation checklist ──
-  const checkSec = document.createElement('section');
-  checkSec.className = 'field-section';
-  const ch = document.createElement('div');
-  ch.className = 'field-header';
-  const cl = document.createElement('span');
-  cl.className = 'field-label';
-  cl.textContent = 'VALIDATION';
-  ch.appendChild(cl);
-  checkSec.appendChild(ch);
-
+  // ── Validation checklist — grouped into sub-sections, one per category ──
+  const checksByGroup = new Map();
   buildFaviconChecks(fav, live).forEach(c => {
-    const row = document.createElement('div');
-    row.className = `hl-check hl-check--${c.level}`;
-    const icon = document.createElement('span');
-    icon.className = 'hl-check-icon';
-    icon.textContent = c.level === 'pass' ? '✓' : c.level === 'warn' ? '!' : '✗';
-    const label = document.createElement('span');
-    label.className = 'hl-check-label';
-    label.textContent = c.label;
-    row.append(icon, label);
-    checkSec.appendChild(row);
+    if (!checksByGroup.has(c.group)) checksByGroup.set(c.group, []);
+    checksByGroup.get(c.group).push(c);
   });
-  content.appendChild(checkSec);
+
+  checksByGroup.forEach((groupChecks, groupName) => {
+    const checkSec = document.createElement('section');
+    checkSec.className = 'field-section';
+    const ch = document.createElement('div');
+    ch.className = 'field-header';
+    const cl = document.createElement('span');
+    cl.className = 'field-label';
+    cl.textContent = groupName;
+    ch.appendChild(cl);
+    checkSec.appendChild(ch);
+
+    groupChecks.forEach(c => {
+      const row = document.createElement('div');
+      row.className = `hl-check hl-check--${c.level}`;
+      const icon = document.createElement('span');
+      icon.className = 'hl-check-icon';
+      icon.textContent = c.level === 'pass' ? '✓' : c.level === 'warn' ? '!' : '✗';
+      const label = document.createElement('span');
+      label.className = 'hl-check-label';
+      label.textContent = c.label;
+      row.append(icon, label);
+      checkSec.appendChild(row);
+    });
+    content.appendChild(checkSec);
+  });
 
   // ── Torch button ──
   const torchSec = document.createElement('section');

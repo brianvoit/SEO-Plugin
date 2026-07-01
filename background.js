@@ -528,6 +528,27 @@ async function googleOAuthConnect(scope, authKey) {
   return { connected: true };
 }
 
+// Wraps googleOAuthConnect with a check that the requested API scope actually
+// came back granted. Google's consent screen can silently drop a scope (e.g.
+// a restricted/sensitive scope on an OAuth client still in "Testing" mode
+// whose test-user list doesn't include the chosen account) while still
+// granting the harmless ones (openid/email) — the connection then "succeeds"
+// but every API call fails with "insufficient authentication scopes." Catch
+// that immediately instead of leaving a broken Connected chip.
+async function googleOAuthConnectRequireScope(scope, authKey, missingScopeError) {
+  const res = await googleOAuthConnect(scope, authKey);
+  if (res && res.connected) {
+    const stored = await browser.storage.local.get(authKey);
+    const auth = stored[authKey];
+    const re = new RegExp(`(^|\\s)${scope.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`);
+    if (!auth || !re.test(auth.scope || '')) {
+      await browser.storage.local.remove(authKey);
+      return { error: missingScopeError };
+    }
+  }
+  return res;
+}
+
 async function googleDisconnect(authKey, extraKeys) {
   const stored = await browser.storage.local.get(authKey);
   const auth = stored[authKey];
@@ -594,7 +615,7 @@ async function gscGetStatus() {
 }
 
 function gscConnect() {
-  return googleOAuthConnect(GSC_SCOPE, 'gscAuth');
+  return googleOAuthConnectRequireScope(GSC_SCOPE, 'gscAuth', 'GSC_SCOPE_MISSING');
 }
 
 function gscDisconnect() {
@@ -1141,7 +1162,7 @@ async function gaGetStatus() {
 }
 
 function gaConnect() {
-  return googleOAuthConnect(GA_SCOPE, 'gaAuth');
+  return googleOAuthConnectRequireScope(GA_SCOPE, 'gaAuth', 'GA_SCOPE_MISSING');
 }
 
 function gaDisconnect() {
@@ -1668,17 +1689,39 @@ function faviconSvgDimensions(text) {
   return null;
 }
 
-// Fetch one URL and report status, whether it's a real image, and the actual
-// pixel dimensions of the file. Never throws.
+// Parse a raw .ico file's ICONDIR to list every embedded image's pixel size.
+// ICO is a simple binary container (no library needed): a 6-byte header
+// (reserved, type, count) followed by `count` 16-byte directory entries whose
+// first two bytes are width/height (0 means 256, per the spec).
+function faviconIcoSizes(buffer) {
+  try {
+    const view = new DataView(buffer);
+    if (view.byteLength < 6 || view.getUint16(0, true) !== 0 || view.getUint16(2, true) !== 1) return [];
+    const count = view.getUint16(4, true);
+    const sizes = [];
+    for (let i = 0; i < count && 6 + i * 16 + 2 <= view.byteLength; i++) {
+      const off = 6 + i * 16;
+      const w = view.getUint8(off) || 256;
+      const h = view.getUint8(off + 1) || 256;
+      sizes.push({ width: w, height: h });
+    }
+    return sizes;
+  } catch { return []; }
+}
+
+// Fetch one URL and report status, whether it's a real image, its actual pixel
+// dimensions, and (for .ico files) every size embedded in the container. Never
+// throws.
 async function faviconProbe(url) {
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), FAVICON_FETCH_TIMEOUT_MS);
   try {
     const res = await fetch(url, { method: 'GET', cache: 'no-store', credentials: 'omit', signal: abort.signal });
     const contentType = (res.headers.get('content-type') || '').toLowerCase();
-    const isImage = /^\s*image\//.test(contentType);
     const isSvg = /svg/.test(contentType) || /\.svg(\?|$)/i.test(url);
-    const out = { url, ok: res.ok, status: res.status, contentType, isImage, width: null, height: null, scalable: false };
+    const isIco = !isSvg && (/\.ico(\?|$)/i.test(url) || /(^|[/.\s-])icon\b|vnd\.microsoft\.icon/.test(contentType));
+    const isImage = /^\s*image\//.test(contentType) || isIco;
+    const out = { url, ok: res.ok, status: res.status, contentType, isImage, width: null, height: null, scalable: false, icoSizes: null };
 
     if (res.ok) {
       try {
@@ -1686,16 +1729,27 @@ async function faviconProbe(url) {
           out.scalable = true;
           const dims = faviconSvgDimensions(await res.text());
           if (dims) { out.width = dims.width; out.height = dims.height; }
-        } else if (isImage) {
-          const bmp = await createImageBitmap(await res.blob());
-          out.width = bmp.width; out.height = bmp.height;
-          bmp.close();
+        } else {
+          const buf = await res.arrayBuffer();
+          if (isIco) {
+            const sizes = faviconIcoSizes(buf);
+            if (sizes.length) {
+              out.icoSizes = sizes;
+              const largest = sizes.reduce((a, b) => (b.width * b.height > a.width * a.height ? b : a));
+              out.width = largest.width; out.height = largest.height;
+            }
+          }
+          if (!out.width) {
+            const bmp = await createImageBitmap(new Blob([buf], { type: contentType || 'image/x-icon' }));
+            out.width = bmp.width; out.height = bmp.height;
+            bmp.close();
+          }
         }
       } catch { /* measurement failed — status/type still reported */ }
     }
     return out;
   } catch (err) {
-    return { url, ok: false, status: 0, contentType: '', isImage: false, width: null, height: null, scalable: false, error: String((err && err.message) || err) };
+    return { url, ok: false, status: 0, contentType: '', isImage: false, width: null, height: null, scalable: false, icoSizes: null, error: String((err && err.message) || err) };
   } finally {
     clearTimeout(timer);
   }
@@ -1728,7 +1782,13 @@ async function validateFavicon({ icons, manifestHref, defaultIcoUrl }) {
           return { href, sizes, type: String(ic.type || '').trim().toLowerCase() };
         });
         const hasSize = (dim) => micons.some(ic => ic.sizes.split(/\s+/).includes(dim));
-        manifest = { ok: true, icons: micons, has192: hasSize('192x192'), has512: hasSize('512x512') };
+        manifest = {
+          ok: true, icons: micons, has192: hasSize('192x192'), has512: hasSize('512x512'),
+          name: (m.name || '').trim() || null,
+          shortName: (m.short_name || '').trim() || null,
+          backgroundColor: (m.background_color || '').trim() || null,
+          themeColor: (m.theme_color || '').trim() || null
+        };
       } else {
         manifest = { ok: false, icons: [], has192: false, has512: false, status: res.status };
       }
@@ -1786,7 +1846,7 @@ async function adsGetStatus() {
 }
 
 function adsConnect() {
-  return googleOAuthConnect('https://www.googleapis.com/auth/adwords', 'adsAuth');
+  return googleOAuthConnectRequireScope('https://www.googleapis.com/auth/adwords', 'adsAuth', 'ADS_SCOPE_MISSING');
 }
 
 function adsDisconnect() {
@@ -2816,7 +2876,7 @@ function webceoDisconnect() {
 const GOOGLE_DOCS_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
 async function docsConnect() {
-  return googleOAuthConnect(GOOGLE_DOCS_SCOPE, 'docsAuth');
+  return googleOAuthConnectRequireScope(GOOGLE_DOCS_SCOPE, 'docsAuth', 'DOCS_SCOPE_MISSING');
 }
 
 async function docsGetStatus() {

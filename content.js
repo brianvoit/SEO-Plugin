@@ -134,10 +134,12 @@ function getFavicon() {
   const manEl = document.querySelector('link[rel="manifest"]');
   let origin = '';
   try { origin = new URL(document.baseURI).origin; } catch { /* ignore */ }
+  const titleEl = document.querySelector('meta[name="apple-mobile-web-app-title"]');
   return {
     icons,
     manifestHref: manEl ? (manEl.href || null) : null,
-    defaultIcoUrl: origin ? origin + '/favicon.ico' : null      // legacy fallback probe
+    defaultIcoUrl: origin ? origin + '/favicon.ico' : null,     // legacy fallback probe
+    appleWebAppTitle: titleEl ? (titleEl.getAttribute('content') || '').trim() || null : null
   };
 }
 

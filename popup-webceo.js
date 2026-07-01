@@ -436,7 +436,7 @@ async function refreshWebceoSettingsStatus() {
     box.classList.remove('hidden');
     refreshWebceoProjectInfo();
   } else {
-    badge.textContent = 'Not connected';
+    badge.textContent = 'Connect';
     badge.className = 'gsc-status-badge gsc-status-badge--disconnected';
     setWebceoKeyState(false);
     setWebceoConfigCollapsed(false);
@@ -512,9 +512,14 @@ document.getElementById('btn-webceo-key-clear').addEventListener('click', async 
   refreshWebceoSettingsStatus();
 });
 
-// The "Connected" chip doubles as the disconnect control
+// The chip is a 3-state control: "Connect" when disconnected (Web CEO has no
+// OAuth, so this just focuses the API-key field), "Connected" otherwise
+// (hover → red "Disconnect", click → disconnect).
 document.getElementById('webceo-status-badge').addEventListener('click', async (e) => {
-  if (!e.currentTarget.classList.contains('gsc-status-badge--connected')) return;
+  if (e.currentTarget.classList.contains('gsc-status-badge--disconnected')) {
+    document.getElementById('webceo-api-key').focus();
+    return;
+  }
   await sendMessageWithTimeout({ action: 'webceoDisconnect' });
   setWebceoKeyState(false);
   await refreshWebceoSettingsStatus();

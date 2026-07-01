@@ -525,7 +525,7 @@ async function refreshGaSettingsStatus() {
     setAccountEmail('ga-account-email', status.email);
     refreshGaPropertyInfo();
   } else {
-    badge.textContent = 'Not connected';
+    badge.textContent = 'Connect';
     badge.className = 'gsc-status-badge gsc-status-badge--disconnected';
     setupForm.classList.remove('hidden');
     connectedInfo.classList.add('hidden');
@@ -607,32 +607,37 @@ function renderSelectedRow(container, label, onTrash, id) {
   container.appendChild(row);
 }
 
-document.getElementById('btn-ga-connect').addEventListener('click', async () => {
-  const btn = document.getElementById('btn-ga-connect');
+async function connectGa() {
+  const badge = document.getElementById('ga-status-badge');
   const errorEl = document.getElementById('ga-connect-error');
   errorEl.classList.add('hidden');
 
-  btn.disabled = true;
-  btn.textContent = 'Connecting…';
+  badge.textContent = 'Connecting…';
+  badge.classList.add('is-busy');
   try {
     const result = await sendMessageWithTimeout({ action: 'gaConnect' });
     if (result.error) {
       if (result.error !== 'FLOW_CANCELLED') {
         errorEl.textContent = gscConnectErrorMessage(result.error);
         errorEl.classList.remove('hidden');
+        if (typeof revealOauthClientSection === 'function') revealOauthClientSection();
       }
+      badge.textContent = 'Connect';
     } else {
       await refreshGaSettingsStatus();
     }
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Connect Google Analytics';
+    badge.classList.remove('is-busy');
   }
-});
+}
 
-// The "Connected" chip doubles as the disconnect control (hover → red Disconnect)
+// The chip is a 3-state control: "Connect" when disconnected (click → connect),
+// "Connected" otherwise (hover → red "Disconnect", click → disconnect).
 document.getElementById('ga-status-badge').addEventListener('click', async (e) => {
-  if (!e.currentTarget.classList.contains('gsc-status-badge--connected')) return;
+  if (e.currentTarget.classList.contains('gsc-status-badge--disconnected')) {
+    connectGa();
+    return;
+  }
   await sendMessageWithTimeout({ action: 'gaDisconnect' });
   await refreshGaSettingsStatus();
 });

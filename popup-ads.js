@@ -985,7 +985,7 @@ async function refreshAdsSettingsStatus() {
     });
     refreshAdsAccountInfo();
   } else {
-    badge.textContent = 'Not connected';
+    badge.textContent = 'Connect';
     badge.className = 'gsc-status-badge gsc-status-badge--disconnected';
     setup.classList.remove('hidden');
     info.classList.add('hidden');
@@ -1028,29 +1028,36 @@ async function refreshAdsAccountInfo() {
   renderAdsAccountOptions(allEl, res.accounts, res.account, null);
 }
 
-document.getElementById('btn-ads-connect').addEventListener('click', async () => {
-  const btn = document.getElementById('btn-ads-connect');
+async function connectAds() {
+  const badge = document.getElementById('ads-status-badge');
   const errorEl = document.getElementById('ads-connect-error');
   errorEl.classList.add('hidden');
-  btn.disabled = true; btn.textContent = 'Connecting…';
+  badge.textContent = 'Connecting…';
+  badge.classList.add('is-busy');
   try {
     const result = await sendMessageWithTimeout({ action: 'adsConnect' });
     if (result.error) {
       if (result.error !== 'FLOW_CANCELLED') {
         errorEl.textContent = gscConnectErrorMessage(result.error);
         errorEl.classList.remove('hidden');
+        if (typeof revealOauthClientSection === 'function') revealOauthClientSection();
       }
+      badge.textContent = 'Connect';
     } else {
       await refreshAdsSettingsStatus();
     }
   } finally {
-    btn.disabled = false; btn.textContent = 'Connect Google Ads';
+    badge.classList.remove('is-busy');
   }
-});
+}
 
-// The "Connected" chip doubles as the disconnect control (hover → red Disconnect)
+// The chip is a 3-state control: "Connect" when disconnected (click → connect),
+// "Connected" otherwise (hover → red "Disconnect", click → disconnect).
 document.getElementById('ads-status-badge').addEventListener('click', async (e) => {
-  if (!e.currentTarget.classList.contains('gsc-status-badge--connected')) return;
+  if (e.currentTarget.classList.contains('gsc-status-badge--disconnected')) {
+    connectAds();
+    return;
+  }
   await sendMessageWithTimeout({ action: 'adsDisconnect' });
   setAdsTokenState(false);   // return the token field to its editable state
   await refreshAdsSettingsStatus();

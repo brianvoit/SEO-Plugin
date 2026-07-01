@@ -481,7 +481,7 @@ async function generateAddKw(force) {
       },
       body: JSON.stringify({
         model: MODEL_MID,
-        max_tokens: 2048,
+        max_tokens: 4096,
         system: addkwSystemBlocks,
         messages: [{ role: 'user', content: context }]
       })
@@ -671,7 +671,7 @@ async function generateAddKwBlindspots(force) {
       },
       body: JSON.stringify({
         model: MODEL_MID,
-        max_tokens: 1500,
+        max_tokens: 4096,
         system: [{ type: 'text', text: ADDKW_BLINDSPOT_SYSTEM, cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: context }]
       })

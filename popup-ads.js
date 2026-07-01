@@ -2190,11 +2190,86 @@ function renderNegatives() {
   });
   body.appendChild(table);
 
-  // Export area (populated after a successful commit)
+  // Export area: usable immediately so a checked-but-not-yet-committed list can
+  // be downloaded/copied/shared for review, independent of pushing to Google
+  // Ads. Replaced with a commit summary once "Add to Google Ads" succeeds.
   const exportWrap = document.createElement('div');
   exportWrap.id = 'neg-export';
-  exportWrap.className = 'field-section neg-export hidden';
+  exportWrap.className = 'field-section neg-export';
   body.appendChild(exportWrap);
+  renderNegPreExport(exportWrap);
+}
+
+// Builds the same {campaignName, name, terms} shape buildNegativesOutline
+// expects, from the currently checked rows + each campaign's current
+// destination-list choice — recomputed fresh on every export action so it
+// always reflects the live checkbox/list-picker state.
+function negCurrentExportLists() {
+  const byCamp = new Map();
+  (_negRecs || []).filter(r => r.include && r.campaignId).forEach(r => {
+    if (!byCamp.has(r.campaignId)) byCamp.set(r.campaignId, { campaignId: r.campaignId, campaignName: r.campaignName, terms: [] });
+    byCamp.get(r.campaignId).terms.push({ text: r.text, matchType: r.matchType });
+  });
+  return [...byCamp.values()].map(c => {
+    const choice = _negListChoice[c.campaignId];
+    const chosen = choice && (_negCampaignLists[c.campaignId] || []).find(l => l.id === choice);
+    const name = chosen ? chosen.name : `Campaign - ${c.campaignName || 'Campaign'}`;
+    return { campaignName: c.campaignName, name, terms: c.terms };
+  });
+}
+
+// Pre-commit export row: Download/Copy/Create Doc, available the moment
+// there are checked terms — lets someone else review the list before it's
+// pushed to Google Ads.
+function renderNegPreExport(wrap) {
+  wrap.replaceChildren();
+
+  const head = document.createElement('div');
+  head.className = 'field-label';
+  head.textContent = 'Export';
+  wrap.appendChild(head);
+
+  const hint = document.createElement('div');
+  hint.className = 'field-hint';
+  hint.textContent = 'Download, copy, or share the checked terms for review — independent of adding them to Google Ads.';
+  wrap.appendChild(hint);
+
+  const exportRow = document.createElement('div');
+  exportRow.className = 'neg-export-actions';
+
+  const txtBtn = document.createElement('button');
+  txtBtn.className = 'save-key-btn';
+  txtBtn.textContent = 'Download .txt';
+  txtBtn.addEventListener('click', () => {
+    const lists = negCurrentExportLists();
+    if (!lists.length) { txtBtn.title = 'Check at least one term first'; return; }
+    downloadNegativesTxt(lists);
+  });
+  exportRow.appendChild(txtBtn);
+
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'save-key-btn';
+  copyBtn.textContent = 'Copy list';
+  copyBtn.addEventListener('click', () => {
+    const lists = negCurrentExportLists();
+    if (!lists.length) { copyBtn.title = 'Check at least one term first'; return; }
+    copyToClipboard(buildNegativesOutline(lists));
+    copyBtn.textContent = 'Copied ✓';
+    setTimeout(() => { copyBtn.textContent = 'Copy list'; }, 1500);
+  });
+  exportRow.appendChild(copyBtn);
+
+  const docBtn = document.createElement('button');
+  docBtn.className = 'save-key-btn';
+  docBtn.textContent = 'Create Google Doc';
+  docBtn.addEventListener('click', () => {
+    const lists = negCurrentExportLists();
+    if (!lists.length) { docBtn.title = 'Check at least one term first'; return; }
+    exportNegativesToDoc(docBtn, lists);
+  });
+  exportRow.appendChild(docBtn);
+
+  wrap.appendChild(exportRow);
 }
 
 async function commitNegatives(btn) {
@@ -2234,8 +2309,7 @@ async function commitNegatives(btn) {
     btn.textContent = 'Add to Google Ads';
     btn.title = err.message;
     if (exportWrap) {
-      exportWrap.classList.remove('hidden');
-      exportWrap.replaceChildren();
+      renderNegPreExport(exportWrap);
       const e = document.createElement('div');
       e.className = 'gen-result-text is-error';
       e.textContent = err.message;
@@ -2244,12 +2318,13 @@ async function commitNegatives(btn) {
   }
 }
 
-// Outline format: -List name / --term (broad) / --"term" (phrase) / --[term] (exact)
+// Outline format: bullet for the list, indented sub-bullet per term
+// (term punctuation: term (broad) / "term" (phrase) / [term] (exact))
 function buildNegativesOutline(lists) {
   const out = [];
   lists.forEach(list => {
-    out.push(`-Added Negatives to ${list.campaignName || 'Campaign'} →  ${list.name}`);
-    list.terms.forEach(t => out.push(`--${adsFormatKeyword(t.text, t.matchType)}`));
+    out.push(`• Added Negatives to ${list.campaignName || 'Campaign'} → ${list.name}`);
+    list.terms.forEach(t => out.push(`  ◦ ${adsFormatKeyword(t.text, t.matchType)}`));
   });
   return out.join('\n');
 }
@@ -2334,8 +2409,12 @@ function renderNegativesResult(results, commitBtn) {
   }
 }
 
-async function exportNegativesToDoc(btn) {
-  if (!_negResultLists || !_negResultLists.length) return;
+// `lists` defaults to the last committed result (_negResultLists) when called
+// from the post-commit export row; the pre-commit export row passes the
+// currently checked lists explicitly instead.
+async function exportNegativesToDoc(btn, lists) {
+  const useLists = lists || _negResultLists;
+  if (!useLists || !useLists.length) return;
   let pageUrl = '';
   try { pageUrl = (pageData && pageData.canonical) || (await getActiveTab()).url; } catch { /* keep default */ }
 
@@ -2344,7 +2423,7 @@ async function exportNegativesToDoc(btn) {
   btn.textContent = 'Creating…';
 
   async function attempt() {
-    return browser.runtime.sendMessage({ action: 'docsExportNegatives', lists: _negResultLists, pageUrl });
+    return browser.runtime.sendMessage({ action: 'docsExportNegatives', lists: useLists, pageUrl });
   }
   let res = await attempt();
   if (res && res.notConnected) {

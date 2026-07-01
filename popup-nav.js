@@ -12,6 +12,7 @@ const actionPlanPanel = document.getElementById('actionplan-panel');
 const hreflangPanel   = document.getElementById('hreflang-panel');
 const adcopyPanel     = document.getElementById('adcopy-panel');
 const negativesPanel  = document.getElementById('negatives-panel');
+const addkwPanel      = document.getElementById('addkw-panel');
 const adgroupPanel    = document.getElementById('adgroup-panel');
 const searchTab     = document.getElementById('search-tab');
 const analyticsTab  = document.getElementById('analytics-tab');
@@ -37,6 +38,7 @@ function hideDetailPanels() {
   hreflangPanel.classList.add('hidden');
   adcopyPanel.classList.add('hidden');
   negativesPanel.classList.add('hidden');
+  addkwPanel.classList.add('hidden');
   adgroupPanel.classList.add('hidden');
 }
 
@@ -119,6 +121,12 @@ function showNegativesPanel() {
   if (typeof openNegativesPanel === 'function') openNegativesPanel();
 }
 
+function showAddKwPanel(source) {
+  enterDetailPanel();
+  addkwPanel.classList.remove('hidden');
+  if (typeof openAddKwPanel === 'function') openAddKwPanel(source);
+}
+
 function showAdGroupPanel() {
   enterDetailPanel();
   adgroupPanel.classList.remove('hidden');
@@ -176,6 +184,12 @@ function hideSettings() {
 document.getElementById('btn-settings').addEventListener('click', showSettings);
 document.getElementById('btn-schema').addEventListener('click', showSchemaPanel);
 document.getElementById('btn-schema-back').addEventListener('click', hideDetailPanelToTab);
+document.getElementById('btn-schema-rich-results').addEventListener('click', async () => {
+  let url = '';
+  try { url = (pageData && pageData.canonical) || (await getActiveTab()).url; } catch { /* keep default */ }
+  if (!url) return;
+  browser.tabs.create({ url: 'https://search.google.com/test/rich-results?url=' + encodeURIComponent(url) });
+});
 document.getElementById('btn-og').addEventListener('click', showOgPanel);
 document.getElementById('btn-og-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-tw').addEventListener('click', showTwPanel);
@@ -192,6 +206,14 @@ document.getElementById('btn-gen-negatives').addEventListener('click', showNegat
 document.getElementById('btn-negatives-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-negatives-regen').addEventListener('click', () => { if (typeof generateNegatives === 'function') generateNegatives(true); });
 document.getElementById('btn-negatives-commit').addEventListener('click', () => { if (typeof commitNegatives === 'function') commitNegatives(document.getElementById('btn-negatives-commit')); });
+document.getElementById('btn-gen-addkw').addEventListener('click', () => showAddKwPanel('ads'));
+document.getElementById('btn-gen-addkw-gsc').addEventListener('click', () => showAddKwPanel('gsc'));
+document.getElementById('btn-addkw-back').addEventListener('click', hideDetailPanelToTab);
+document.getElementById('btn-addkw-regen').addEventListener('click', () => { if (typeof generateAddKw === 'function') generateAddKw(true); });
+document.getElementById('btn-addkw-commit').addEventListener('click', () => { if (typeof commitAddKw === 'function') commitAddKw(document.getElementById('btn-addkw-commit')); });
+document.getElementById('btn-addkw-export-txt').addEventListener('click', () => { if (typeof handleAddKwExportTxt === 'function') handleAddKwExportTxt(document.getElementById('btn-addkw-export-txt')); });
+document.getElementById('btn-addkw-export-copy').addEventListener('click', () => { if (typeof handleAddKwExportCopy === 'function') handleAddKwExportCopy(document.getElementById('btn-addkw-export-copy')); });
+document.getElementById('btn-addkw-export-doc').addEventListener('click', () => { if (typeof handleAddKwExportDoc === 'function') handleAddKwExportDoc(document.getElementById('btn-addkw-export-doc')); });
 document.getElementById('btn-adgroup-back').addEventListener('click', hideDetailPanelToTab);
 
 // ─── Main tabs (Overview / Search / Analytics / DNS / Redirect) ──────────────
@@ -209,6 +231,7 @@ document.querySelectorAll('#main-tabs [data-tab]').forEach(btn => {
       || !hreflangPanel.classList.contains('hidden')
       || !adcopyPanel.classList.contains('hidden')
       || !negativesPanel.classList.contains('hidden')
+      || !addkwPanel.classList.contains('hidden')
       || !adgroupPanel.classList.contains('hidden');
     if (tab === activeTab && !inPanel) return;
     activeTab = tab;

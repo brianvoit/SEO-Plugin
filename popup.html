@@ -424,6 +424,9 @@
         </svg>
         Back
       </button>
+      <div class="settings-header-actions">
+        <button id="btn-schema-rich-results" class="save-key-btn" title="Open this page in Google's Rich Results Test">Test in Rich Results ↗</button>
+      </div>
     </div>
     <div id="schema-detail-content"></div>
   </div>
@@ -542,6 +545,62 @@
     <div id="negatives-body"></div>
   </div>
 
+  <!-- Add Keywords detail panel (launched from both Search tab and Ads tab) -->
+  <div id="addkw-panel" class="hidden">
+    <div class="settings-header">
+      <button id="btn-addkw-back" class="settings-back-btn">
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="10 3 4 8 10 13"/>
+        </svg>
+        Back
+      </button>
+      <div class="settings-header-actions">
+        <button id="btn-addkw-export-txt" class="addkw-icon-btn hidden" title="Download .txt of the checked keywords">
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 2v8"/>
+            <polyline points="4.5 7 8 10.5 11.5 7"/>
+            <path d="M2.5 13.5h11"/>
+          </svg>
+        </button>
+        <button id="btn-addkw-export-copy" class="addkw-icon-btn hidden" title="Copy the checked keywords">
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="5" y="4" width="9" height="11" rx="1.5"/>
+            <path d="M3 12H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1"/>
+          </svg>
+        </button>
+        <button id="btn-addkw-export-doc" class="addkw-icon-btn hidden" title="Create a Google Doc of the checked keywords">
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 1.5h5.5L12.5 4.5V14.5H4Z"/>
+            <path d="M9.5 1.5V4.5H12.5"/>
+            <line x1="6" y1="8" x2="10.5" y2="8"/>
+            <line x1="6" y1="10.5" x2="10.5" y2="10.5"/>
+          </svg>
+        </button>
+        <button id="btn-addkw-regen" class="addkw-icon-btn" title="Re-run the analysis">
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M13.5 8A5.5 5.5 0 1 1 8 2.5a5.5 5.5 0 0 1 3.9 1.6L13.5 5.6"/>
+            <polyline points="13.5 2 13.5 5.6 9.9 5.6"/>
+          </svg>
+        </button>
+        <button id="btn-addkw-commit" class="save-key-btn hidden" title="Add the checked keywords to each ad group">+ to Ads</button>
+      </div>
+    </div>
+    <section class="field-section">
+      <div class="field-header">
+        <span class="field-label">ADD KEYWORDS</span>
+        <span class="neg-header-right">
+          <button class="info-tip" type="button" title="Suggestions are scored for relevance to this page. Branded terms are excluded.">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7.5" x2="8" y2="11"/><circle cx="8" cy="5" r="0.55" fill="currentColor" stroke="none"/>
+            </svg>
+          </button>
+          <span id="addkw-tuned" class="adcopy-tuned"></span>
+        </span>
+      </div>
+    </section>
+    <div id="addkw-body"></div>
+  </div>
+
   <!-- Ad group drill-in detail panel (ads → ad → assets) -->
   <div id="adgroup-panel" class="hidden">
     <div class="settings-header">
@@ -654,11 +713,19 @@
       <section class="field-section">
         <div class="field-header">
           <span class="field-label">QUERIES</span>
-          <div class="alt-header-control">
-            <span class="alt-header-label">HIDE BRANDED</span>
-            <button id="btn-gsc-branded-toggle" class="toggle-btn" aria-pressed="true">
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          <div class="field-header-actions">
+            <button class="adcopy-launch-btn" id="btn-gen-addkw-gsc" title="Find new keywords to add to Google Ads, sourced from these queries">
+              Add Keywords
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="5" x2="8" y2="11"/><line x1="5" y1="8" x2="11" y2="8"/>
+              </svg>
             </button>
+            <div class="alt-header-control">
+              <span class="alt-header-label">BRAND</span>
+              <button id="btn-gsc-branded-toggle" class="toggle-btn" aria-pressed="true">
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </button>
+            </div>
           </div>
         </div>
         <div class="gsc-query-search-bar" id="gsc-query-search-bar">
@@ -920,18 +987,24 @@
         <div class="field-header">
           <span class="field-label">SEARCH TERMS</span>
           <div class="field-header-actions">
-            <div class="alt-header-control">
-              <span class="alt-header-label">HIDE BRANDED</span>
-              <button id="btn-ads-branded-toggle" class="toggle-btn" aria-pressed="true">
-                <span class="toggle-track"><span class="toggle-thumb"></span></span>
-              </button>
-            </div>
+            <button class="adcopy-launch-btn" id="btn-gen-addkw" title="Find new keywords to add, sourced from search terms, with Claude">
+              Add Keywords
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="5" x2="8" y2="11"/><line x1="5" y1="8" x2="11" y2="8"/>
+              </svg>
+            </button>
             <button class="adcopy-launch-btn" id="btn-gen-negatives" title="Find low-quality search terms to exclude, with Claude">
               Refine Negatives
               <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="8" cy="8" r="6.5"/><line x1="5" y1="8" x2="11" y2="8"/>
               </svg>
             </button>
+            <div class="alt-header-control">
+              <span class="alt-header-label">BRAND</span>
+              <button id="btn-ads-branded-toggle" class="toggle-btn" aria-pressed="true">
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </button>
+            </div>
           </div>
         </div>
         <div class="gsc-query-search-bar" id="ads-terms-search-bar">
@@ -1334,6 +1407,7 @@
   <script src="popup-gsc.js"></script>
   <script src="popup-ga.js"></script>
   <script src="popup-ads.js"></script>
+  <script src="popup-addkw.js"></script>
   <script src="popup-webceo.js"></script>
   <script src="popup-redirects.js"></script>
   <script src="popup-dns.js"></script>

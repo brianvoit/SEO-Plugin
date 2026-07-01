@@ -740,21 +740,27 @@ function renderHreflangDetail() {
 
 // ─── Render: structured data ─────────────────────────────────────────────────
 
-// Recommended properties per common Schema.org type — a missing one is a
-// yellow flag (rich-result eligibility usually needs these).
-const SCHEMA_RECOMMENDED = {
-  Article:       ['headline', 'image', 'datePublished', 'author'],
-  BlogPosting:   ['headline', 'image', 'datePublished', 'author'],
-  NewsArticle:   ['headline', 'image', 'datePublished', 'author'],
-  Product:       ['name', 'image'],
-  Recipe:        ['name', 'image', 'recipeIngredient', 'recipeInstructions'],
-  Organization:  ['name', 'logo', 'url'],
-  LocalBusiness: ['name', 'address', 'telephone'],
-  Event:         ['name', 'startDate', 'location'],
-  VideoObject:   ['name', 'thumbnailUrl', 'uploadDate'],
-  BreadcrumbList:['itemListElement'],
-  FAQPage:       ['mainEntity'],
-  Person:        ['name']
+// Required vs recommended properties per Schema.org type, per Google's
+// published Search Gallery structured-data guidelines
+// (developers.google.com/search/docs/appearance/structured-data). "required"
+// means Google won't show the rich result at all without it; "recommended"
+// means the result is eligible but weaker/less featured.
+const SCHEMA_GOOGLE_RULES = {
+  Article:       { required: ['headline', 'image'],              recommended: ['author', 'datePublished', 'dateModified', 'publisher'] },
+  BlogPosting:   { required: ['headline', 'image'],              recommended: ['author', 'datePublished', 'dateModified', 'publisher'] },
+  NewsArticle:   { required: ['headline', 'image'],              recommended: ['author', 'datePublished', 'dateModified', 'publisher'] },
+  Product:       { required: ['name'],                           recommended: ['image', 'description', 'sku', 'brand', 'offers', 'aggregateRating', 'review'] },
+  Recipe:        { required: ['name', 'image'],                  recommended: ['author', 'datePublished', 'description', 'prepTime', 'cookTime', 'totalTime', 'recipeYield', 'recipeIngredient', 'recipeInstructions', 'nutrition', 'aggregateRating', 'video'] },
+  Organization:  { required: ['name'],                           recommended: ['logo', 'url', 'sameAs', 'contactPoint'] },
+  LocalBusiness: { required: ['name', 'address'],                recommended: ['telephone', 'openingHoursSpecification', 'priceRange', 'geo', 'image'] },
+  Event:         { required: ['name', 'startDate', 'location'],  recommended: ['endDate', 'image', 'offers', 'performer', 'organizer', 'eventStatus', 'eventAttendanceMode'] },
+  VideoObject:   { required: ['name', 'description', 'thumbnailUrl', 'uploadDate'], recommended: ['duration', 'contentUrl', 'embedUrl'] },
+  BreadcrumbList:{ required: ['itemListElement'],                recommended: [] },
+  FAQPage:       { required: ['mainEntity'],                     recommended: [] },
+  Person:        { required: ['name'],                           recommended: ['url', 'image', 'jobTitle', 'worksFor'] },
+  Review:        { required: ['reviewRating', 'author'],         recommended: ['itemReviewed'] },
+  AggregateRating:{ required: ['ratingValue', 'reviewCount'],    recommended: ['bestRating', 'worstRating'] },
+  JobPosting:    { required: ['title', 'description', 'datePosted', 'hiringOrganization', 'jobLocation'], recommended: ['validThrough', 'employmentType', 'baseSalary'] },
 };
 
 function schemaIsMissing(schema, prop) {
@@ -762,15 +768,44 @@ function schemaIsMissing(schema, prop) {
   return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 }
 
-// Worst status across all schemas: red for invalid JSON-LD, amber for a
-// recognized type missing a recommended property
+// Very lightweight format sanity checks — not a full validator, just catches
+// the common "technically present but obviously wrong" mistakes (a relative
+// or empty string where a URL is expected, an unparseable date).
+const SCHEMA_URL_KEYS  = ['url', 'logo', 'thumbnailUrl', 'contentUrl', 'embedUrl'];
+const SCHEMA_DATE_KEYS = ['datePublished', 'dateModified', 'startDate', 'endDate', 'uploadDate', 'datePosted', 'validThrough'];
+
+function schemaFormatIssues(node) {
+  const issues = [];
+  Object.entries(node).forEach(([key, val]) => {
+    if (key.startsWith('@') || val == null) return;
+    if (SCHEMA_DATE_KEYS.includes(key) && typeof val === 'string' && isNaN(Date.parse(val))) {
+      issues.push(`"${key}" doesn't look like a valid date ("${val}")`);
+    }
+    if (SCHEMA_URL_KEYS.includes(key)) {
+      const s = typeof val === 'string' ? val : (val && typeof val === 'object' ? val.url : null);
+      if (s && !/^https?:\/\//i.test(s)) issues.push(`"${key}" doesn't look like an absolute URL ("${s}")`);
+    }
+  });
+  return issues;
+}
+
+// Worst status across all schemas: red for invalid JSON-LD or a recognized
+// type missing a REQUIRED property, amber for a missing recommended property
+// or a format issue.
 function schemaWorstLevel(schemas, invalidCount) {
   if (invalidCount > 0) return 'error';
   for (const schema of schemas) {
     for (const type of [].concat(schema['@type'])) {
-      const rec = SCHEMA_RECOMMENDED[type];
-      if (rec && rec.some(p => schemaIsMissing(schema, p))) return 'warning';
+      const rules = SCHEMA_GOOGLE_RULES[type];
+      if (rules && rules.required.some(p => schemaIsMissing(schema, p))) return 'error';
     }
+  }
+  for (const schema of schemas) {
+    for (const type of [].concat(schema['@type'])) {
+      const rules = SCHEMA_GOOGLE_RULES[type];
+      if (rules && rules.recommended.some(p => schemaIsMissing(schema, p))) return 'warning';
+    }
+    if (schemaFormatIssues(schema).length) return 'warning';
   }
   return 'ok';
 }
@@ -796,46 +831,226 @@ function renderStructuredData(data) {
 let _schemaSuggestions = null;
 let _schemaSuggestLoading = false;
 
+// How many levels of nested objects/arrays-of-objects to expand inline
+// (e.g. WebPage -> address -> PostalAddress fields is depth 1; a further
+// nested object inside that would be depth 2, then we stop and just show
+// its type/ref so a deeply linked graph can't blow up the panel).
+const SCHEMA_MAX_DEPTH = 2;
+
+// A node that's purely a cross-reference into the page's @graph — e.g.
+// {"@id":"https://site.com/#website"} with no other fields. Common in
+// Yoast/RankMath-style linked schema (isPartOf, breadcrumb, publisher, …).
+function schemaIsRefOnly(val) {
+  if (!val || typeof val !== 'object' || Array.isArray(val)) return false;
+  return !!val['@id'] && Object.keys(val).filter(k => k !== '@id').length === 0;
+}
+
+// Trim a long @id URL down to its fragment ("#/schema/WebSite") when present,
+// since that's the meaningful, stable part for a same-page reference.
+function schemaShortRef(id) {
+  const s = String(id || '');
+  const hashIdx = s.indexOf('#');
+  if (hashIdx !== -1) return s.slice(hashIdx);
+  return s.length > 60 ? s.slice(0, 60) + '…' : s;
+}
+
+function appendSchemaRow(container, key, valueText, title) {
+  const row = document.createElement('div');
+  row.className = 'schema-prop';
+  const keyEl = document.createElement('span');
+  keyEl.className = 'schema-key';
+  keyEl.textContent = key;
+  const valEl = document.createElement('span');
+  valEl.className = 'schema-val';
+  valEl.textContent = valueText;
+  if (title) valEl.title = title;
+  row.append(keyEl, valEl);
+  container.appendChild(row);
+}
+
+// Validation summary for one entity: red rows for missing REQUIRED
+// properties (Google won't grant the rich result at all), amber rows for
+// missing recommended ones or format issues. Nothing rendered for types with
+// no known rule set (unchanged from before — we simply don't claim to
+// validate what we don't have documented rules for).
+function renderSchemaValidation(node, container) {
+  const types = [].concat(node['@type']).filter(Boolean);
+  const rules = types.map(t => SCHEMA_GOOGLE_RULES[t]).find(Boolean);
+  const formatIssues = schemaFormatIssues(node);
+  if (!rules && !formatIssues.length) return;
+
+  const missingRequired    = rules ? rules.required.filter(p => schemaIsMissing(node, p)) : [];
+  const missingRecommended = rules ? rules.recommended.filter(p => schemaIsMissing(node, p)) : [];
+
+  if (!missingRequired.length && !missingRecommended.length && !formatIssues.length) {
+    const ok = document.createElement('div');
+    ok.className = 'schema-validation-row schema-validation-row--ok';
+    ok.textContent = '✓ Has everything Google documents for this type';
+    container.appendChild(ok);
+    return;
+  }
+  if (missingRequired.length) {
+    const row = document.createElement('div');
+    row.className = 'schema-validation-row schema-validation-row--error';
+    row.textContent = `✗ Missing required: ${missingRequired.join(', ')}`;
+    container.appendChild(row);
+  }
+  if (missingRecommended.length) {
+    const row = document.createElement('div');
+    row.className = 'schema-validation-row schema-validation-row--warning';
+    row.textContent = `⚠ Missing recommended: ${missingRecommended.join(', ')}`;
+    container.appendChild(row);
+  }
+  formatIssues.forEach(msg => {
+    const row = document.createElement('div');
+    row.className = 'schema-validation-row schema-validation-row--warning';
+    row.textContent = `⚠ ${msg}`;
+    container.appendChild(row);
+  });
+}
+
+// Renders one schema property. Primitives are a single key:value line.
+// A reference into the @graph ({"@id":"..."}) is resolved and inlined as a
+// full nested entity card the first time it's encountered (so the hierarchy
+// is visible in place, not split across separate top-level cards); if that
+// entity was already rendered elsewhere in the tree, it falls back to a
+// "→ #fragment" pointer so shared/cyclic references can't loop or duplicate.
+// Anonymous (no @id) nested objects/arrays get the same treatment up to
+// SCHEMA_MAX_DEPTH, purely to bound worst-case render size.
+function renderSchemaValue(key, val, container, depth, byId, seenIds) {
+  if (val === undefined || val === null || val === '') return;
+
+  if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
+    const full = String(val);
+    appendSchemaRow(container, key, full.length > 80 ? full.slice(0, 80) + '…' : full, full.length > 80 ? full : undefined);
+    return;
+  }
+
+  if (Array.isArray(val)) {
+    if (!val.length) return;
+    const hasObjects = val.some(v => v && typeof v === 'object');
+    if (!hasObjects) {
+      const joined = val.map(String).join(', ');
+      appendSchemaRow(container, key, joined.length > 80 ? joined.slice(0, 80) + '…' : joined, joined);
+      return;
+    }
+    appendSchemaRow(container, key, `${val.length} item${val.length !== 1 ? 's' : ''}`);
+    const wrapAll = document.createElement('div');
+    wrapAll.className = 'schema-nested';
+    val.forEach((item, i) => {
+      if (!item || typeof item !== 'object') return;
+      if (schemaIsRefOnly(item)) {
+        const target = byId.get(item['@id']);
+        if (target && !seenIds.has(item['@id'])) {
+          const label = document.createElement('div');
+          label.className = 'schema-nested-label';
+          label.textContent = `${key}[${i + 1}]`;
+          wrapAll.appendChild(label);
+          renderSchemaEntity(target, wrapAll, byId, seenIds, true);
+        } else {
+          appendSchemaRow(wrapAll, `${key}[${i + 1}]`, `→ ${schemaShortRef(item['@id'])}`, item['@id']);
+        }
+        return;
+      }
+      const label = document.createElement('div');
+      label.className = 'schema-nested-label';
+      const itemType = item['@type'] ? [].concat(item['@type']).join(' + ') : '';
+      label.textContent = `${key}[${i + 1}]` + (itemType ? ` · ${itemType}` : '');
+      wrapAll.appendChild(label);
+      if (depth < SCHEMA_MAX_DEPTH) {
+        Object.entries(item).forEach(([k, v]) => { if (!k.startsWith('@')) renderSchemaValue(k, v, wrapAll, depth + 1, byId, seenIds); });
+      }
+    });
+    container.appendChild(wrapAll);
+    return;
+  }
+
+  // Plain object: either a graph reference (resolve + inline once) or an
+  // anonymous embedded object (expand its own fields up to the depth cap).
+  if (schemaIsRefOnly(val)) {
+    const target = byId.get(val['@id']);
+    if (target && !seenIds.has(val['@id'])) {
+      appendSchemaRow(container, key, [].concat(target['@type']).join(' + ') || '(object)');
+      const wrap = document.createElement('div');
+      wrap.className = 'schema-nested';
+      renderSchemaEntity(target, wrap, byId, seenIds, true);
+      container.appendChild(wrap);
+    } else {
+      appendSchemaRow(container, key, `→ ${schemaShortRef(val['@id'])}`, val['@id']);
+    }
+    return;
+  }
+  const ownKeys = Object.keys(val).filter(k => !k.startsWith('@'));
+  const typeLabel = val['@type'] ? [].concat(val['@type']).join(' + ') : '';
+  appendSchemaRow(container, key, val.name || typeLabel || val.url || '(object)');
+  if (!ownKeys.length || depth >= SCHEMA_MAX_DEPTH) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'schema-nested';
+  ownKeys.forEach(k => renderSchemaValue(k, val[k], wrap, depth + 1, byId, seenIds));
+  container.appendChild(wrap);
+}
+
+// Renders a full entity — type header, validation summary, and every own
+// property — used for both top-level roots and inlined graph references.
+function renderSchemaEntity(node, container, byId, seenIds, nested) {
+  const type = [].concat(node['@type']).join(' + ') || 'Unknown';
+  const card = document.createElement('div');
+  card.className = nested ? 'schema-card schema-card--nested' : 'schema-card';
+
+  const header = document.createElement('div');
+  header.className = 'schema-type-name';
+  header.textContent = type;
+  card.appendChild(header);
+
+  if (node['@id']) seenIds.add(node['@id']);
+  renderSchemaValidation(node, card);
+
+  Object.entries(node).forEach(([key, val]) => {
+    if (key.startsWith('@')) return;
+    renderSchemaValue(key, val, card, 0, byId, seenIds);
+  });
+
+  container.appendChild(card);
+}
+
+// Every @id referenced anywhere within a node's own property values (not
+// recursing into other graph nodes — just this node's direct references).
+function schemaCollectRefs(node, refs) {
+  Object.entries(node).forEach(([k, v]) => {
+    if (k.startsWith('@')) return;
+    if (Array.isArray(v)) {
+      v.forEach(item => { if (item && typeof item === 'object' && item['@id']) refs.add(item['@id']); });
+    } else if (v && typeof v === 'object' && v['@id']) {
+      refs.add(v['@id']);
+    }
+  });
+}
+
 function renderSchemaDetail() {
   const content = document.getElementById('schema-detail-content');
   content.innerHTML = '';
+  if (!_schemas.length) { renderSchemaSuggestions(); return; }
 
-  _schemas.forEach(schema => {
-    const type = [].concat(schema['@type']).join(' + ') || 'Unknown';
-    const card = document.createElement('div');
-    card.className = 'schema-card';
+  const byId = new Map();
+  _schemas.forEach(s => { if (s && s['@id']) byId.set(s['@id'], s); });
 
-    const header = document.createElement('div');
-    header.className = 'schema-type-name';
-    header.textContent = type;
-    card.appendChild(header);
+  const referenced = new Set();
+  _schemas.forEach(s => schemaCollectRefs(s, referenced));
 
-    Object.entries(schema).forEach(([key, val]) => {
-      if (key.startsWith('@')) return;
-      let display;
-      if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
-        display = String(val);
-        if (display.length > 80) display = display.slice(0, 80) + '…';
-      } else if (Array.isArray(val)) {
-        display = `${val.length} item${val.length !== 1 ? 's' : ''}`;
-      } else if (val && typeof val === 'object') {
-        display = val.name || val['@type'] || val.url || '(object)';
-      } else { return; }
+  // Roots = entities nothing else points to (the natural top of the tree).
+  // If every entity is referenced by something (a pure cycle — rare, but
+  // possible), fall back to treating them all as roots so nothing vanishes.
+  let roots = _schemas.filter(s => !s['@id'] || !referenced.has(s['@id']));
+  if (!roots.length) roots = _schemas.slice();
 
-      const row = document.createElement('div');
-      row.className = 'schema-prop';
-      const keyEl = document.createElement('span');
-      keyEl.className = 'schema-key';
-      keyEl.textContent = key;
-      const valEl = document.createElement('span');
-      valEl.className = 'schema-val';
-      valEl.textContent = display;
-      row.appendChild(keyEl);
-      row.appendChild(valEl);
-      card.appendChild(row);
-    });
+  const seenIds = new Set();
+  roots.forEach(root => renderSchemaEntity(root, content, byId, seenIds, false));
 
-    content.appendChild(card);
+  // Safety net: anything the traversal above never reached still gets its
+  // own top-level card, so a full page's structured data is always visible.
+  _schemas.forEach(s => {
+    if (s['@id'] ? seenIds.has(s['@id']) : roots.includes(s)) return;
+    renderSchemaEntity(s, content, byId, seenIds, false);
   });
 
   renderSchemaSuggestions();

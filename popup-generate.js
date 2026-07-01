@@ -132,6 +132,7 @@ function clearGenResults() {
   });
   if (typeof resetAdCopy === 'function') resetAdCopy();
   if (typeof resetNegatives === 'function') resetNegatives();
+  if (typeof resetAddKw === 'function') resetAddKw();
 }
 
 // ─── Generate OG / Twitter text fields ───────────────────────────────────────

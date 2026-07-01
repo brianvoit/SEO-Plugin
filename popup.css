@@ -1277,6 +1277,15 @@ body.settings-open #update-footer { margin-top: auto; }
 }
 .schema-card:last-child { border-bottom: none; }
 
+/* A graph reference (@id) inlined under its referencing property, rather
+   than a top-level root — same layout, no outer border/padding since it
+   already sits inside a .schema-nested indent. */
+.schema-card--nested {
+  padding: 0;
+  border-bottom: none;
+  margin-bottom: 4px;
+}
+
 .schema-type-name {
   font-size: 12px;
   font-weight: 700;
@@ -1304,6 +1313,33 @@ body.settings-open #update-footer { margin-top: auto; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Indented breakdown of a nested object's own fields (e.g. address ->
+   PostalAddress's street/city/zip), or of each item in an array of objects
+   (e.g. breadcrumb itemListElement). Nests visually via repeated padding
+   when an object is nested more than one level deep. */
+.schema-nested {
+  margin: 2px 0 6px 8px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+.schema-nested-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+
+/* Per-entity validation summary against Google's documented rich-result
+   requirements — required vs recommended vs a basic format check. */
+.schema-validation-row {
+  font-size: 11px;
+  line-height: 1.4;
+  margin-bottom: 6px;
+}
+.schema-validation-row--ok      { color: var(--hint-green); }
+.schema-validation-row--warning { color: var(--hint-amber); }
+.schema-validation-row--error   { color: var(--hint-red); }
 
 /* ── Dates ────────────────────────────────────────────────────────────────── */
 
@@ -1553,6 +1589,27 @@ body.settings-open #update-footer { margin-top: auto; }
 /* ── Refine Negatives panel ─────────────────────────────────────────────────── */
 /* Right-aligned action group in the panel header (Add to Google Ads + Re-analyze) */
 .settings-header-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+/* Small accent-outlined icon buttons in a panel header (export glyphs, re-analyze) */
+.addkw-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 25px;
+  height: 25px;
+  flex-shrink: 0;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.addkw-icon-btn:hover { background: var(--accent); color: #fff; }
+.addkw-icon-btn:disabled { opacity: .5; cursor: default; }
+.addkw-icon-btn svg { overflow: visible; }
+.addkw-icon-btn.is-success { border-color: var(--hint-green); color: var(--hint-green); }
+.addkw-icon-btn.is-error   { border-color: var(--hint-red);   color: var(--hint-red); }
 /* Info glyph + "Tuned for…" chips, right side of the section header */
 .neg-header-right { display: flex; align-items: center; gap: 6px; min-width: 0; }
 #negatives-range-group { margin-top: 8px; }
@@ -1667,6 +1724,102 @@ body.settings-open #update-footer { margin-top: auto; }
 
 .neg-export { display: flex; flex-direction: column; gap: 4px; }
 .neg-export-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+/* ── Add Keywords (extends the neg-row grid with a Volume column) ───────────── */
+
+.addkw-table-head,
+.addkw-row {
+  display: grid;
+  grid-template-columns: 18px auto 1fr 50px 44px 42px 52px;
+  column-gap: 6px;
+}
+.addkw-table-head {
+  grid-template-areas: "check match term vol impr clk last";
+  padding: 6px 0;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+.addkw-h-vol  { grid-area: vol;  text-align: right; }
+.addkw-h-last { grid-area: last; text-align: center; }
+
+.addkw-row {
+  grid-template-areas:
+    "check match term   vol    impr clk  last"
+    ".     .     reason reason reason reason reason";
+  row-gap: 3px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.addkw-row:last-child { border-bottom: none; }
+.addkw-row--off { opacity: .5; }
+
+.addkw-term-wrap { grid-area: term; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.addkw-vol       { grid-area: vol;  text-align: right; }
+.addkw-cell-last { grid-area: last; text-align: center; }
+
+/* Destination ad-group picker: closed shows the full
+   "Campaign › Ad group" path; open shows campaign-grouped, indented options. */
+.addkw-ag-picker { position: relative; align-self: flex-start; max-width: 100%; }
+.addkw-ag-picker-btn {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--bg-section);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 5px;
+  cursor: pointer;
+}
+.addkw-ag-picker-btn:hover { color: var(--text); border-color: var(--text-muted); }
+.addkw-ag-picker.is-open .addkw-ag-picker-btn { border-color: var(--accent); color: var(--text); }
+
+.addkw-ag-picker-menu {
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 0;
+  z-index: 20;
+  min-width: 200px;
+  max-width: 280px;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--bg-section);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .35);
+  padding: 4px 0;
+}
+.addkw-ag-picker-group + .addkw-ag-picker-group { border-top: 1px solid var(--border); }
+.addkw-ag-picker-group-label {
+  padding: 5px 10px 2px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  color: var(--text-muted);
+}
+.addkw-ag-picker-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 5px 10px 5px 16px;
+  font-size: 11px;
+  color: var(--text);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.addkw-ag-picker-option:hover { background: var(--bg); color: var(--accent); }
+.addkw-ag-picker-option.is-active { color: var(--accent); font-weight: 600; }
+.addkw-ag-picker-empty { padding: 8px 10px; font-size: 11px; color: var(--text-muted); }
 
 /* ── Ad group drill-in (ad → assets) ────────────────────────────────────────── */
 /* Bold ad header (only shown when an ad group has multiple ads) */

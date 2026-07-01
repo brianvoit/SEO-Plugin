@@ -2247,6 +2247,66 @@ async function adsGetCampaignNegLists({ pageUrl, campaignIds }) {
   return { byCampaign };
 }
 
+// Every enabled ad group in the resolved account (not just ones already
+// serving ads on the current page) — lets the Add Keywords picker offer any
+// ad group as a destination, not only the ones already tied to this page.
+async function adsGetAllAdGroups({ pageUrl }) {
+  const tokenResult = await adsGetAccessToken();
+  if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
+  if (tokenResult.error === 'REAUTH_REQUIRED') return { connected: false, reauthRequired: true };
+  if (tokenResult.error) return { connected: true, error: tokenResult.error };
+  const accessToken = tokenResult.accessToken;
+
+  const customerId = await adsGetAccount(gscPageHost(pageUrl));
+  if (!customerId) return { connected: true, error: 'NO_ACCOUNT' };
+  const cid = adsDigits(customerId);
+
+  const res = await adsSearch(accessToken, cid,
+    `SELECT ad_group.id, ad_group.name, campaign.id, campaign.name
+     FROM ad_group
+     WHERE ad_group.status = 'ENABLED' AND campaign.status = 'ENABLED'
+     ORDER BY campaign.name, ad_group.name`);
+  if (res.error) return { connected: true, error: res.error, detail: res.detail };
+
+  const adGroups = (res.rows || [])
+    .map(r => ({
+      adGroupId: String(r.adGroup?.id || ''),
+      adGroupName: r.adGroup?.name || '',
+      campaignId: String(r.campaign?.id || ''),
+      campaignName: r.campaign?.name || ''
+    }))
+    .filter(a => a.adGroupId);
+
+  return { connected: true, adGroups };
+}
+
+// Every keyword text already targeted anywhere in the account (not scoped to
+// this page's ad groups) — used by the Add Keywords "Potential Blindspots"
+// brainstorm to avoid suggesting something that's already covered elsewhere.
+async function adsGetAllKeywords({ pageUrl }) {
+  const tokenResult = await adsGetAccessToken();
+  if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
+  if (tokenResult.error === 'REAUTH_REQUIRED') return { connected: false, reauthRequired: true };
+  if (tokenResult.error) return { connected: true, error: tokenResult.error };
+  const accessToken = tokenResult.accessToken;
+
+  const customerId = await adsGetAccount(gscPageHost(pageUrl));
+  if (!customerId) return { connected: true, error: 'NO_ACCOUNT' };
+  const cid = adsDigits(customerId);
+
+  const res = await adsSearch(accessToken, cid,
+    `SELECT ad_group_criterion.keyword.text
+     FROM keyword_view
+     WHERE ad_group_criterion.status != 'REMOVED' AND campaign.status = 'ENABLED'`);
+  if (res.error) return { connected: true, error: res.error, detail: res.detail };
+
+  const texts = [...new Set((res.rows || [])
+    .map(r => (r.adGroupCriterion?.keyword?.text || '').toLowerCase().trim())
+    .filter(Boolean))];
+
+  return { connected: true, texts };
+}
+
 async function adsAddNegatives({ pageUrl, campaigns }) {
   const tokenResult = await adsGetAccessToken();
   if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
@@ -2261,6 +2321,136 @@ async function adsAddNegatives({ pageUrl, campaigns }) {
   const results = [];
   for (const camp of (campaigns || [])) {
     results.push(await adsAddNegativesForCampaign(accessToken, cid, camp));
+  }
+  return { connected: true, results };
+}
+
+// ─── Add Keywords (Keyword Plan Idea Service + adGroupCriteria mutate) ──────
+const KW_IDEA_CHUNK = 20; // practical per-request seed-keyword batch size
+
+// One Keyword Plan Idea Service request. v1 defaults: English language, no
+// geoTargetConstants (global volume — disclosed in the UI), GOOGLE_SEARCH
+// network. Never throws — mirrors adsSearch/adsMutate's { rows/results } or
+// { error, detail } contract, so a rejected/unsupported call just yields no
+// volume rather than breaking the panel.
+async function adsGenerateKeywordIdeas(accessToken, customerId, keywords) {
+  const { adsDeveloperToken, adsManagerId } = await browser.storage.local.get(['adsDeveloperToken', 'adsManagerId']);
+  if (!adsDeveloperToken) return { error: 'NO_DEV_TOKEN' };
+
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    'developer-token': adsDeveloperToken,
+    'Content-Type': 'application/json'
+  };
+  if (adsManagerId) headers['login-customer-id'] = adsDigits(adsManagerId);
+
+  const body = {
+    keywordSeed: { keywords: keywords.slice(0, KW_IDEA_CHUNK) },
+    language: 'languageConstants/1000', // English
+    keywordPlanNetwork: 'GOOGLE_SEARCH',
+    includeAdultKeywords: false
+  };
+
+  let res;
+  try {
+    res = await fetch(`${GA_ADS_API}/customers/${adsDigits(customerId)}/keywordPlanIdeas:generateKeywordIdeas`, {
+      method: 'POST', headers, body: JSON.stringify(body)
+    });
+  } catch {
+    return { error: 'NETWORK' };
+  }
+  if (res.status === 429) return { error: 'RATE_LIMITED' };
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => null);
+    const msg = (Array.isArray(errBody) ? errBody[0] : errBody)?.error?.message;
+    return { error: 'API_ERROR', detail: msg || `HTTP ${res.status}` };
+  }
+  const data = await res.json();
+  return { results: data.results || [] };
+}
+
+// Fetches volume ideas for an arbitrary-length keyword list, chunking at
+// KW_IDEA_CHUNK per request. Returns { byKeyword: { "<lowercase text>": {avgMonthlySearches, competition} } }
+// — a partial/empty map (never an error) if the account/token isn't ready,
+// since volume is enrichment only and must never block the rest of the panel.
+async function adsGetKeywordIdeas({ pageUrl, keywords }) {
+  const tokenResult = await adsGetAccessToken();
+  if (tokenResult.error) return { byKeyword: {}, error: tokenResult.error };
+  const accessToken = tokenResult.accessToken;
+
+  const customerId = await adsGetAccount(gscPageHost(pageUrl));
+  if (!customerId) return { byKeyword: {}, error: 'NO_ACCOUNT' };
+  const cid = adsDigits(customerId);
+
+  const wanted = [...new Set((keywords || []).map(k => String(k || '').trim()).filter(Boolean))];
+  if (!wanted.length) return { byKeyword: {} };
+
+  const byKeyword = {};
+  for (let i = 0; i < wanted.length; i += KW_IDEA_CHUNK) {
+    const chunk = wanted.slice(i, i + KW_IDEA_CHUNK);
+    const res = await adsGenerateKeywordIdeas(accessToken, cid, chunk);
+    if (res.error) continue; // graceful no-op per chunk — never block the others
+    (res.results || []).forEach(r => {
+      const text = r.text || '';
+      if (!text) return;
+      byKeyword[text.toLowerCase()] = {
+        avgMonthlySearches: r.keywordIdeaMetrics?.avgMonthlySearches ?? null,
+        competition: r.keywordIdeaMetrics?.competition ?? null
+      };
+    });
+  }
+  return { byKeyword };
+}
+
+// Adds new positive keywords to a single ad group, deduping against existing
+// keyword_view criteria (text + match type). Simpler than the negatives flow —
+// no shared-set resolution, just attaching criteria to an ad group that
+// already exists.
+async function adsAddKeywordsForAdGroup(accessToken, cid, group) {
+  const { adGroupId, adGroupName, campaignName } = group;
+  const out = { adGroupId, adGroupName: adGroupName || null, campaignName: campaignName || null, added: [], skipped: [], error: null };
+  const wanted = (group.terms || []).filter(t => t && t.text && String(t.text).trim());
+  if (!wanted.length) return out;
+
+  const existingRes = await adsSearch(accessToken, cid,
+    `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type
+     FROM keyword_view WHERE ad_group.id = ${adsDigits(adGroupId)}`);
+  if (existingRes.error) { out.error = existingRes.detail || existingRes.error; return out; }
+  const have = new Set((existingRes.rows || []).map(r =>
+    `${(r.adGroupCriterion?.keyword?.text || '').toLowerCase()}::${r.adGroupCriterion?.keyword?.matchType || ''}`));
+
+  const ops = [];
+  wanted.forEach(t => {
+    const mt = negMatchType(t.matchType);
+    const text = String(t.text).trim();
+    const key = `${text.toLowerCase()}::${mt}`;
+    if (have.has(key)) { out.skipped.push({ text, matchType: mt }); return; }
+    have.add(key);
+    ops.push({ create: { adGroup: `customers/${cid}/adGroups/${adsDigits(adGroupId)}`, status: 'ENABLED', keyword: { text, matchType: mt } } });
+    out.added.push({ text, matchType: mt });
+  });
+
+  if (ops.length) {
+    const addRes = await adsMutate(accessToken, cid, 'adGroupCriteria', ops);
+    if (addRes.error) { out.error = addRes.detail || addRes.error; out.added = []; return out; }
+  }
+  return out;
+}
+
+async function adsAddKeywords({ pageUrl, groups }) {
+  const tokenResult = await adsGetAccessToken();
+  if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
+  if (tokenResult.error === 'REAUTH_REQUIRED') return { connected: false, reauthRequired: true };
+  if (tokenResult.error) return { connected: true, error: tokenResult.error };
+  const accessToken = tokenResult.accessToken;
+
+  const customerId = await adsGetAccount(gscPageHost(pageUrl));
+  if (!customerId) return { connected: true, error: 'NO_ACCOUNT' };
+  const cid = adsDigits(customerId);
+
+  const results = [];
+  for (const group of (groups || [])) {
+    results.push(await adsAddKeywordsForAdGroup(accessToken, cid, group));
   }
   return { connected: true, results };
 }
@@ -2654,6 +2844,34 @@ async function docsExportNegatives({ lists, pageUrl }) {
   return docsUploadHtmlDoc(token.accessToken, docTitle, html);
 }
 
+// New keywords as nested bullets: one bullet per ad group, with its added
+// keywords (match type shown as punctuation, same convention as negatives)
+// nested beneath.
+function buildAddKeywordsHtml(groups, docTitle) {
+  const out = [`<h1>${htmlEsc(docTitle)}</h1>`];
+  const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  out.push(`<p style="color:#999999;font-size:10pt">Generated ${htmlEsc(dateStr)}</p>`);
+  out.push('<ul>');
+  (groups || []).forEach(group => {
+    const label = group.campaignName ? `${group.campaignName} | ${group.adGroupName || 'Ad Group'}` : (group.adGroupName || 'Ad Group');
+    out.push(`<li>Added Keywords to ${htmlEsc(label)}<ul>`);
+    (group.terms || []).forEach(t => out.push(`<li>${htmlEsc(negFormatTerm(t.text, t.matchType))}</li>`));
+    out.push('</ul></li>');
+  });
+  out.push('</ul>');
+  return `<html><head><meta charset="utf-8"></head><body>${out.join('')}</body></html>`;
+}
+
+async function docsExportAddKeywords({ groups, pageUrl }) {
+  const token = await docsGetAccessToken();
+  if (token.error) return { notConnected: true, error: token.error };
+
+  const date = new Date().toISOString().slice(0, 10);
+  const docTitle = `${date}: Added Keywords For ${docsUrlLabel(pageUrl)}`;
+  const html = buildAddKeywordsHtml(groups, docTitle);
+  return docsUploadHtmlDoc(token.accessToken, docTitle, html);
+}
+
 // ─── Google Search Console: message handlers ────────────────────────────────
 
 browser.runtime.onMessage.addListener((message) => {
@@ -2685,7 +2903,11 @@ browser.runtime.onMessage.addListener((message) => {
     case 'adsGetMoreSearchTerms': return adsGetMoreSearchTerms(message);
     case 'adsGetAdsDetail':    return adsGetAdsDetail(message);
     case 'adsGetCampaignNegLists': return adsGetCampaignNegLists(message);
+    case 'adsGetAllAdGroups':  return adsGetAllAdGroups(message);
+    case 'adsGetAllKeywords':  return adsGetAllKeywords(message);
     case 'adsAddNegatives':    return adsAddNegatives(message);
+    case 'adsGetKeywordIdeas': return adsGetKeywordIdeas(message);
+    case 'adsAddKeywords':     return adsAddKeywords(message);
     case 'getRedirectInfo':    return getRedirectInfo(message);
     case 'traceUrl':           return traceUrl(message);
     case 'getTargetTab':       return getTargetTab();
@@ -2703,6 +2925,7 @@ browser.runtime.onMessage.addListener((message) => {
     case 'docsConnect':          return docsConnect();
     case 'docsExportActionPlan': return docsExportActionPlan(message);
     case 'docsExportNegatives':  return docsExportNegatives(message);
+    case 'docsExportAddKeywords': return docsExportAddKeywords(message);
     default: return undefined;
   }
 });

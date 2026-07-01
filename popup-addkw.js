@@ -281,6 +281,15 @@ function addkwFormatVolume(n) {
 
 // ─── Claude prompt (mirrors NEGATIVES_SYSTEM_BASE's structure, inverted intent) ─
 
+// Stage-1 pre-filter (Haiku): quickly drops obviously irrelevant candidates so
+// Sonnet only sees the plausible subset. Returns a JSON array of index numbers.
+const ADDKW_PREFILTER_SYSTEM = [
+  'You are screening search-term candidates for Google Ads. Given a landing page and a numbered candidate list, return ONLY a JSON array of the index numbers worth analyzing further as potential new keywords.',
+  'Keep a candidate if: it is relevant to the page topic, has clear commercial or informational intent matching this page, and is not obviously wasteful.',
+  'Skip a candidate if: it is off-topic, purely navigational with no ad value, hopelessly generic, or a near-duplicate concept already represented by a stronger candidate.',
+  'Return ONLY the JSON array of integers, e.g. [0,3,7,12]. No prose, no code fences.',
+].join('\n');
+
 const ADDKW_SYSTEM_BASE = [
   'You are a Google Ads keyword strategist. From the candidate search terms/queries below, identify the ones that would make GOOD NEW KEYWORDS to add to this advertiser\'s account for this landing page.',
   '',
@@ -403,9 +412,9 @@ async function generateAddKw(force) {
     }
 
     const ranked = candidates;
-    const candidateLines = ranked.map((c, i) => addkwCandidateLine(c, i)).join('\n');
 
-    const context = [
+    // Page context shared by both stages
+    const pageMeta = [
       `Landing page URL: ${pageUrl}`,
       `Page title: "${pageData?.title?.text || ''}"`,
       pageData?.metaDescription?.text && `Meta description: "${pageData.metaDescription.text}"`,
@@ -414,8 +423,49 @@ async function generateAddKw(force) {
       brandTerms.length   && `Brand terms (already excluded from candidates): ${brandTerms.join(', ')}`,
       pageData?.headings?.length && `Headings:\n${pageData.headings.map(h => `${h.tag.toUpperCase()}: ${h.text}`).join('\n')}`,
       pageData?.bodyTextExcerpt  && `Page content excerpt: "${pageData.bodyTextExcerpt}"`,
+    ].filter(v => v !== undefined && v !== false && v !== null && v !== '');
+
+    // Stage 1: Haiku pre-filter — quickly drops obviously irrelevant candidates
+    // so Sonnet only analyzes the plausible subset. Falls back to the full set
+    // if the call fails or returns nothing.
+    addKwBodyMessage('Pre-screening candidates…');
+    let filteredRanked = ranked;
+    if (ranked.length > 10) {
+      try {
+        const allLines = ranked.map((c, i) => addkwCandidateLine(c, i)).join('\n');
+        const preCtx = [...pageMeta, `Candidates:\n${allLines}`].join('\n\n');
+        const preData = await claudeFetch({
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': claudeApiKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true'
+          },
+          body: JSON.stringify({
+            model: MODEL_LIGHT,
+            max_tokens: 512,
+            system: [{ type: 'text', text: ADDKW_PREFILTER_SYSTEM, cache_control: { type: 'ephemeral' } }],
+            messages: [{ role: 'user', content: preCtx }]
+          })
+        }, 30000);
+        const preRaw = (preData.content?.[0]?.text ?? '').replace(/```json/gi, '').replace(/```/g, '').trim();
+        const ps = preRaw.indexOf('['), pe = preRaw.lastIndexOf(']');
+        const preIdxs = ps !== -1 && pe > ps ? JSON.parse(preRaw.slice(ps, pe + 1)) : null;
+        if (Array.isArray(preIdxs) && preIdxs.length) {
+          const keep = new Set(preIdxs.map(Number).filter(n => Number.isInteger(n) && n >= 0 && n < ranked.length));
+          if (keep.size) filteredRanked = ranked.filter((_, i) => keep.has(i));
+        }
+      } catch { /* pre-filter failed — fall back to full candidate set */ }
+    }
+
+    // Stage 2: Sonnet full analysis on the filtered set
+    addKwBodyMessage(_addkwSource === 'gsc' ? 'Analyzing queries…' : 'Analyzing search terms…');
+    const candidateLines = filteredRanked.map((c, i) => addkwCandidateLine(c, i)).join('\n');
+
+    const context = [...pageMeta,
       `Candidate ${_addkwSource === 'gsc' ? 'organic queries' : 'search terms'} (already filtered to drop branded and already-targeted terms):\n` + candidateLines,
-    ].filter(v => v !== undefined && v !== false && v !== null && v !== '').join('\n\n');
+    ].join('\n\n');
 
     const addkwSystemDynamic = buildAddKwSystem(insights, brandTerms, _addkwSource);
     const addkwSystemBlocks = [{ type: 'text', text: ADDKW_SYSTEM_BASE, cache_control: { type: 'ephemeral' } }];
@@ -431,7 +481,7 @@ async function generateAddKw(force) {
       },
       body: JSON.stringify({
         model: MODEL_MID,
-        max_tokens: 4096,
+        max_tokens: 2048,
         system: addkwSystemBlocks,
         messages: [{ role: 'user', content: context }]
       })
@@ -444,8 +494,8 @@ async function generateAddKw(force) {
     const recs = [];
     parsed.forEach(p => {
       const idx = Number(p.index);
-      const cand = Number.isInteger(idx) ? ranked[idx]
-        : ranked.find(c => c.text.toLowerCase() === String(p.term || '').toLowerCase());
+      const cand = Number.isInteger(idx) ? filteredRanked[idx]
+        : filteredRanked.find(c => c.text.toLowerCase() === String(p.term || '').toLowerCase());
       if (!cand) return;
       const matchType  = negNormMatch(p.matchType);
       const reason     = String(p.reason || '').trim();
@@ -621,7 +671,7 @@ async function generateAddKwBlindspots(force) {
       },
       body: JSON.stringify({
         model: MODEL_MID,
-        max_tokens: 4096,
+        max_tokens: 1500,
         system: [{ type: 'text', text: ADDKW_BLINDSPOT_SYSTEM, cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: context }]
       })

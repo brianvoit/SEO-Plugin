@@ -143,13 +143,36 @@ function adsFilterLabel() {
   return _adsFilter.label || _adsFilter.text || '';
 }
 
+// Ad groups belonging to dead (paused + zero-impression) campaigns are hidden
+// across the whole Ads tab. Recomputed on each data load (computeAdsHidden).
+let _adsHiddenAdGroups = new Set();
+function computeAdsHidden() {
+  _adsHiddenAdGroups = new Set();
+  if (!_adsData) return;
+  const statusByCamp = new Map((_adsData.campaigns || []).map(c => [c.id, c.status]));
+  const imprByCamp = new Map();
+  const groupsByCamp = new Map();
+  (_adsData.ads || []).forEach(a => {
+    imprByCamp.set(a.campaignId, (imprByCamp.get(a.campaignId) || 0) + (a.impressions || 0));
+    if (!groupsByCamp.has(a.campaignId)) groupsByCamp.set(a.campaignId, new Set());
+    groupsByCamp.get(a.campaignId).add(a.adGroupId);
+  });
+  imprByCamp.forEach((impr, campId) => {
+    if (statusByCamp.get(campId) === 'PAUSED' && impr === 0) {
+      (groupsByCamp.get(campId) || new Set()).forEach(agId => _adsHiddenAdGroups.add(agId));
+    }
+  });
+}
+
 function adsAdGroupVisible(adGroupId) {
+  if (_adsHiddenAdGroups.has(adGroupId)) return false;
   const f = _adsFilter;
   if (!f) return true;
   if (f.type === 'campaign') return f.groupIds.has(adGroupId);
   return f.adGroupId ? adGroupId === f.adGroupId : true;
 }
 function adsKeywordVisible(kw) {
+  if (_adsHiddenAdGroups.has(kw.adGroupId)) return false;
   const f = _adsFilter;
   if (!f) return true;
   if (f.type === 'campaign')   return f.groupIds.has(kw.adGroupId);
@@ -195,6 +218,7 @@ function matchesQsFilter(r, filter) {
 }
 
 function adsTermVisible(t) {
+  if (_adsHiddenAdGroups.has(t.adGroupId)) return false;
   const f = _adsFilter;
   if (!f) return true;
   if (f.type === 'campaign')   return f.groupIds.has(t.adGroupId);
@@ -250,8 +274,16 @@ function renderAdsTree() {
   const campaigns = Array.from(byCampaign.entries()).map(([campId, camp]) => {
     const groups = Array.from(camp.groups.values()).sort((a, b) => b.cost - a.cost);
     const total = groups.reduce((s, g) => s + g.cost, 0);
-    return { campId, camp, groups, total };
-  }).sort((a, b) => b.total - a.total);
+    const totalImpr = groups.reduce((s, g) => s + g.impressions, 0);
+    return { campId, camp, groups, total, totalImpr };
+  })
+  // Hide dead campaigns: paused AND zero impressions in the selected window,
+  // even if their ads still target this page (they're just noise).
+  .filter(({ campId, totalImpr }) => {
+    const status = isByCampaign.get(campId)?.status;
+    return !(status === 'PAUSED' && totalImpr === 0);
+  })
+  .sort((a, b) => b.total - a.total);
 
   campaigns.forEach(({ campId, camp, groups }) => {
     const cRow = document.createElement('div');
@@ -889,6 +921,7 @@ function renderAdsPanel(response) {
     _adsFilter = null;
     _adsTermIntent = null;
     _adsFilled = response.timeseries || [];
+    computeAdsHidden();   // dead paused campaigns → hidden across all tables
     renderAdsScorecards(response.totals, response.previousTotals);
     renderAdsChart();
     renderAdsAll();
@@ -1176,9 +1209,9 @@ function loadAdsPrefs() {
 // intent matches the page. Sonnet (not Haiku) for ad copy.
 
 const ADS_GEN_ASSETS = [
-  { key: 'headlines',     label: 'Headlines',      max: 30, one: 'headline' },
-  { key: 'longHeadlines', label: 'Long Headlines', max: 90, one: 'long headline' },
-  { key: 'descriptions',  label: 'Descriptions',   max: 90, one: 'description' },
+  { key: 'headlines',     label: 'Headlines',      max: 30, one: 'headline',      maxCount: 15 },
+  { key: 'longHeadlines', label: 'Long Headlines', max: 90, one: 'long headline', maxCount: 5 },
+  { key: 'descriptions',  label: 'Descriptions',   max: 90, one: 'description',   maxCount: 4 },
 ];
 
 const AD_COPY_SYSTEM_BASE = [
@@ -1235,28 +1268,47 @@ function sanitizeAdText(s) {
 }
 
 // System prompt for replacing a SINGLE asset line (not the whole set).
-function buildAdLineSystem(asset, insights, brandTerms, existing) {
+// Shared style/policy guidance for both the single- and batch-line prompts.
+// Generated assets are forced Positive (sentiment) + Commercial (intent) and
+// must be complete, self-contained phrases — not fragments that trail off.
+function adLineGuidance(asset, brandTerms, existing) {
   const lines = [
-    `You are an expert Google Ads copywriter. Write ONE replacement ${asset.one} for an ad pointing to the landing page described below.`,
     `- At most ${asset.max} characters. Count carefully and never exceed.`,
   ];
   if (asset.key === 'descriptions') lines.push('- Aim for 70 to 90 characters.');
+  lines.push('- Each line must be a COMPLETE, self-contained thought that fits within the character limit. Never end on a dangling preposition, article, or conjunction (e.g. do NOT write "Heavy Duty Magnetic Hooks for" or "Trusted Testing and"). If a full idea will not fit, write a shorter complete one instead.');
+  lines.push('- Commercial search intent: lead with the value proposition, differentiator, or concrete reason to choose this option.');
+  lines.push('- Positive, confident, upbeat tone.');
   lines.push('- Never use em dashes, en dashes, or exclamation marks.');
   lines.push('- Title or sentence case, no ALL CAPS, no emoji, no phone numbers, no unverifiable superlatives.');
   lines.push('- Be specific to the page; do not invent facts. Prioritize the real paid search terms, tracked keywords, and matching organic queries, woven in naturally.');
   if (existing && existing.length) {
-    lines.push(`- It must be clearly different from these existing options: ${existing.map(e => `"${e}"`).join('; ')}.`);
-  }
-  if (insights?.intent && typeof OG_INTENT_GUIDANCE !== 'undefined' && OG_INTENT_GUIDANCE[insights.intent]) {
-    lines.push(`- Search intent is ${insights.intent}: ${OG_INTENT_GUIDANCE[insights.intent]}`);
-  }
-  if (insights?.sentiment && typeof OG_SENTIMENT_GUIDANCE !== 'undefined' && OG_SENTIMENT_GUIDANCE[insights.sentiment]) {
-    lines.push(`- Page sentiment is ${insights.sentiment}: ${OG_SENTIMENT_GUIDANCE[insights.sentiment]}`);
+    lines.push(`- Must be clearly different from these existing options: ${existing.map(e => `"${e}"`).join('; ')}.`);
   }
   if (brandTerms && brandTerms.length) {
     lines.push(`- You may use the brand name (${brandTerms.join(', ')}) where it strengthens the ad.`);
   }
-  lines.push('- Return ONLY the replacement text. No quotes, no labels, no JSON, no explanation.');
+  return lines;
+}
+
+function buildAdLineSystem(asset, insights, brandTerms, existing) {
+  const lines = [
+    `You are an expert Google Ads copywriter. Write ONE replacement ${asset.one} for an ad pointing to the landing page described below.`,
+    ...adLineGuidance(asset, brandTerms, existing),
+    '- Return ONLY the replacement text. No quotes, no labels, no JSON, no explanation.',
+  ];
+  return lines.join('\n');
+}
+
+// Batch variant: N distinct lines in one call (used to fill an ad group up to
+// its asset max). Returns a JSON array so we get them all in one round trip.
+function buildAdLinesSystem(asset, insights, brandTerms, existing, n) {
+  const lines = [
+    `You are an expert Google Ads copywriter. Write ${n} DISTINCT replacement ${asset.one}s for an ad pointing to the landing page described below.`,
+    ...adLineGuidance(asset, brandTerms, existing),
+    `- All ${n} must be different from each other.`,
+    `- Return ONLY a JSON array of exactly ${n} strings. No prose, no code fences.`,
+  ];
   return lines.join('\n');
 }
 
@@ -1311,13 +1363,22 @@ async function regenerateAdCopyLine(asset, index, input, count, btn) {
 }
 
 // Last-resort deterministic shortener: trim to a word boundary within max.
+// Trailing filler words that make a trimmed line read as a fragment.
+const ADCOPY_DANGLING = new Set(['for', 'and', 'or', 'to', 'with', 'the', 'a', 'an', 'of', 'in', 'on', 'at', 'by', 'your', 'our', 'that', 'this', 'from', 'as', 'is', 'are', 'plus']);
+
 function adcopyHardTrim(s, max) {
   s = String(s || '').trim();
   if (s.length <= max) return s;
   let t = s.slice(0, max);
   const sp = t.lastIndexOf(' ');
   if (sp > max * 0.6) t = t.slice(0, sp);
-  return t.replace(/[\s,.;:!?–—-]+$/, '').trim();
+  t = t.replace(/[\s,.;:!?–—-]+$/, '').trim();
+  // Drop trailing dangling words so we don't ship "... Hooks for" as a fragment.
+  let words = t.split(/\s+/);
+  while (words.length > 1 && ADCOPY_DANGLING.has(words[words.length - 1].toLowerCase())) {
+    words.pop();
+  }
+  return words.join(' ').replace(/[\s,.;:!?–—-]+$/, '').trim();
 }
 
 // Guarantee every asset fits its limit. One targeted Claude pass rewrites only
@@ -2496,6 +2557,7 @@ function drillIntoAdGroup(adGroupId) {
 // Called by showAdGroupPanel (popup-nav.js) when the panel opens
 function openAdGroupPanel() {
   if (!_adGroupDrillId) return;
+  adAssetGenCacheReset();   // fresh dedup cache per panel session
   renderAdGroupDetail();
 }
 
@@ -2519,7 +2581,9 @@ async function renderAdGroupDetail() {
   body.replaceChildren();
 
   const ads = (_adsData?.ads || []).filter(a => a.adGroupId === _adGroupDrillId);
-  setAdGroupTitle(ads[0]?.adGroup || 'Ad group', ads.length ? `${ads.length} ad${ads.length === 1 ? '' : 's'}` : '');
+  const agName = ads[0]?.adGroup || 'Ad group';
+  const campName = ads[0]?.campaign || '';
+  setAdGroupTitle(campName ? `${campName} | ${agName}` : agName, ads.length ? `${ads.length} ad${ads.length === 1 ? '' : 's'}` : '');
 
   if (!ads.length) {
     body.appendChild(adgroupMessage('No ads point to this page in this ad group for the selected period.'));
@@ -2537,10 +2601,15 @@ async function renderAdGroupDetail() {
 
     const multi = ads.length > 1;
     const groupTerms = (_adsData.searchTerms || []).filter(t => t.adGroupId === _adGroupDrillId);
+    const allAssetTexts = [];
     ads.slice().sort((a, b) => b.cost - a.cost).forEach(a => {
       const detail = (res.ads || {})[a.adId] || { headlines: [], descriptions: [], type: a.type, name: a.adName };
+      (detail.headlines || []).forEach(h => allAssetTexts.push(h.text));
+      (detail.descriptions || []).forEach(d => allAssetTexts.push(d.text));
       renderOneAd(a, detail, multi, body, groupTerms);
     });
+    // Classify each existing asset's intent + sentiment, then inject the chips.
+    ensureAdAssetInsights(allAssetTexts, populateAssetInsightChips);
   } catch (err) {
     body.replaceChildren();
     body.appendChild(adgroupMessage(err.message, true));
@@ -2632,10 +2701,14 @@ function renderAdAssetSection(label, assetKey, items, body, indent, groupTerms) 
   lbl.className = 'field-label';
   lbl.textContent = `${label} (${items.length})`;
   const gen = document.createElement('button');
-  gen.className = 'save-key-btn';
-  gen.title = `Generate a new ${asset.one}`;
+  gen.className = 'save-key-btn adgroup-gen-btn';
+  gen.title = `Generate ${asset.one}s up to the max (${asset.maxCount}), or one more if already full`;
+  const genLabel = document.createElement('span');
+  genLabel.className = 'gen-btn-label';
+  genLabel.textContent = 'Generate';
+  gen.appendChild(genLabel);
+  gen.appendChild(document.createTextNode(' '));
   gen.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M8 1l1.4 4.6L14 7l-4.6 1.4L8 13l-1.4-4.6L2 7l4.6-1.4z"/></svg>'));
-  gen.appendChild(document.createTextNode(' Generate'));
   head.appendChild(lbl);
   head.appendChild(gen);
   section.appendChild(head);
@@ -2656,7 +2729,7 @@ function renderAdAssetSection(label, assetKey, items, body, indent, groupTerms) 
   )));
 
   section.appendChild(sugg);
-  gen.addEventListener('click', () => runAssetGenerate(asset, sugg, existingTexts, gen));
+  gen.addEventListener('click', () => runAssetFill(asset, sugg, existingTexts, gen));
   body.appendChild(section);
 }
 
@@ -2684,6 +2757,7 @@ async function runAssetGenerate(asset, sugg, existingTexts, btn) {
 function makeAssetRow(item, max, onGenerate, matchCount) {
   const row = document.createElement('div');
   row.className = 'asset-row' + (item.enabled === false ? ' asset-row--off' : '');
+  row.dataset.assetText = item.text;
 
   const text = document.createElement('div');
   text.className = 'asset-text';
@@ -2696,6 +2770,12 @@ function makeAssetRow(item, max, onGenerate, matchCount) {
     m.title = `Appears in ${matchCount} search term${matchCount === 1 ? '' : 's'} that triggered ads for this page`;
     text.appendChild(m);
   }
+  // Intent + sentiment chips (filled in async by ensureAdAssetInsights)
+  const chips = document.createElement('span');
+  chips.className = 'asset-insight-chips';
+  const cached = _adAssetInsights[(item.text || '').toLowerCase()];
+  if (cached) { const c = buildInsightChips(cached); if (c) chips.appendChild(c); }
+  text.appendChild(chips);
   row.appendChild(text);
 
   const badges = document.createElement('div');
@@ -2815,5 +2895,161 @@ async function generateOneAdLine(asset, existing) {
   let out = sanitizeAdText(claudeText(data).trim().replace(/^["']|["']$/g, ''));
   if (!out) throw new Error('empty');
   if (out.length > asset.max) out = adcopyHardTrim(out, asset.max);
+  adAssetGenCacheAdd(out);
   return out;
+}
+
+// Short, temporary dedup cache of recently generated lines (across sections and
+// regenerations within a single ad-group panel session) so the same text isn't
+// produced again. Reset when the ad-group panel is reopened / the page changes.
+let _adAssetGenCache = [];
+function adAssetGenCacheAdd(text) {
+  const t = (text || '').trim();
+  if (!t) return;
+  _adAssetGenCache.push(t);
+  if (_adAssetGenCache.length > 60) _adAssetGenCache = _adAssetGenCache.slice(-60);
+}
+function adAssetGenCacheReset() { _adAssetGenCache = []; }
+
+// ─── Per-asset intent + sentiment classification (for the chips) ─────────────
+// Cached by asset text (a headline's intent/sentiment doesn't change), so it
+// persists across ad groups. One Haiku batch call classifies the missing ones.
+let _adAssetInsights = {};   // text(lowercased) -> { intent, sentiment }
+
+const AD_ASSET_INTENTS    = ['Informational', 'Navigational', 'Commercial', 'Transactional'];
+const AD_ASSET_SENTIMENTS = ['Positive', 'Negative', 'Neutral', 'Mixed'];
+function adNormLabel(v, allowed) {
+  const s = String(v || '').trim().toLowerCase();
+  return allowed.find(a => a.toLowerCase() === s) || null;
+}
+
+async function ensureAdAssetInsights(texts, onReady) {
+  const need = [...new Set((texts || []).map(t => (t || '').trim()).filter(Boolean))]
+    .filter(t => !(t.toLowerCase() in _adAssetInsights));
+  if (!need.length) return;
+  try {
+    const { claudeApiKey } = await browser.storage.local.get('claudeApiKey');
+    if (!claudeApiKey) return;
+    const system = [
+      'Classify each Google Ads asset (a headline or description) by search INTENT and TONE (sentiment).',
+      'Intent is exactly one of: Informational, Navigational, Commercial, Transactional.',
+      'Sentiment is exactly one of: Positive, Negative, Neutral, Mixed.',
+      'Return ONLY a JSON array with one object per input line, in the same order:',
+      '[{"intent":"Commercial","sentiment":"Positive"}, ...]. No prose, no code fences.',
+    ].join('\n');
+    const content = need.map((t, i) => `${i}: ${t}`).join('\n');
+    const data = await claudeFetch({
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({ model: MODEL_LIGHT, max_tokens: 40 + need.length * 24, system, messages: [{ role: 'user', content }] })
+    });
+    let raw = claudeText(data).trim().replace(/```json/gi, '').replace(/```/g, '').trim();
+    const s = raw.indexOf('['), e = raw.lastIndexOf(']');
+    if (s !== -1 && e > s) raw = raw.slice(s, e + 1);
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return;
+    need.forEach((t, i) => {
+      const r = arr[i] || {};
+      _adAssetInsights[t.toLowerCase()] = {
+        intent: adNormLabel(r.intent, AD_ASSET_INTENTS),
+        sentiment: adNormLabel(r.sentiment, AD_ASSET_SENTIMENTS)
+      };
+    });
+    if (onReady) onReady();
+  } catch { /* best effort — chips just stay absent */ }
+}
+
+// After classification resolves, inject chips into each already-rendered asset
+// row (avoids a full re-render + re-fetch of the ad detail).
+function populateAssetInsightChips() {
+  document.querySelectorAll('#adgroup-body .asset-row').forEach(row => {
+    const text = row.dataset.assetText;
+    const box = row.querySelector('.asset-insight-chips');
+    if (!text || !box) return;
+    const ins = _adAssetInsights[text.toLowerCase()];
+    if (!ins || (!ins.intent && !ins.sentiment)) return;
+    box.replaceChildren();
+    const chips = buildInsightChips(ins);
+    if (chips) box.appendChild(chips);
+  });
+}
+
+// Batch generator: N distinct lines in a single call, deduped against the
+// caller's existing options AND the session cache. Returns the parsed,
+// sanitized, length-capped, deduped array (may be shorter than N if the model
+// repeated itself).
+async function generateAdLines(asset, existing, n) {
+  const { claudeApiKey } = await browser.storage.local.get('claudeApiKey');
+  if (!claudeApiKey) throw new Error('No Claude API key — add one in Settings (⚙).');
+  const { context, insights, brandTerms } = await buildAdCopyGrounding();
+  const avoid = [...new Set([...(existing || []), ..._adAssetGenCache])];
+  const system = buildAdLinesSystem(asset, insights, brandTerms, avoid, n);
+  const data = await claudeFetch({
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': claudeApiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: MODEL_MID,
+      max_tokens: 40 + n * 40,
+      thinking: { type: 'disabled' },
+      system,
+      messages: [{ role: 'user', content: context }]
+    })
+  });
+  let raw = claudeText(data).trim().replace(/```json/gi, '').replace(/```/g, '').trim();
+  const s = raw.indexOf('['), e = raw.lastIndexOf(']');
+  if (s !== -1 && e > s) raw = raw.slice(s, e + 1);
+  let arr; try { arr = JSON.parse(raw); } catch { arr = []; }
+  if (!Array.isArray(arr)) arr = [];
+
+  const seen = new Set(avoid.map(x => x.toLowerCase()));
+  const out = [];
+  for (const item of arr) {
+    let t = sanitizeAdText(String(item || '').trim().replace(/^["']|["']$/g, ''));
+    if (!t) continue;
+    if (t.length > asset.max) t = adcopyHardTrim(t, asset.max);
+    const lc = t.toLowerCase();
+    if (!t || seen.has(lc)) continue;
+    seen.add(lc);
+    adAssetGenCacheAdd(t);
+    out.push(t);
+    if (out.length >= n) break;
+  }
+  return out;
+}
+
+// Section "Generate" click: fill the ad group up to the asset's max count if
+// it's below (e.g. bring headlines to 15), otherwise generate just one more.
+async function runAssetFill(asset, sugg, existingTexts, btn) {
+  if (btn.disabled) return;
+  const label = btn.querySelector('.gen-btn-label');
+  btn.disabled = true;
+  if (label) label.textContent = 'Generating…'; else btn.classList.add('is-busy');
+  try {
+    const current = existingTexts().length;
+    const need = Math.max(1, (asset.maxCount || 1) - current);
+    if (need === 1) {
+      const text = await generateOneAdLine(asset, existingTexts());
+      sugg.appendChild(makeAdSuggestionRow(asset, text, existingTexts));
+    } else {
+      const lines = await generateAdLines(asset, existingTexts(), need);
+      if (!lines.length) throw new Error('empty');
+      lines.forEach(text => sugg.appendChild(makeAdSuggestionRow(asset, text, existingTexts)));
+    }
+  } catch (err) {
+    btn.title = err.message;
+    setTimeout(() => { btn.title = ''; }, 2500);
+  } finally {
+    btn.disabled = false;
+    if (label) label.textContent = 'Generate'; else btn.classList.remove('is-busy');
+  }
 }

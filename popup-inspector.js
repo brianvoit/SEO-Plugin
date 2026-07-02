@@ -1238,6 +1238,13 @@ function schemaShortRef(id) {
   return s.length > 60 ? s.slice(0, 60) + '…' : s;
 }
 
+// A value that points at an image file — used to attach a hover preview.
+function schemaImageUrl(s) {
+  if (typeof s !== 'string') return null;
+  const t = s.trim();
+  return /^https?:\/\/\S+\.(jpe?g|png|webp|gif|svg|avif|bmp|ico)(\?\S*)?$/i.test(t) ? t : null;
+}
+
 function appendSchemaRow(container, key, valueText, title) {
   const row = document.createElement('div');
   row.className = 'schema-prop';
@@ -1248,6 +1255,13 @@ function appendSchemaRow(container, key, valueText, title) {
   valEl.className = 'schema-val';
   valEl.textContent = valueText;
   if (title) valEl.title = title;
+  // Image URL → hover to preview the actual image (reuses the OG preview).
+  const imgUrl = schemaImageUrl(valueText);
+  if (imgUrl) {
+    valEl.classList.add('schema-val--img');
+    valEl.addEventListener('mouseenter', () => showImagePreview(imgUrl, valEl));
+    valEl.addEventListener('mouseleave', hideImagePreview);
+  }
   row.append(keyEl, valEl);
   container.appendChild(row);
 }
@@ -1305,8 +1319,7 @@ function renderSchemaValue(key, val, container, depth, byId, seenIds) {
   if (val === undefined || val === null || val === '') return;
 
   if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
-    const full = String(val);
-    appendSchemaRow(container, key, full.length > 80 ? full.slice(0, 80) + '…' : full, full.length > 80 ? full : undefined);
+    appendSchemaRow(container, key, String(val));
     return;
   }
 
@@ -1314,8 +1327,7 @@ function renderSchemaValue(key, val, container, depth, byId, seenIds) {
     if (!val.length) return;
     const hasObjects = val.some(v => v && typeof v === 'object');
     if (!hasObjects) {
-      const joined = val.map(String).join(', ');
-      appendSchemaRow(container, key, joined.length > 80 ? joined.slice(0, 80) + '…' : joined, joined);
+      appendSchemaRow(container, key, val.map(String).join(', '));
       return;
     }
     appendSchemaRow(container, key, `${val.length} item${val.length !== 1 ? 's' : ''}`);
@@ -1328,9 +1340,10 @@ function renderSchemaValue(key, val, container, depth, byId, seenIds) {
         if (target && !seenIds.has(item['@id'])) {
           const label = document.createElement('div');
           label.className = 'schema-nested-label';
-          label.textContent = `${key}[${i + 1}]`;
+          const t = target['@type'] ? [].concat(target['@type']).join(' + ') : '';
+          label.textContent = `${key}[${i + 1}]` + (t ? ` · ${t}` : '');
           wrapAll.appendChild(label);
-          renderSchemaEntity(target, wrapAll, byId, seenIds, true);
+          renderSchemaEntityBody(target, wrapAll, byId, seenIds);
         } else {
           appendSchemaRow(wrapAll, `${key}[${i + 1}]`, `→ ${schemaShortRef(item['@id'])}`, item['@id']);
         }
@@ -1351,13 +1364,15 @@ function renderSchemaValue(key, val, container, depth, byId, seenIds) {
 
   // Plain object: either a graph reference (resolve + inline once) or an
   // anonymous embedded object (expand its own fields up to the depth cap).
+  // Either way the type shows once on the key row; the fields are indented
+  // below with no repeated type header (that double-labelling was confusing).
   if (schemaIsRefOnly(val)) {
     const target = byId.get(val['@id']);
     if (target && !seenIds.has(val['@id'])) {
       appendSchemaRow(container, key, [].concat(target['@type']).join(' + ') || '(object)');
       const wrap = document.createElement('div');
       wrap.className = 'schema-nested';
-      renderSchemaEntity(target, wrap, byId, seenIds, true);
+      renderSchemaEntityBody(target, wrap, byId, seenIds);
       container.appendChild(wrap);
     } else {
       appendSchemaRow(container, key, `→ ${schemaShortRef(val['@id'])}`, val['@id']);
@@ -1374,26 +1389,31 @@ function renderSchemaValue(key, val, container, depth, byId, seenIds) {
   container.appendChild(wrap);
 }
 
-// Renders a full entity — type header, validation summary, and every own
-// property — used for both top-level roots and inlined graph references.
-function renderSchemaEntity(node, container, byId, seenIds, nested) {
+// An entity's validation summary + own properties, with NO type header — the
+// type is shown by the caller (a blue header for top-level roots, or the key
+// row for an inlined linked/nested entity). Shared so both render identically.
+function renderSchemaEntityBody(node, container, byId, seenIds) {
+  if (node['@id']) seenIds.add(node['@id']);
+  renderSchemaValidation(node, container);
+  Object.entries(node).forEach(([key, val]) => {
+    if (key.startsWith('@')) return;
+    renderSchemaValue(key, val, container, 0, byId, seenIds);
+  });
+}
+
+// A top-level entity card: blue type header + body. Inlined linked entities
+// use renderSchemaEntityBody directly (their type is already on the key row).
+function renderSchemaEntity(node, container, byId, seenIds) {
   const type = [].concat(node['@type']).join(' + ') || 'Unknown';
   const card = document.createElement('div');
-  card.className = nested ? 'schema-card schema-card--nested' : 'schema-card';
+  card.className = 'schema-card';
 
   const header = document.createElement('div');
   header.className = 'schema-type-name';
   header.textContent = type;
   card.appendChild(header);
 
-  if (node['@id']) seenIds.add(node['@id']);
-  renderSchemaValidation(node, card);
-
-  Object.entries(node).forEach(([key, val]) => {
-    if (key.startsWith('@')) return;
-    renderSchemaValue(key, val, card, 0, byId, seenIds);
-  });
-
+  renderSchemaEntityBody(node, card, byId, seenIds);
   container.appendChild(card);
 }
 
@@ -1428,13 +1448,13 @@ function renderSchemaDetail() {
   if (!roots.length) roots = _schemas.slice();
 
   const seenIds = new Set();
-  roots.forEach(root => renderSchemaEntity(root, content, byId, seenIds, false));
+  roots.forEach(root => renderSchemaEntity(root, content, byId, seenIds));
 
   // Safety net: anything the traversal above never reached still gets its
   // own top-level card, so a full page's structured data is always visible.
   _schemas.forEach(s => {
     if (s['@id'] ? seenIds.has(s['@id']) : roots.includes(s)) return;
-    renderSchemaEntity(s, content, byId, seenIds, false);
+    renderSchemaEntity(s, content, byId, seenIds);
   });
 
   renderSchemaSuggestions();

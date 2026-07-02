@@ -676,16 +676,24 @@ async function ensureGscQueryVolume(queries, pageUrl, onReady) {
   _gscQueryVolumeLoading = true;
   try {
     const res = await sendMessageWithTimeout({ action: 'adsGetKeywordIdeas', pageUrl, keywords: need });
-    // A wholesale account/connection failure (not a per-keyword miss) means
-    // this domain has no usable Ads connection — hide the column entirely
-    // and stop trying. Any successful response (even with some keywords
-    // unmatched) confirms the account is usable.
-    if (res && res.error && !Object.keys(res.byKeyword || {}).length) {
+    // Only hide the column when there is genuinely no Ads for this domain
+    // (not connected, needs re-auth, no dev token, or no account mapped).
+    // For anything else — including an API/access-tier error that returns no
+    // metrics — SHOW the column: the user wants it whenever Ads is connected,
+    // and rows without data just render "—". (A prior version hid the whole
+    // column on any error, which is why it never appeared on accounts whose
+    // Keyword Plan access is limited.)
+    const NO_ADS = new Set(['NOT_CONNECTED', 'REAUTH_REQUIRED', 'NO_DEV_TOKEN', 'NO_ACCOUNT']);
+    if (res && NO_ADS.has(res.error) && !Object.keys(res.byKeyword || {}).length) {
       _gscAdsVolumeState = 'unavailable';
-    } else {
+    } else if (res) {
       _gscAdsVolumeState = 'available';
-      need.forEach(t => { _gscQueryVolumeMap[t.toLowerCase()] = null; }); // placeholder so a per-keyword miss isn't retried every render
-      Object.assign(_gscQueryVolumeMap, res?.byKeyword || {});
+      // Mark every attempted term as resolved (trimmed key, matching the cell
+      // lookup) so it isn't re-requested on every render — this also prevents
+      // an infinite render→fetch→render loop on a persistent API error. Real
+      // data overwrites the null placeholder where the API returned it.
+      need.forEach(t => { const lc = (t || '').toLowerCase().trim(); if (!(lc in _gscQueryVolumeMap)) _gscQueryVolumeMap[lc] = null; });
+      Object.assign(_gscQueryVolumeMap, res.byKeyword || {});
     }
   } catch { /* transient — leave state as-is, try again next render */ }
   _gscQueryVolumeLoading = false;
@@ -1038,7 +1046,16 @@ function renderGscPanel(response, pageUrl) {
   _gscSiteUrl = response.siteUrl;
   _gscQueries = response.queries || [];
   _gscQueriesExhausted = _gscQueries.length < 25;   // first page is 25
-  if (_gscPageUrl !== pageUrl) _gscIntentFilter = null;   // new page → reset intent filter
+  if (_gscPageUrl !== pageUrl) {
+    _gscIntentFilter = null;                 // new page → reset intent filter
+    // Whether Ads volume is available is per-domain (does this domain have a
+    // mapped Ads account?), so re-evaluate it on a new page instead of
+    // carrying a stale 'unavailable'/'available' across domains.
+    let prevHost = '', newHost = '';
+    try { prevHost = new URL(_gscPageUrl || '').hostname.replace(/^www\./, ''); } catch { /* ignore */ }
+    try { newHost = new URL(pageUrl).hostname.replace(/^www\./, ''); } catch { /* ignore */ }
+    if (prevHost !== newHost) _gscAdsVolumeState = 'unknown';
+  }
   _gscPageUrl = pageUrl;
   _gscOverviewData = response.overview;
 

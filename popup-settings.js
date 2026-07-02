@@ -87,9 +87,22 @@ const wpSiteForm = document.getElementById('wp-site-form');
 
 // Build a settings list row: two info lines, an optional edit (pencil) button,
 // and a remove button (X icon)
-function buildSettingsRow(line1, line2, removeTitle, withEdit) {
+function buildSettingsRow(line1, line2, removeTitle, withEdit, faviconHost) {
   const row = document.createElement('div');
   row.className = 'wp-site-row';
+
+  // Left group: optional favicon (vertically centered so it spans both info
+  // lines) + the two-line info block.
+  const left = document.createElement('div');
+  left.className = 'wp-site-left';
+  if (faviconHost) {
+    const fav = document.createElement('img');
+    fav.className = 'wp-site-favicon';
+    fav.src = `https://www.google.com/s2/favicons?sz=32&domain=${encodeURIComponent(faviconHost)}`;
+    fav.alt = '';
+    fav.loading = 'lazy';
+    left.appendChild(fav);
+  }
 
   const info = document.createElement('div');
   info.className = 'wp-site-info';
@@ -101,7 +114,8 @@ function buildSettingsRow(line1, line2, removeTitle, withEdit) {
   b.textContent = line2;
   info.appendChild(a);
   info.appendChild(b);
-  row.appendChild(info);
+  left.appendChild(info);
+  row.appendChild(left);
 
   // Edit + remove grouped together on the right
   const actions = document.createElement('div');
@@ -205,7 +219,7 @@ function renderBrandDomains() {
   empty.classList.add('hidden');
 
   hosts.forEach(host => {
-    const { row, removeBtn, editBtn } = buildSettingsRow(host, `/${allBrandedTerms[host]}/i`, 'Remove', true);
+    const { row, removeBtn, editBtn } = buildSettingsRow(host, `/${allBrandedTerms[host]}/i`, 'Remove', true, host);
     removeBtn.dataset.host = host;
     editBtn.addEventListener('click', () => openBrandEdit(host));
     list.appendChild(row);
@@ -435,12 +449,18 @@ document.getElementById('docs-status-badge').addEventListener('click', async (e)
 // the Setup screen and is toggled from the footer rather than living under
 // one integration's header.
 
-function revealOauthClientSection() {
+// Open/close the OAuth Client bottom drawer and flip the footer triangle
+// (▲ closed = "slide up", ▼ open = "close down").
+function setOauthDrawer(open) {
   const sec = document.getElementById('oauth-client-section');
-  sec.classList.remove('hidden');
-  sec.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  if (sec) sec.classList.toggle('oauth-open', open);
+  const tri = document.querySelector('#btn-oauth-client-toggle .oauth-toggle-tri');
+  if (tri) tri.textContent = open ? '▼' : '▲';
 }
 
+function revealOauthClientSection() { setOauthDrawer(true); }
+
 document.getElementById('btn-oauth-client-toggle').addEventListener('click', () => {
-  document.getElementById('oauth-client-section').classList.toggle('hidden');
+  const sec = document.getElementById('oauth-client-section');
+  setOauthDrawer(!sec.classList.contains('oauth-open'));
 });

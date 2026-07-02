@@ -2132,7 +2132,7 @@ async function adsGetPageData({ pageUrl, range, forceRefresh }) {
   // an empty rows array and the feature silently no-ops), + currency
   const [campRes, kwRes, stRes, tsRes, prevRes, agIsRes, custRes] = await Promise.all([
     adsSearch(accessToken, customerId,
-      `SELECT campaign.id, campaign.name, metrics.search_impression_share,
+      `SELECT campaign.id, campaign.name, campaign.status, metrics.search_impression_share,
               metrics.search_budget_lost_impression_share, metrics.search_rank_lost_impression_share
        FROM campaign WHERE ${dateWhere} AND campaign.id IN ${campList}`),
     adsSearch(accessToken, customerId,
@@ -2163,6 +2163,7 @@ async function adsGetPageData({ pageUrl, range, forceRefresh }) {
 
   const campaigns = (campRes.rows || []).map(r => ({
     id: String(r.campaign.id), name: r.campaign.name,
+    status: r.campaign?.status || null,
     impressionShare: r.metrics?.searchImpressionShare ?? null,
     lostBudget: r.metrics?.searchBudgetLostImpressionShare ?? null,
     lostRank: r.metrics?.searchRankLostImpressionShare ?? null

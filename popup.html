@@ -246,7 +246,6 @@
         </div>
 
         <div class="gsc-property-box" id="ads-account-box">
-          <span class="wp-field-label" style="display:block;margin-bottom:6px">Account for this domain</span>
           <span class="gsc-property-match hidden" id="ads-account-match"></span>
           <div class="gsc-property-all gsc-property-all--scroll" id="ads-account-all"></div>
         </div>
@@ -313,7 +312,6 @@
       </div>
 
       <div class="gsc-property-box" id="webceo-project-box">
-        <span class="wp-field-label" style="display:block;margin-bottom:6px">Project for this domain</span>
         <span class="gsc-property-match hidden" id="webceo-project-match"></span>
         <div class="gsc-property-all gsc-property-all--scroll" id="webceo-project-all"></div>
       </div>
@@ -413,8 +411,10 @@
     </section>
 
     <!-- OAuth Client — shared across Search Console, Analytics, Ads, and Drive.
-         Collapsed by default; toggled via "OAuth Client" in the footer. -->
-    <section class="field-section hidden" id="oauth-client-section">
+         A bottom drawer; closed by default, slid up via "OAuth Client" in the
+         footer. Closed state is handled by CSS transform (not .hidden) so it
+         can animate. -->
+    <section class="field-section" id="oauth-client-section">
       <div class="field-header">
         <span class="field-label">OAUTH CLIENT</span>
       </div>
@@ -1452,10 +1452,14 @@
 
   <!-- Update footer -->
   <footer id="update-footer" class="hidden">
-    <span id="update-version" class="update-version"></span>
-    <button id="btn-oauth-client-toggle" class="update-check-btn">OAuth Client</button>
-    <span id="update-status" class="update-status hidden"></span>
-    <button id="btn-check-update" class="update-check-btn">Check for updates</button>
+    <div class="update-footer-group">
+      <span id="update-version" class="update-version"></span>
+      <button id="btn-oauth-client-toggle" class="update-check-btn oauth-toggle">OAuth Client <span class="oauth-toggle-tri">▲</span></button>
+    </div>
+    <div class="update-footer-group">
+      <span id="update-status" class="update-status hidden"></span>
+      <button id="btn-check-update" class="update-check-btn">Check for updates</button>
+    </div>
   </footer>
 
   <script src="popup-shared.js"></script>

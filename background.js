@@ -3100,6 +3100,143 @@ async function docsExportAddKeywords({ groups, pageUrl }) {
   return docsUploadHtmlDoc(token.accessToken, docTitle, html);
 }
 
+// ─── Google Sheets: per-domain keyword-brainstorm history ──────────────────
+// Reuses the same drive.file grant as the Docs exports above — drive.file
+// covers files the app creates via any Google Workspace API using that
+// token, including Sheets-API-created spreadsheets, so no separate OAuth
+// scope/connection is needed. One spreadsheet per domain (cached by domain
+// in sheetsSpreadsheetIds), a single fixed tab ("Blindspot Ideas") that every
+// export appends rows to — never a new tab per run — so the sheet reads as
+// one continuously growing history log.
+
+const SHEETS_TAB_NAME = 'Blindspot Ideas';
+const SHEETS_HEADER_ROW = ['Date Added', 'Page URL', 'Keyword', 'Status', 'Confidence', 'Match Type', 'Volume', 'Competition', 'Reason'];
+const SHEETS_SPREADSHEET_CACHE_CAP = 50;
+
+const SHEETS_STATUS_LABEL = {
+  already_suggested: 'Filtered: already suggested',
+  branded:            'Filtered: branded term',
+  already_targeted:   'Filtered: already targeted',
+  no_volume:           'Filtered: no search volume',
+};
+
+function sheetsDomainFromUrl(pageUrl) {
+  try { return new URL(pageUrl).hostname.replace(/^www\./, ''); } catch { return 'unknown'; }
+}
+
+// Finds (or creates) the one spreadsheet for this domain. A cached ID is
+// verified before trust — the user may have deleted the file in Drive since
+// last export — and silently recreated on 404/trashed, matching the same
+// no-warning precedent as docsGetOrCreateFolder above.
+async function sheetsGetOrCreateSpreadsheet(accessToken, domain) {
+  const { sheetsSpreadsheetIds } = await browser.storage.local.get('sheetsSpreadsheetIds');
+  const cache = sheetsSpreadsheetIds || {};
+  const cached = cache[domain];
+  if (cached && cached.id) {
+    const check = await fetch(`https://www.googleapis.com/drive/v3/files/${cached.id}?fields=id,trashed`, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    }).catch(() => null);
+    if (check && check.ok) {
+      const meta = await check.json();
+      if (!meta.trashed) return { id: cached.id };
+    }
+    // 404, trashed, or network error: fall through and recreate below.
+  }
+
+  const title = `SEO Inspector Blindspots — ${domain}`;
+  const createRes = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      properties: { title },
+      sheets: [{ properties: { title: SHEETS_TAB_NAME } }]
+    })
+  });
+  if (!createRes.ok) {
+    const detail = await createRes.text().catch(() => '');
+    if (createRes.status === 401) {
+      await browser.storage.local.remove('docsAuth');
+      return { notConnected: true, error: 'REAUTH_REQUIRED' };
+    }
+    return { error: 'CREATE_FAILED', detail };
+  }
+  const { spreadsheetId } = await createRes.json();
+
+  // Sheets-API-created files land at Drive root — re-parent into the shared
+  // "SEO Plans" folder alongside the Doc exports. Best-effort: still usable
+  // at Drive root if this fails.
+  const folderId = await docsGetOrCreateFolder(accessToken);
+  if (folderId) {
+    await fetch(`https://www.googleapis.com/drive/v3/files/${spreadsheetId}?addParents=${folderId}&removeParents=root`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${accessToken}` }
+    }).catch(() => {});
+  }
+
+  // Header row, written once at creation time only.
+  await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`'${SHEETS_TAB_NAME}'!A1:I1`)}?valueInputOption=USER_ENTERED`,
+    {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: [SHEETS_HEADER_ROW] })
+    }
+  ).catch(() => {});
+
+  cache[domain] = { id: spreadsheetId, updatedAt: Date.now() };
+  const keys = Object.keys(cache);
+  if (keys.length > SHEETS_SPREADSHEET_CACHE_CAP) {
+    keys.sort((a, b) => (cache[a].updatedAt || 0) - (cache[b].updatedAt || 0));
+    keys.slice(0, keys.length - SHEETS_SPREADSHEET_CACHE_CAP).forEach(k => delete cache[k]);
+  }
+  await browser.storage.local.set({ sheetsSpreadsheetIds: cache });
+  return { id: spreadsheetId };
+}
+
+async function sheetsAppendBlindspotIdeas(accessToken, spreadsheetId, rows) {
+  const range = encodeURIComponent(`'${SHEETS_TAB_NAME}'!A:I`);
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: rows })
+    }
+  );
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    if (res.status === 401) {
+      await browser.storage.local.remove('docsAuth');
+      return { notConnected: true, error: 'REAUTH_REQUIRED' };
+    }
+    return { error: 'APPEND_FAILED', detail };
+  }
+  return { ok: true };
+}
+
+async function sheetsExportBlindspotIdeas({ ideas, pageUrl }) {
+  const token = await docsGetAccessToken();
+  if (token.error) return { notConnected: true, error: token.error };
+
+  if (!Array.isArray(ideas) || !ideas.length) return { error: 'NO_IDEAS' };
+
+  const domain = sheetsDomainFromUrl(pageUrl);
+  const sheet = await sheetsGetOrCreateSpreadsheet(token.accessToken, domain);
+  if (sheet.notConnected || sheet.error) return sheet;
+
+  const dateAdded = new Date().toISOString().slice(0, 10);
+  const rows = ideas.map(r => [
+    dateAdded, pageUrl, r.text,
+    SHEETS_STATUS_LABEL[r.filterReason] || 'Kept',
+    r.confidence || '', r.matchType || '', r.volume ?? '', r.competition || '', r.reason || ''
+  ]);
+
+  const appendRes = await sheetsAppendBlindspotIdeas(token.accessToken, sheet.id, rows);
+  if (appendRes.notConnected || appendRes.error) return appendRes;
+
+  return { url: `https://docs.google.com/spreadsheets/d/${sheet.id}/edit` };
+}
+
 // ─── Google Search Console: message handlers ────────────────────────────────
 
 browser.runtime.onMessage.addListener((message) => {
@@ -3158,6 +3295,7 @@ browser.runtime.onMessage.addListener((message) => {
     case 'docsExportActionPlan': return docsExportActionPlan(message);
     case 'docsExportNegatives':  return docsExportNegatives(message);
     case 'docsExportAddKeywords': return docsExportAddKeywords(message);
+    case 'sheetsExportBlindspotIdeas': return sheetsExportBlindspotIdeas(message);
     default: return undefined;
   }
 });

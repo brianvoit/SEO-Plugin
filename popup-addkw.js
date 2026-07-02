@@ -8,6 +8,13 @@
 const ADDKW_CANDIDATE_CAP = 120;
 const ADDKW_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
+// Blindspot brainstorm results persist far longer than the main analysis —
+// they're driven by page content (slow-changing), not live search/Ads data —
+// and independently of it, so a stale main-analysis cache never forces a
+// re-brainstorm within this window.
+const ADDKW_BLINDSPOT_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const ADDKW_BLINDSPOT_CACHE_CAP = 30;
+
 const ADDKW_CONF_HELP = {
   high:   'High confidence: clearly relevant, strong intent for this page. Good candidate to add.',
   medium: 'Medium confidence: plausibly worth it, but check budget/relevance before adding.',
@@ -32,6 +39,12 @@ let _addkwBlindspotLoading = false;
 let _addkwBlindspotGenerated = false;  // has a brainstorm run for the current _addkwRecs generation?
 let _addkwBlindspotSkippedCount = 0;   // ideas dropped: already targeted, branded, or no measurable volume
 let _addkwBlindspotError = null;
+// Full brainstorm run — kept AND filtered ideas, null = no run yet. Single
+// source of truth for rendering; kept entries are the SAME object references
+// merged into _addkwRecs, so in-place edits (checkbox, ad-group picker) stay
+// consistent between both. Each idea carries filterReason:
+//   null | 'already_suggested' | 'branded' | 'already_targeted' | 'no_volume'
+let _addkwBlindspotAllIdeas = null;
 
 // Fetches the full account ad-group list once per host, so the per-row picker
 // can offer any ad group, not just the ones already serving this page.
@@ -91,6 +104,7 @@ function resetAddKw() {
   _addkwBlindspotGenerated = false;
   _addkwBlindspotSkippedCount = 0;
   _addkwBlindspotError = null;
+  _addkwBlindspotAllIdeas = null;
   setAddKwCommitVisible(false);
   setAddKwExportButtonsVisible(false);
   const tunedEl = document.getElementById('addkw-tuned');
@@ -175,14 +189,64 @@ async function clearAddKwCache() {
   } catch { /* best-effort */ }
 }
 
+// ─── Blindspot cache (survives 30 days, or until regenerated) — keyed by bare
+// page URL only. Independent of addkwAnalysisCache's 24h TTL: blindspot runs
+// are driven by page content (slow-changing), not live search/Ads data, so
+// they shouldn't be forced to re-brainstorm just because that faster-moving
+// cache expired.
+
+function addkwBlindspotCacheKey(pageUrl) {
+  return (pageUrl || '').split('#')[0];
+}
+
+async function saveAddKwBlindspotCache(pageUrl, ideas) {
+  try {
+    const key = addkwBlindspotCacheKey(pageUrl);
+    const { addkwBlindspotCache } = await browser.storage.local.get('addkwBlindspotCache');
+    const cache = addkwBlindspotCache || {};
+    cache[key] = { ideas, skippedCount: _addkwBlindspotSkippedCount, fetchedAt: Date.now() };
+    const keys = Object.keys(cache);
+    if (keys.length > ADDKW_BLINDSPOT_CACHE_CAP) {
+      keys.sort((a, b) => cache[a].fetchedAt - cache[b].fetchedAt);
+      keys.slice(0, keys.length - ADDKW_BLINDSPOT_CACHE_CAP).forEach(k => delete cache[k]);
+    }
+    await browser.storage.local.set({ addkwBlindspotCache: cache });
+  } catch { /* best-effort */ }
+}
+
+async function loadAddKwBlindspotCache(pageUrl) {
+  try {
+    const key = addkwBlindspotCacheKey(pageUrl);
+    const { addkwBlindspotCache } = await browser.storage.local.get('addkwBlindspotCache');
+    const entry = addkwBlindspotCache && addkwBlindspotCache[key];
+    if (!entry || !Array.isArray(entry.ideas)) return false;
+    if (Date.now() - entry.fetchedAt > ADDKW_BLINDSPOT_CACHE_TTL_MS) return false;
+    _addkwBlindspotAllIdeas = entry.ideas;
+    _addkwBlindspotSkippedCount = entry.skippedCount || 0;
+    _addkwBlindspotGenerated = true;
+    _addkwBlindspotError = null;
+    return true;
+  } catch { return false; }
+}
+
 // Opening the panel: show cached recs (for this source) or analyze fresh.
 async function openAddKwPanel(source) {
   _addkwSource = source === 'gsc' ? 'gsc' : 'ads';
   if (_addkwLoading) { addKwBodyMessage(_addkwSource === 'gsc' ? 'Analyzing queries…' : 'Analyzing search terms…'); return; }
-  try { const tab = await getActiveTab(); await ensureAddKwAllAdGroups(tab.url); } catch { /* picker falls back gracefully */ }
+  let tab;
+  try { tab = await getActiveTab(); await ensureAddKwAllAdGroups(tab.url); } catch { /* picker falls back gracefully */ }
   if (_addkwRecs && _addkwRecsSource === _addkwSource) { renderAddKw(); return; }
   const restored = await loadAddKwCache();
-  if (restored) { renderAddKw(); return; }
+  if (restored) {
+    // The 24h main cache already carries the full blindspot run (it's part
+    // of _addkwRecs) — also restore from the 30-day cache so
+    // _addkwBlindspotGenerated/_addkwBlindspotAllIdeas reflect a real run
+    // instead of defaulting to "not generated yet".
+    const pageUrl = pageData?.canonical || (tab && tab.url) || '';
+    await loadAddKwBlindspotCache(pageUrl);
+    renderAddKw();
+    return;
+  }
   generateAddKw(false);
 }
 
@@ -309,6 +373,7 @@ const ADDKW_SYSTEM_BASE = [
   '- medium: plausibly worth it, but a human should sanity-check budget/relevance first.',
   '- low: borderline; only weak signals it is worth adding.',
   'Never use em dashes or en dashes in the reason text.',
+  'The JSON array you return must always be complete and valid — never cut off mid-object. If including every good candidate would make the response too long, keep only the strongest ones (highest confidence first) rather than risk an incomplete response. If none of the candidates are worth adding, return an empty array: [].',
 ].join('\n');
 
 // Returns only the page-specific suffix (intent + brand terms + source note).
@@ -357,9 +422,6 @@ async function generateAddKw(force) {
   if (!force && _addkwRecs && _addkwRecsSource === _addkwSource) { renderAddKw(); return; }
 
   setAddKwBusy(true);
-  _addkwBlindspotGenerated = false;
-  _addkwBlindspotSkippedCount = 0;
-  _addkwBlindspotError = null;
   addKwBodyMessage(_addkwSource === 'gsc' ? 'Analyzing queries…' : 'Analyzing search terms…');
 
   try {
@@ -368,6 +430,21 @@ async function generateAddKw(force) {
 
     const tab = await getActiveTab();
     const pageUrl = pageData?.canonical || tab.url;
+
+    // Restore any still-valid blindspot brainstorm for this page instead of
+    // unconditionally wiping it — rebuilding the main analysis (e.g. after
+    // its 24h cache expires, or a manual Regenerate) shouldn't force a
+    // re-brainstorm within the blindspot cache's own 30-day window.
+    if (!_addkwBlindspotAllIdeas) {
+      const blindspotRestored = await loadAddKwBlindspotCache(pageUrl);
+      if (!blindspotRestored) {
+        _addkwBlindspotGenerated = false;
+        _addkwBlindspotSkippedCount = 0;
+        _addkwBlindspotAllIdeas = null;
+      }
+    }
+    _addkwBlindspotError = null;
+
     let host = '';
     try { host = new URL(pageUrl, tab.url).hostname.replace(/^www\./, ''); } catch { /* ignore */ }
     const brandTerms = (allBrandedTerms[host] || '').split('|').map(s => s.trim()).filter(Boolean);
@@ -449,7 +526,7 @@ async function generateAddKw(force) {
             messages: [{ role: 'user', content: preCtx }]
           })
         }, 30000);
-        const preRaw = (preData.content?.[0]?.text ?? '').replace(/```json/gi, '').replace(/```/g, '').trim();
+        const preRaw = claudeText(preData).replace(/```json/gi, '').replace(/```/g, '').trim();
         const ps = preRaw.indexOf('['), pe = preRaw.lastIndexOf(']');
         const preIdxs = ps !== -1 && pe > ps ? JSON.parse(preRaw.slice(ps, pe + 1)) : null;
         if (Array.isArray(preIdxs) && preIdxs.length) {
@@ -458,6 +535,11 @@ async function generateAddKw(force) {
         }
       } catch { /* pre-filter failed — fall back to full candidate set */ }
     }
+    // Bound Stage 2's worst-case output size regardless of how many the
+    // pre-filter kept — candidates are already strongest-first, so this
+    // just trims the long tail rather than the best matches.
+    const ADDKW_STAGE2_CAP = 60;
+    if (filteredRanked.length > ADDKW_STAGE2_CAP) filteredRanked = filteredRanked.slice(0, ADDKW_STAGE2_CAP);
 
     // Stage 2: Sonnet full analysis on the filtered set
     addKwBodyMessage(_addkwSource === 'gsc' ? 'Analyzing queries…' : 'Analyzing search terms…');
@@ -481,13 +563,18 @@ async function generateAddKw(force) {
       },
       body: JSON.stringify({
         model: MODEL_MID,
-        max_tokens: 4096,
+        max_tokens: 8192,
+        thinking: { type: 'disabled' },
         system: addkwSystemBlocks,
         messages: [{ role: 'user', content: context }]
       })
     }, 120000);
-    const parsed = parseAddKwJson(data.content?.[0]?.text ?? '');
-    if (!parsed) throw new Error('Could not parse the analysis response');
+    const rawAnalysisText = claudeText(data);
+    const parsed = parseAddKwJson(rawAnalysisText);
+    if (!parsed) {
+      const snippet = rawAnalysisText.trim().slice(0, 160);
+      throw new Error('Could not parse the analysis response' + (snippet ? ` — got: "${snippet}${rawAnalysisText.length > 160 ? '…' : ''}"` : ' (empty response)'));
+    }
 
     const agMap = _addkwSource === 'ads' ? addkwAdGroupMap() : null;
     const defaultGroup = _addkwAdGroupOptions[0] || null;
@@ -594,6 +681,14 @@ async function generateAddKw(force) {
     _addkwRecsSource = _addkwSource;
     _addkwInsights = insights;
     _addkwResultGroups = null;
+
+    // A restored blindspot run needs to be re-merged (kept AND filtered — the
+    // whole run is actionable) — the assignment above just replaced
+    // _addkwRecs wholesale.
+    if (_addkwBlindspotAllIdeas) {
+      _addkwRecs = [..._addkwRecs.filter(r => !r.isBlindspot), ..._addkwBlindspotAllIdeas];
+    }
+
     saveAddKwCache();
 
     renderAddKw();
@@ -672,11 +767,12 @@ async function generateAddKwBlindspots(force) {
       body: JSON.stringify({
         model: MODEL_MID,
         max_tokens: 4096,
+        thinking: { type: 'disabled' },
         system: [{ type: 'text', text: ADDKW_BLINDSPOT_SYSTEM, cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: context }]
       })
     }, 120000);
-    const parsed = parseAddKwJson(data.content?.[0]?.text ?? '');
+    const parsed = parseAddKwJson(claudeText(data));
     if (!parsed) throw new Error('Could not parse the brainstorm response');
 
     // Dedup against main (search-history) recs only — exclude any prior
@@ -684,50 +780,67 @@ async function generateAddKwBlindspots(force) {
     // instead of spuriously treating it as "already present".
     const existingTexts = new Set((_addkwRecs || []).filter(r => !r.isBlindspot).map(r => r.text.toLowerCase()));
     const defaultGroup = _addkwAdGroupOptions[0] || null;
-    let skipped = 0;
 
+    // Every idea Claude returns is kept (with a filterReason when it isn't
+    // actionable) so the user can still see and be inspired by ones that
+    // aren't addable — only truly empty/garbage text is hard-dropped.
     const ideas = [];
     parsed.forEach(p => {
       const text = String(p.term || '').trim();
       if (!text) return;
       const lc = text.toLowerCase();
-      if (existingTexts.has(lc)) { skipped++; return; }
-      if (isQueryBranded(text, brandPattern)) { skipped++; return; }
-      if (_addkwAllKeywordTexts && _addkwAllKeywordTexts.has(lc)) { skipped++; return; }
-      existingTexts.add(lc);
+
+      let filterReason = null;
+      if (existingTexts.has(lc)) filterReason = 'already_suggested';
+      else if (isQueryBranded(text, brandPattern)) filterReason = 'branded';
+      else if (_addkwAllKeywordTexts && _addkwAllKeywordTexts.has(lc)) filterReason = 'already_targeted';
+      if (filterReason === null) existingTexts.add(lc);
+
       const matchType  = negNormMatch(p.matchType);
       const reason     = String(p.reason || '').trim();
       const confidence = ['high', 'medium', 'low'].includes(String(p.confidence || '').toLowerCase()) ? p.confidence.toLowerCase() : '';
       ideas.push({
-        text, reason, confidence, matchType, include: true,
+        text, reason, confidence, matchType, include: filterReason === null,
         adGroupId: defaultGroup ? defaultGroup.adGroupId : null,
         adGroupName: defaultGroup ? defaultGroup.adGroupName : null,
         campaignName: defaultGroup ? defaultGroup.campaignName : null,
         impressions: 0, clicks: 0, cost: 0, conversions: 0, position: null,
-        volume: null, competition: null, isBlindspot: true
+        volume: null, competition: null, isBlindspot: true, filterReason
       });
     });
 
-    if (ideas.length) {
-      const idr = await sendMessageWithTimeout({ action: 'adsGetKeywordIdeas', pageUrl: tab.url, keywords: ideas.map(r => r.text) });
+    // Volume lookup only makes sense for ideas that survived the text-based
+    // filters above — no point burning a Keyword Planner call on something
+    // already excluded.
+    const toLookup = ideas.filter(r => r.filterReason === null);
+    if (toLookup.length) {
+      const idr = await sendMessageWithTimeout({ action: 'adsGetKeywordIdeas', pageUrl: tab.url, keywords: toLookup.map(r => r.text) });
       const byKeyword = (idr && idr.byKeyword) || {};
-      ideas.forEach(r => {
+      toLookup.forEach(r => {
         const m = byKeyword[r.text.toLowerCase()];
         if (m) { r.volume = m.avgMonthlySearches ?? null; r.competition = m.competition ?? null; }
       });
     }
 
     // Only keep ideas with real, measurable volume — a blind spot with no
-    // provable demand is speculation, not a lead worth surfacing.
-    const withVolume = ideas.filter(r => r.volume != null && r.volume > 0);
-    skipped += ideas.length - withVolume.length;
+    // provable demand is speculation, not a lead worth committing to Ads,
+    // but it still stays visible (marked no_volume) for the user to browse.
+    toLookup.forEach(r => {
+      if (r.volume == null || r.volume <= 0) { r.filterReason = 'no_volume'; r.include = false; }
+    });
+    const withVolume = ideas.filter(r => r.filterReason === null);
 
     // Drop any blind-spot recs from a previous run before appending the fresh
     // set, so "Regenerate" replaces them instead of accumulating duplicates.
-    _addkwRecs = [...(_addkwRecs || []).filter(r => !r.isBlindspot), ...withVolume];
+    // Every idea — kept or filtered — goes into _addkwRecs so the whole run
+    // is spot-checkable and actionable (checkbox + ad-group picker), not
+    // just the auto-kept subset; filtered rows just start unchecked.
+    _addkwRecs = [...(_addkwRecs || []).filter(r => !r.isBlindspot), ...ideas];
+    _addkwBlindspotAllIdeas = ideas;
     _addkwBlindspotGenerated = true;
-    _addkwBlindspotSkippedCount = skipped;
+    _addkwBlindspotSkippedCount = ideas.length - withVolume.length;
     saveAddKwCache();
+    saveAddKwBlindspotCache(pageUrl, ideas);
   } catch (err) {
     _addkwBlindspotGenerated = true;
     _addkwBlindspotError = err.message;
@@ -909,6 +1022,13 @@ function makeAddKwRow(r, showAdGroupSelect) {
     conf.title = ADDKW_CONF_HELP[r.confidence] || '';
     reason.appendChild(conf);
   }
+  if (r.filterReason) {
+    const chip = document.createElement('span');
+    chip.className = `hl-chip ${ADDKW_FILTER_REASON_CHIP_CLASS[r.filterReason] || 'hl-chip--pending'}`;
+    chip.title = 'Filtered out of the auto-kept list, but still addable — check it to include.';
+    chip.textContent = ADDKW_FILTER_REASON_LABEL[r.filterReason] || r.filterReason;
+    reason.appendChild(chip);
+  }
   if (r.reason) {
     const txt = document.createElement('span');
     txt.className = 'neg-reason-text';
@@ -1008,6 +1128,19 @@ function renderAddKw() {
 // own content/intent (not from any search-term or query history), kept only
 // when they have real estimated volume and aren't already targeted anywhere
 // in the account — i.e. gaps the advertiser hasn't reached yet.
+const ADDKW_FILTER_REASON_LABEL = {
+  already_suggested: 'Already suggested above',
+  branded:           'Matches a branded term',
+  already_targeted:  'Already an active keyword',
+  no_volume:         'No search volume',
+};
+const ADDKW_FILTER_REASON_CHIP_CLASS = {
+  already_suggested: 'hl-chip--pending',
+  already_targeted:  'hl-chip--ok',
+  branded:           'hl-chip--warn',
+  no_volume:         'hl-chip--err',
+};
+
 function renderAddKwBlindspotSection(body, blindspotRecs) {
   const section = document.createElement('section');
   section.className = 'field-section';
@@ -1021,9 +1154,18 @@ function renderAddKwBlindspotSection(body, blindspotRecs) {
   const info = document.createElement('button');
   info.className = 'info-tip';
   info.type = 'button';
-  info.title = "Keyword ideas brainstormed from this page's content and intent, not from search history. Only kept when they have real estimated search volume and aren't already targeted anywhere in the account.";
+  info.title = "Keyword ideas brainstormed from this page's content and intent, not from search history. Every idea is shown and checkable — ones with a status chip (no measurable volume, already targeted, branded, or already suggested above) are unchecked by default, but you can still add them if you disagree.";
   info.innerHTML = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7.5" x2="8" y2="11"/><circle cx="8" cy="5" r="0.55" fill="currentColor" stroke="none"/></svg>';
   header.appendChild(info);
+  if (_addkwBlindspotAllIdeas && _addkwBlindspotAllIdeas.length) {
+    const exportBtn = document.createElement('button');
+    exportBtn.className = 'addkw-icon-btn';
+    exportBtn.type = 'button';
+    exportBtn.title = 'Add these ideas to this domain\'s Google Sheet';
+    exportBtn.innerHTML = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="12" rx="1.5"/><line x1="2" y1="6.3" x2="14" y2="6.3"/><line x1="2" y1="10.7" x2="14" y2="10.7"/><line x1="6.3" y1="2" x2="6.3" y2="14"/></svg>';
+    exportBtn.addEventListener('click', () => exportAddKwBlindspotsToSheet(exportBtn, _addkwBlindspotAllIdeas));
+    header.appendChild(exportBtn);
+  }
   section.appendChild(header);
   body.appendChild(section);
 
@@ -1057,12 +1199,13 @@ function renderAddKwBlindspotSection(body, blindspotRecs) {
     return;
   }
 
+  // blindspotRecs carries the entire run now (kept + filtered) — every idea
+  // is rendered as a real, checkable row so the user can spot-check and
+  // commit anything, not just the auto-kept subset. No extra click needed.
   if (!blindspotRecs.length) {
     const msg = document.createElement('div');
     msg.className = 'field-hint';
-    msg.textContent = _addkwBlindspotSkippedCount
-      ? `No blind spots found — ${_addkwBlindspotSkippedCount} idea${_addkwBlindspotSkippedCount === 1 ? '' : 's'} had no measurable search volume or ${_addkwBlindspotSkippedCount === 1 ? 'was' : 'were'} already targeted.`
-      : 'No additional keyword opportunities found for this page.';
+    msg.textContent = 'No additional keyword opportunities found for this page.';
     section.appendChild(msg);
   } else {
     const table = document.createElement('div');
@@ -1070,12 +1213,6 @@ function renderAddKwBlindspotSection(body, blindspotRecs) {
     table.appendChild(makeAddKwTableHead());
     blindspotRecs.forEach(r => table.appendChild(makeAddKwRow(r, true)));
     section.appendChild(table);
-    if (_addkwBlindspotSkippedCount) {
-      const note = document.createElement('div');
-      note.className = 'field-hint';
-      note.textContent = `${_addkwBlindspotSkippedCount} other idea${_addkwBlindspotSkippedCount === 1 ? '' : 's'} dropped — no measurable volume or already targeted.`;
-      section.appendChild(note);
-    }
   }
 
   const retry = document.createElement('button');
@@ -1267,6 +1404,40 @@ async function exportAddKwToDoc(btn, groups) {
     browser.tabs.create({ url: res.url });
     btn.classList.add('is-success');
     btn.title = 'Opened ✓';
+    setTimeout(() => { btn.classList.remove('is-success'); btn.title = origTitle; }, 3000);
+  } else {
+    btn.classList.add('is-error');
+    btn.title = `Export failed: ${(res && res.error) || 'unknown error'}`;
+    setTimeout(() => { btn.classList.remove('is-error'); btn.title = origTitle; }, 3000);
+  }
+}
+
+// Appends the current blindspot run (kept + filtered, each with its status)
+// to this domain's shared Google Sheet — one spreadsheet per domain, rows
+// appended to a single fixed tab so the sheet reads as a growing history log.
+async function exportAddKwBlindspotsToSheet(btn, ideas) {
+  if (!ideas || !ideas.length) return;
+  let pageUrl = '';
+  try { pageUrl = (pageData && pageData.canonical) || (await getActiveTab()).url; } catch { /* keep default */ }
+
+  btn.disabled = true;
+  const origTitle = btn.title;
+  btn.title = 'Adding to Google Sheet…';
+
+  async function attempt() {
+    return sendMessageWithTimeout({ action: 'sheetsExportBlindspotIdeas', ideas, pageUrl });
+  }
+  let res = await attempt();
+  if (res && res.notConnected) {
+    const auth = await sendMessageWithTimeout({ action: 'docsConnect' });
+    if (!auth || auth.error) { btn.disabled = false; btn.title = 'Google Sheets auth failed — try again'; setTimeout(() => { btn.title = origTitle; }, 3000); return; }
+    res = await attempt();
+  }
+  btn.disabled = false;
+  if (res && res.url) {
+    browser.tabs.create({ url: res.url });
+    btn.classList.add('is-success');
+    btn.title = 'Added ✓';
     setTimeout(() => { btn.classList.remove('is-success'); btn.title = origTitle; }, 3000);
   } else {
     btn.classList.add('is-error');

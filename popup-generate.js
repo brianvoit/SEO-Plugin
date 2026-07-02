@@ -91,7 +91,7 @@ async function generateField(field) {
       })
     });
 
-    const suggestion = data.content?.[0]?.text?.trim();
+    const suggestion = claudeText(data).trim();
     if (!suggestion) throw new Error('Empty response from Claude');
 
     genSuggestions[field] = suggestion;
@@ -287,7 +287,7 @@ async function generateOGField(key, bodyEl, btn) {
       })
     });
 
-    const suggestion = (resp.content?.[0]?.text ?? '').trim();
+    const suggestion = claudeText(resp).trim();
     if (!suggestion) throw new Error('Empty response from Claude');
 
     resultEl.replaceChildren();
@@ -497,7 +497,7 @@ async function loadAiInsights(forceRefresh = false) {
         messages: [{ role: 'user', content }]
       })
     });
-    const text = (data.content?.[0]?.text ?? '').replace(/^```(?:json)?|```$/g, '').trim();
+    const text = claudeText(data).replace(/^```(?:json)?|```$/g, '').trim();
     const values = normalizeAiInsights(JSON.parse(text));
     if (!values) throw new Error('Unexpected labels in response');
 

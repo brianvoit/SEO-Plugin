@@ -95,6 +95,18 @@ async function claudeFetch(options, timeoutMs = 60000) {
   }
 }
 
+// Pull the model's actual reply out of a Messages API response. Content
+// blocks aren't always [text, ...] — Sonnet 5 runs adaptive thinking by
+// default when `thinking` is omitted, which prepends a thinking block (no
+// `.text` field) before the text block, so `content[0].text` silently
+// resolves to undefined. Find the first real text block instead of assuming
+// position 0.
+function claudeText(data) {
+  const blocks = (data && data.content) || [];
+  for (const b of blocks) { if (b && b.type === 'text' && typeof b.text === 'string') return b.text; }
+  return '';
+}
+
 // Build an SVG element (e.g. an icon, or a whole chart) from a markup string
 // without using innerHTML. DOMParser is not flagged by the AMO linter, and the
 // markup we pass is always numeric/escaped, so this is safe.

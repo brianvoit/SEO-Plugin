@@ -49,7 +49,7 @@ async function classifyIntents(terms, claudeApiKey) {
       messages: [{ role: 'user', content }]
     })
   });
-  const text = (data.content?.[0]?.text ?? '').replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
+  const text = claudeText(data).replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
   const map = JSON.parse(text);
   return terms.map((t, i) => INTENTS.find(l => l.toLowerCase() === String(map[i] ?? map[String(i)] ?? '').trim().toLowerCase()) || null);
 }

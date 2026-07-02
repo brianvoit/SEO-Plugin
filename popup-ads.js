@@ -1277,11 +1277,12 @@ async function regenerateAdCopyLine(asset, index, input, count, btn) {
       body: JSON.stringify({
         model: MODEL_MID,
         max_tokens: 120,
+        thinking: { type: 'disabled' },
         system,
         messages: [{ role: 'user', content: _adCopyContext || 'No additional context available.' }]
       })
     });
-    let out = sanitizeAdText((data.content?.[0]?.text ?? '').trim().replace(/^["']|["']$/g, ''));
+    let out = sanitizeAdText(claudeText(data).trim().replace(/^["']|["']$/g, ''));
     if (!out) throw new Error('empty');
     if (out.length > asset.max) out = adcopyHardTrim(out, asset.max);
 
@@ -1329,9 +1330,9 @@ async function enforceAdCopyLimits(claudeApiKey, parsed) {
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true'
       },
-      body: JSON.stringify({ model: MODEL_MID, max_tokens: 600, system, messages: [{ role: 'user', content }] })
+      body: JSON.stringify({ model: MODEL_MID, max_tokens: 600, thinking: { type: 'disabled' }, system, messages: [{ role: 'user', content }] })
     });
-    let raw = (data.content?.[0]?.text ?? '').trim().replace(/```json/gi, '').replace(/```/g, '').trim();
+    let raw = claudeText(data).trim().replace(/```json/gi, '').replace(/```/g, '').trim();
     const s = raw.indexOf('['), e = raw.lastIndexOf(']');
     if (s !== -1 && e > s) raw = raw.slice(s, e + 1);
     const arr = JSON.parse(raw);
@@ -1600,12 +1601,13 @@ async function generateAdCopy(force) {
       body: JSON.stringify({
         model: MODEL_MID,
         max_tokens: 1600,
+        thinking: { type: 'disabled' },
         system: systemBlocks,
         messages: [{ role: 'user', content: context }]
       })
     });
     // Robust JSON extraction: strip code fences, then take the outermost {…}.
-    let raw = (data.content?.[0]?.text ?? '').trim();
+    let raw = claudeText(data).trim();
     raw = raw.replace(/```json/gi, '').replace(/```/g, '').trim();
     const start = raw.indexOf('{'), end = raw.lastIndexOf('}');
     if (start !== -1 && end > start) raw = raw.slice(start, end + 1);
@@ -1968,11 +1970,12 @@ async function generateNegatives(force) {
       body: JSON.stringify({
         model: MODEL_MID,
         max_tokens: 4096,
+        thinking: { type: 'disabled' },
         system: negSystemBlocks,
         messages: [{ role: 'user', content: context }]
       })
     });
-    const parsed = parseNegativesJson(data.content?.[0]?.text ?? '');
+    const parsed = parseNegativesJson(claudeText(data));
     if (!parsed) throw new Error('Could not parse the analysis response');
 
     // Map Claude's picks back to candidates, expanding to one row per campaign.
@@ -2793,11 +2796,12 @@ async function generateOneAdLine(asset, existing) {
     body: JSON.stringify({
       model: MODEL_MID,
       max_tokens: 120,
+      thinking: { type: 'disabled' },
       system,
       messages: [{ role: 'user', content: context }]
     })
   });
-  let out = sanitizeAdText((data.content?.[0]?.text ?? '').trim().replace(/^["']|["']$/g, ''));
+  let out = sanitizeAdText(claudeText(data).trim().replace(/^["']|["']$/g, ''));
   if (!out) throw new Error('empty');
   if (out.length > asset.max) out = adcopyHardTrim(out, asset.max);
   return out;

@@ -829,6 +829,52 @@ function faviconIconChip(live, href) {
   return chip;
 }
 
+// Hovering a declared-icon row shows the actual image at its actual pixel
+// resolution (SVGs — which have no fixed native size — are rendered at a
+// fixed 256x256 so they're inspectable). Skipped while the live check is
+// still pending or the file failed to load.
+let _faviconPreviewEl = null;
+
+function showFaviconPreview(anchorEl, href, live) {
+  const r = live && live.results ? live.results[href] : null;
+  if (!r || !r.ok || !r.isImage) return;
+
+  if (!_faviconPreviewEl) {
+    _faviconPreviewEl = document.createElement('div');
+    _faviconPreviewEl.className = 'favicon-img-preview';
+    _faviconPreviewEl.appendChild(document.createElement('img')).alt = '';
+    const cap = document.createElement('div');
+    cap.className = 'favicon-preview-caption';
+    _faviconPreviewEl.appendChild(cap);
+    document.body.appendChild(_faviconPreviewEl);
+  }
+
+  const img = _faviconPreviewEl.querySelector('img');
+  const cap = _faviconPreviewEl.querySelector('.favicon-preview-caption');
+  img.src = href;
+
+  if (r.scalable) {
+    img.style.width = '256px';
+    img.style.height = '256px';
+    cap.textContent = 'SVG — shown at 256×256';
+  } else {
+    img.style.width  = r.width  ? `${r.width}px`  : '';
+    img.style.height = r.height ? `${r.height}px` : '';
+    cap.textContent = r.width && r.height ? `${r.width}×${r.height} — actual size` : 'Size unknown';
+  }
+
+  _faviconPreviewEl.classList.add('visible');
+
+  const rect = anchorEl.getBoundingClientRect();
+  const maxW = 340;
+  _faviconPreviewEl.style.top  = `${rect.bottom + 6}px`;
+  _faviconPreviewEl.style.left = `${Math.max(6, Math.min(rect.left, window.innerWidth - maxW - 6))}px`;
+}
+
+function hideFaviconPreview() {
+  if (_faviconPreviewEl) _faviconPreviewEl.classList.remove('visible');
+}
+
 // Validation checklist rows, grouped to mirror realfavicongenerator.net's
 // checker report: { group, label, level: 'pass'|'warn'|'fail' }.
 function buildFaviconChecks(fav, live) {
@@ -969,6 +1015,11 @@ function renderFaviconDetail() {
       hrefEl.title = (actual ? `Actual size: ${actual}\n` : '') + 'Open in new tab: ' + i.href;
       if (i.href) hrefEl.addEventListener('click', () => browser.tabs.create({ url: i.href }));
       if (actual) tag.title = `${tag.title}\nActual size: ${actual}`;
+
+      if (i.href) {
+        row.addEventListener('mouseenter', () => showFaviconPreview(row, i.href, live));
+        row.addEventListener('mouseleave', hideFaviconPreview);
+      }
 
       row.append(tag, hrefEl, faviconIconChip(live, i.href));
       tableSec.appendChild(row);
@@ -1512,7 +1563,7 @@ priority: high = strong rich-result candidate; medium = useful; low = nice-to-ha
         messages: [{ role: 'user', content: prompt }]
       })
     });
-    let text = (data.content?.[0]?.text || '').replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
+    let text = claudeText(data).replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
     const parsed = JSON.parse(text);
     _schemaSuggestions = (parsed.suggestions || []).slice(0, 5).map(s => ({
       type:     String(s.type     || '').trim(),

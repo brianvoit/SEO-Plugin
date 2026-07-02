@@ -431,7 +431,7 @@ async function loadActionPlan(forceRefresh = false) {
         messages: [{ role: 'user', content: context }]
       })
     });
-    const plan = normalizeActionPlan(actionPlanParse(data.content?.[0]?.text));
+    const plan = normalizeActionPlan(actionPlanParse(claudeText(data)));
     if (!plan) throw new Error('Could not parse a plan from the response.');
 
     _actionPlan = plan;

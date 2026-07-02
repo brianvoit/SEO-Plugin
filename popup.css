@@ -1232,6 +1232,40 @@ body.settings-open #update-footer { margin-top: auto; }
 .og-img-preview.visible { display: block; }
 .og-img-preview img { display: block; max-width: 200px; max-height: 200px; border-radius: 3px; }
 
+.favicon-img-preview {
+  position: fixed;
+  z-index: 100;
+  display: none;
+  padding: 8px;
+  background: var(--bg-section);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  text-align: center;
+}
+.favicon-img-preview.visible { display: block; }
+.favicon-img-preview img {
+  display: block;
+  max-width: 320px;
+  max-height: 320px;
+  margin: 0 auto;
+  border-radius: 3px;
+  /* Checkerboard so transparent icons stay visible against the dark panel */
+  background:
+    linear-gradient(45deg, #ccc 25%, transparent 25%) 0 0/16px 16px,
+    linear-gradient(-45deg, #ccc 25%, transparent 25%) 0 0/16px 16px,
+    linear-gradient(45deg, transparent 75%, #ccc 75%) 0 0/16px 16px,
+    linear-gradient(-45deg, transparent 75%, #ccc 75%) 0 0/16px 16px,
+    #fff;
+}
+.favicon-preview-caption {
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
 /* ── Structured Data nav row ──────────────────────────────────────────────── */
 
 .field-nav-btn {
@@ -1660,7 +1694,7 @@ body.settings-open #update-footer { margin-top: auto; }
 .neg-row-term { grid-area: term; font-size: 12.5px; font-weight: 600; color: var(--text); word-break: break-word; min-width: 0; }
 .neg-term-link { cursor: pointer; }
 .neg-term-link:hover { color: var(--accent); text-decoration: underline; }
-.neg-row-reason { grid-area: reason; display: flex; align-items: baseline; gap: 6px; font-size: 11px; color: var(--text-muted); line-height: 1.35; }
+.neg-row-reason { grid-area: reason; display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; font-size: 11px; color: var(--text-muted); line-height: 1.35; }
 .neg-reason-text { min-width: 0; }
 
 .neg-conf {

@@ -1635,7 +1635,7 @@ async function loadData(expandMeta = false, forceRefreshGsc = false) {
 
   const tab = await getActiveTab();
   try {
-    const data = await browser.tabs.sendMessage(tab.id, { action: 'getPageData' });
+    const data = await getPageDataFromTab(tab.id);
     document.getElementById('error-state').classList.add('hidden');
     showActiveTab();
     render(data, expandMeta);
@@ -1650,11 +1650,25 @@ async function loadData(expandMeta = false, forceRefreshGsc = false) {
     if (typeof loadAiInsights === 'function') loadAiInsights(forceRefreshGsc);
     if (typeof hydrateActionPlanNav === 'function') hydrateActionPlanNav();
   } catch {
+    // The page's content script didn't answer — most often because this tab
+    // was already open before the extension loaded (content scripts only
+    // inject on subsequent page loads), or it's a page they can't run on
+    // (about:, view-source:, the PDF viewer, etc.). Only the Overview tab
+    // depends on that on-page read; the other tabs pull by URL and still
+    // work, so keep the tab bar visible and let the user navigate instead of
+    // stranding them on a bare error. The banner + hidden Overview content
+    // convey the failure without hiding navigation.
     document.getElementById('error-state').classList.remove('hidden');
-    tabGroup.classList.add('hidden');
     mainContent.classList.add('hidden');
     searchTab.classList.add('hidden');
     renderRedirectStatus(tab.id, null);
+    // The Search/Analytics/Ads/Tracked/DNS tabs pull by URL, not from the
+    // on-page read, so they still work here. Analytics/Ads/Tracked/DNS load
+    // lazily on tab-click; GSC is the exception (only the success path above
+    // loads it eagerly), so kick it off here too — loadGscData falls back to
+    // tab.url when the page's canonical can't be read, so the Search tab
+    // populates instead of sitting empty after a failed page read.
+    loadGscData(forceRefreshGsc);
   }
 }
 
@@ -1681,7 +1695,7 @@ document.getElementById('meta-toggle').addEventListener('click', async () => {
   metaExpanded = !metaExpanded;
   const tab = await getActiveTab();
   try {
-    const data = await browser.tabs.sendMessage(tab.id, { action: 'getPageData' });
+    const data = await getPageDataFromTab(tab.id);
     renderMeta(data, metaExpanded);
   } catch { /* ignore */ }
 });

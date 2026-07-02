@@ -2547,8 +2547,23 @@ const KW_IDEA_CHUNK = 20; // practical per-request seed-keyword batch size
 // per-account variance), so this cache is keyed by keyword text alone and
 // shared by every caller: Add Keywords' candidate lookup, blindspot
 // brainstorm, and the Search tab's query enrichment.
+//
+// Storage key is versioned (V2) to auto-discard the pre-existing
+// `adsKeywordVolumeCache` entries: the original version cached ANY text
+// match Google returned, even ones with no keywordIdeaMetrics at all, which
+// meant a bad first test (e.g. an access-tier/request-shape issue returning
+// text-only matches) got permanently memorized as "confirmed no data" and
+// silently masked every retry for the following 30 days. See
+// adsGetKeywordIdeas below — an entry now only gets cached once it actually
+// carries real metrics.
 const KW_VOLUME_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const KW_VOLUME_CACHE_CAP = 1000;
+const KW_VOLUME_CACHE_KEY = 'adsKeywordVolumeCacheV2';
+// Flip to true locally to trace Keyword Plan Idea Service responses in the
+// background console (about:debugging → Inspect) — distinguishes "no results"
+// from "results with no metrics" (the Basic-access-tier symptom). Off by
+// default so nothing logs in a shipped build.
+const KW_VOLUME_DEBUG = false;
 
 // One Keyword Plan Idea Service request. v1 defaults: English language, no
 // geoTargetConstants (global volume — disclosed in the UI), GOOGLE_SEARCH
@@ -2611,8 +2626,8 @@ async function adsGetKeywordIdeas({ pageUrl, keywords }) {
   const wanted = [...new Set((keywords || []).map(k => String(k || '').trim()).filter(Boolean))];
   if (!wanted.length) return { byKeyword: {} };
 
-  const { adsKeywordVolumeCache } = await browser.storage.local.get('adsKeywordVolumeCache');
-  const cache = adsKeywordVolumeCache || {};
+  const { [KW_VOLUME_CACHE_KEY]: storedCache } = await browser.storage.local.get(KW_VOLUME_CACHE_KEY);
+  const cache = storedCache || {};
 
   const byKeyword = {};
   const toFetch = [];
@@ -2624,22 +2639,32 @@ async function adsGetKeywordIdeas({ pageUrl, keywords }) {
   });
 
   let cacheDirty = false;
+  let anyChunkErrored = false;
   let lastChunkError = null;
+  let resultCount = 0, metricsCount = 0;
   for (let i = 0; i < toFetch.length; i += KW_IDEA_CHUNK) {
     const chunk = toFetch.slice(i, i + KW_IDEA_CHUNK);
     const res = await adsGenerateKeywordIdeas(accessToken, cid, chunk);
-    if (res.error) { lastChunkError = res; continue; } // graceful no-op per chunk — never block the others
+    if (res.error) { anyChunkErrored = true; lastChunkError = res; continue; } // graceful no-op per chunk — never block the others
     (res.results || []).forEach(r => {
       const text = r.text || '';
       if (!text) return;
+      resultCount++;
       const lc = text.toLowerCase();
+      // Only cache entries that actually carry metrics. A text match with no
+      // keywordIdeaMetrics at all is not a confirmed "zero volume" answer —
+      // caching it anyway is exactly what silently locked in a bad first
+      // test for 30 days (see the KW_VOLUME_CACHE_KEY comment above). An
+      // unmetriced miss just gets re-tried on the next call instead.
+      if (!r.keywordIdeaMetrics) { byKeyword[lc] = { avgMonthlySearches: null, competition: null, fetchedAt: Date.now() }; return; }
+      metricsCount++;
       const entry = {
-        avgMonthlySearches:     r.keywordIdeaMetrics?.avgMonthlySearches ?? null,
-        competition:            r.keywordIdeaMetrics?.competition ?? null,
-        competitionIndex:       r.keywordIdeaMetrics?.competitionIndex ?? null,
-        lowTopOfPageBidMicros:  r.keywordIdeaMetrics?.lowTopOfPageBidMicros ?? null,
-        highTopOfPageBidMicros: r.keywordIdeaMetrics?.highTopOfPageBidMicros ?? null,
-        monthlySearchVolumes:   r.keywordIdeaMetrics?.monthlySearchVolumes ?? [],
+        avgMonthlySearches:     r.keywordIdeaMetrics.avgMonthlySearches ?? null,
+        competition:            r.keywordIdeaMetrics.competition ?? null,
+        competitionIndex:       r.keywordIdeaMetrics.competitionIndex ?? null,
+        lowTopOfPageBidMicros:  r.keywordIdeaMetrics.lowTopOfPageBidMicros ?? null,
+        highTopOfPageBidMicros: r.keywordIdeaMetrics.highTopOfPageBidMicros ?? null,
+        monthlySearchVolumes:   r.keywordIdeaMetrics.monthlySearchVolumes ?? [],
         fetchedAt: Date.now()
       };
       byKeyword[lc] = entry;
@@ -2648,21 +2673,26 @@ async function adsGetKeywordIdeas({ pageUrl, keywords }) {
     });
   }
 
+  // Diagnostic trail (gated by KW_VOLUME_DEBUG). Distinguishes "the request
+  // never got results at all" from "results came back but with no metrics on
+  // any of them" (the two collapse into the same empty UI otherwise).
+  if (KW_VOLUME_DEBUG && toFetch.length) {
+    console.log(`[adsGetKeywordIdeas] requested ${toFetch.length}, chunks errored: ${anyChunkErrored}` + (lastChunkError ? ` (${lastChunkError.error}: ${lastChunkError.detail || ''})` : '') + `, results: ${resultCount}, results with metrics: ${metricsCount}`);
+  }
+
   if (cacheDirty) {
     const keys = Object.keys(cache);
     if (keys.length > KW_VOLUME_CACHE_CAP) {
       keys.sort((a, b) => cache[a].fetchedAt - cache[b].fetchedAt);
       keys.slice(0, keys.length - KW_VOLUME_CACHE_CAP).forEach(k => delete cache[k]);
     }
-    await browser.storage.local.set({ adsKeywordVolumeCache: cache });
+    await browser.storage.local.set({ [KW_VOLUME_CACHE_KEY]: cache });
   }
 
-  // Distinguish "every fetch attempt actually failed" (surfaced, so callers
-  // like the Search tab can tell a broken connection apart from genuinely-
-  // zero volume) from "requests succeeded but returned no matches" (not an
-  // error — Keyword Planner just has nothing on these terms) or a partial
-  // success (some chunks worked, don't block on the rest).
-  if (toFetch.length && !cacheDirty && lastChunkError) {
+  // Surface a genuine HTTP/API failure whenever ANY chunk hit one — even if
+  // other chunks in the same batch came back fine, so a partial outage
+  // doesn't get silently swallowed just because some keywords resolved.
+  if (anyChunkErrored) {
     return { byKeyword, error: lastChunkError.error, detail: lastChunkError.detail };
   }
   return { byKeyword };

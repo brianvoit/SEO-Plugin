@@ -231,6 +231,29 @@ async function getActiveTab() {
   return tab;
 }
 
+// Read the current page's data from its content script. `content.js` only
+// auto-injects on page loads that happen AFTER the extension loads, so a tab
+// that was already open (or the sidebar/pop-out opened on a pre-existing tab)
+// has no listener and the first sendMessage throws. On that failure, inject
+// content.js on demand (the manifest already grants the `scripting`
+// permission), then retry once. A second failure means a genuinely
+// unreadable page — about:, view-source:, the PDF viewer, addons.mozilla.org
+// — which the caller surfaces as the "Cannot read this page" state.
+async function getPageDataFromTab(tabId) {
+  try {
+    return await browser.tabs.sendMessage(tabId, { action: 'getPageData' });
+  } catch {
+    // No content script answered — inject it, then retry. The injection is
+    // wrapped defensively: if it fails because the script is somehow already
+    // present (a transient miss rather than a truly missing script), the
+    // retry sendMessage below still resolves against the existing listener.
+    try {
+      await browser.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+    } catch { /* already present, or a restricted page — let the retry decide */ }
+    return await browser.tabs.sendMessage(tabId, { action: 'getPageData' });
+  }
+}
+
 // Show the connected Google account email to the left of a "Connected" chip.
 // Hidden when there's no email (e.g. an older connection made before the email
 // scope was added — reconnect to populate it).

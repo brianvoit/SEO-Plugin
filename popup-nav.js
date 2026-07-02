@@ -46,6 +46,10 @@ function hideDetailPanels() {
 
 function showActiveTab() {
   hideDetailPanels();
+  // The "Cannot read this page" banner is an Overview-only state; clear it
+  // whenever we (re)render a tab so it doesn't linger over another tab's
+  // content after the user navigates away from a failed page read.
+  errorBanner.classList.add('hidden');
   document.body.classList.remove('settings-open');
   document.getElementById('btn-settings').classList.remove('is-active');
   // The update checker lives only on the Setup screen

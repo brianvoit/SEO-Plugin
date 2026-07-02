@@ -1076,7 +1076,7 @@ async function loadGscData(forceRefresh = false) {
   const tab = await getActiveTab();
   let pageUrl = tab.url;
   try {
-    const data = await browser.tabs.sendMessage(tab.id, { action: 'getPageData' });
+    const data = await getPageDataFromTab(tab.id);
     if (data?.canonical) pageUrl = data.canonical;
   } catch { /* fall back to tab.url */ }
 
@@ -1209,7 +1209,7 @@ async function refreshGscPropertyInfo() {
   const tab = await getActiveTab();
   let pageUrl = tab.url;
   try {
-    const data = await browser.tabs.sendMessage(tab.id, { action: 'getPageData' });
+    const data = await getPageDataFromTab(tab.id);
     if (data?.canonical) pageUrl = data.canonical;
   } catch { /* fall back to tab.url */ }
 

@@ -23,6 +23,46 @@ document.querySelectorAll('#display-mode-group .mode-option').forEach(btn => {
   });
 });
 
+// ─── Page access (Firefox MV3 optional host permission) ─────────────────────
+// Firefox treats host_permissions as optional and OFF by default, so the
+// content script that reads the current page (the whole Overview tab) can't
+// run until the user grants all-sites access. Chrome grants this at install,
+// so this only matters on Firefox. We surface a Grant button in Setup and
+// request it with a user gesture (permissions.request must be gesture-driven).
+const PAGE_ACCESS_ORIGINS = ['*://*/*'];
+
+async function hasPageAccess() {
+  try { return await browser.permissions.contains({ origins: PAGE_ACCESS_ORIGINS }); }
+  catch { return true; } // if the API is unavailable, don't nag
+}
+
+// Show the Grant-access section only while the permission is missing. Called
+// whenever Setup opens (see showSettings in popup-nav.js).
+async function refreshPageAccessSection() {
+  const section = document.getElementById('page-access-section');
+  if (!section) return;
+  const granted = await hasPageAccess();
+  section.classList.toggle('hidden', granted);
+}
+
+document.getElementById('btn-grant-page-access').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  try {
+    const granted = await browser.permissions.request({ origins: PAGE_ACCESS_ORIGINS });
+    if (granted) {
+      document.getElementById('page-access-section').classList.add('hidden');
+      // Re-read the current page now that we're allowed to (populates Overview
+      // without the user having to reload or reopen anything).
+      if (typeof loadData === 'function') loadData();
+    } else {
+      const hint = document.getElementById('page-access-hint');
+      if (hint) hint.textContent = 'Access was not granted. The Overview tab stays empty until you allow access to the pages you visit.';
+    }
+  } catch { /* request failed — leave the section visible to try again */ }
+  btn.disabled = false;
+});
+
 // ─── Follow active tab (sidebar / pop-out auto-refresh) ──────────────────────
 // Button now lives in the app header (always visible). Initialize its state
 // from storage on startup so it reflects the persisted preference immediately.

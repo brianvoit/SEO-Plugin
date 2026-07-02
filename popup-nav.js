@@ -178,6 +178,7 @@ function showSettings() {
     setDisplayModeUI(displayMode || 'sidebar');
   });
 
+  if (typeof refreshPageAccessSection === 'function') refreshPageAccessSection();
   loadWpSites();
   refreshGscSettingsStatus().then(status => {
     if (status && status.connected) refreshGscPropertyInfo();

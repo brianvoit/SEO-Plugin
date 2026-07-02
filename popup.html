@@ -71,6 +71,19 @@
   <!-- Settings panel -->
   <div id="settings-panel" class="hidden">
 
+    <!-- Page access: Firefox MV3 treats host permissions as optional, so the
+         extension can't read pages (the Overview tab) until the user grants
+         all-sites access. Shown only while that grant is missing. -->
+    <section class="field-section hidden" id="page-access-section">
+      <div class="field-header">
+        <span class="field-label">PAGE ACCESS</span>
+      </div>
+      <div class="field-hint hint-amber" id="page-access-hint">The Overview tab reads the page you're on, which needs your permission. Without it, only the Search/Analytics/Ads tabs (which use Google APIs) will work.</div>
+      <div class="wp-form-actions">
+        <button id="btn-grant-page-access" class="save-key-btn">Grant page access</button>
+      </div>
+    </section>
+
     <section class="field-section">
       <div class="field-header">
         <span class="field-label">DISPLAY MODE</span>

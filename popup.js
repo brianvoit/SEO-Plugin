@@ -112,4 +112,21 @@ document.getElementById('btn-check-update').addEventListener('click', checkForUp
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
-Promise.all([loadGscPrefs(), loadGaPrefs(), loadAdsPrefs(), loadWebceoPrefs()]).then(() => loadData());
+Promise.all([loadGscPrefs(), loadGaPrefs(), loadAdsPrefs(), loadWebceoPrefs()]).then(async () => {
+  // Firefox MV3: host access is optional and off by default, so on a fresh
+  // install the extension can't read the page and the Overview comes up empty.
+  // Send first-time users straight to Setup (which has the Grant Page Access
+  // button) once, instead of a broken Overview. After they've been prompted
+  // once, load normally — the Grant button still lives in Setup if they
+  // declined and change their mind.
+  try {
+    if (typeof hasPageAccess === 'function' && !(await hasPageAccess())) {
+      const { pageAccessPrompted } = await browser.storage.local.get('pageAccessPrompted');
+      if (!pageAccessPrompted) {
+        await browser.storage.local.set({ pageAccessPrompted: true });
+        if (typeof showSettings === 'function') { showSettings(); return; }
+      }
+    }
+  } catch { /* fall through to a normal load */ }
+  loadData();
+});

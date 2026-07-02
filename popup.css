@@ -2323,6 +2323,10 @@ body.settings-open #update-footer { margin-top: auto; }
 .gsc-query-row { padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 11.5px; }
 .gsc-query-row:last-child { border-bottom: none; }
 .gsc-query-main { display: grid; grid-template-columns: 18px 1fr 58px 54px 50px 50px; gap: 6px; align-items: center; }
+/* Vol/competition column only exists once an Ads connection is confirmed
+   for the domain (see _gscAdsVolumeState in popup-gsc.js) — the base
+   .gsc-query-main above is untouched for the disconnected case. */
+.gsc-query-main--vol { grid-template-columns: 18px 1fr 46px 48px 44px 40px 40px; }
 .gsc-query-row--header { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); border-bottom: 1px solid var(--border); }
 .gsc-query-text-wrap { display: flex; align-items: center; gap: 4px; overflow: hidden; min-width: 0; }
 .gsc-query-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; color: var(--text); cursor: pointer; }
@@ -2377,6 +2381,30 @@ body.settings-open #update-footer { margin-top: auto; }
   padding: 1px 4px;
   letter-spacing: 0.04em;
 }
+
+/* ── Ads-sourced Vol/competition cell + 12-month trend hover popover ────────── */
+.gsc-query-vol { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+.gsc-query-vol-num { text-align: right; font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--text-muted); }
+.gsc-query-comp-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; cursor: help; }
+.gsc-query-comp-dot--low    { background: var(--hint-green); }
+.gsc-query-comp-dot--medium { background: var(--hint-amber); }
+.gsc-query-comp-dot--high   { background: var(--hint-red); }
+
+.gsc-vol-trend-preview {
+  position: fixed;
+  z-index: 100;
+  display: none;
+  padding: 8px;
+  background: var(--bg-section);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  text-align: center;
+}
+.gsc-vol-trend-preview.visible { display: block; }
+.gsc-vol-sparkline { fill: none; stroke: var(--accent); stroke-width: 1.4; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.gsc-vol-trend-caption { margin-top: 6px; font-size: 10px; color: var(--text-muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; white-space: nowrap; }
 
 /* Query filter bar (click-to-filter chart) */
 .gsc-query-filter-bar {

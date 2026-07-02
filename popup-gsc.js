@@ -20,6 +20,16 @@ let _gscIntentFilter = null;       // null = All, else one of INTENTS
 let _gscQuerySearch = '';          // regex string for query text filter
 let _gscQuerySearchExclude = false; // false = match (include), true = exclude
 
+// Google Ads-sourced query enrichment (volume/competition/CPC/trend) — a
+// query's demand is page-independent, so this is a flat term→data map, not
+// scoped to the current page. `_gscAdsVolumeState` gates whether the Vol
+// column exists in the DOM at all: it only ever appears once we've
+// confirmed the domain has a usable Ads connection, never as an empty/dash
+// column for a disconnected domain.
+let _gscQueryVolumeMap = {};                 // query(lower) → {avgMonthlySearches, competition, competitionIndex, lowTopOfPageBidMicros, highTopOfPageBidMicros, monthlySearchVolumes} | null
+let _gscAdsVolumeState = 'unknown';          // 'unknown' | 'available' | 'unavailable'
+let _gscQueryVolumeLoading = false;
+
 // Chart metrics config. The chart helpers below are generic — popup-ga.js
 // passes its own config of the same shape. Optional per-metric fields:
 //   invertY    zero-at-top axis (lower is better, e.g. SERP position)
@@ -47,8 +57,15 @@ const GSC_QUERY_COLUMNS = [
   { key: 'ctr',         label: 'CTR',    format: v => (v * 100).toFixed(1) + '%' }
 ];
 
+// Ads-sourced demand column — prepended ahead of the performance columns
+// above, but only when _gscAdsVolumeState === 'available' (see
+// renderGscQueries). Cell content itself is special-cased in
+// buildQueryDataRow (needs a competition dot + hover trend, not just text),
+// this entry exists so the header/sort machinery treats it uniformly.
+const GSC_QUERY_VOL_COLUMN = { key: 'volume', label: 'Vol' };
+
 // Lower position is better, so default that column to ascending
-const GSC_QUERY_SORT_DEFAULT_DIR = { impressions: 'desc', clicks: 'desc', position: 'asc', ctr: 'desc' };
+const GSC_QUERY_SORT_DEFAULT_DIR = { impressions: 'desc', clicks: 'desc', position: 'asc', ctr: 'desc', volume: 'desc' };
 
 // ─── Google Search Console: helpers ──────────────────────────────────────────
 
@@ -421,18 +438,18 @@ function sortGscQueries(queries, sort) {
   return sorted;
 }
 
-function buildQueryHeaderRow(sort) {
+function buildQueryHeaderRow(sort, columns = GSC_QUERY_COLUMNS, volAvailable = false) {
   const row = document.createElement('div');
   row.className = 'gsc-query-row gsc-query-row--header';
 
   const main = document.createElement('div');
-  main.className = 'gsc-query-main';
+  main.className = 'gsc-query-main' + (volAvailable ? ' gsc-query-main--vol' : '');
   main.appendChild(document.createElement('span'));   // empty cell over the + button column
   const qh = document.createElement('span');
   qh.textContent = 'Query';
   main.appendChild(qh);
 
-  GSC_QUERY_COLUMNS.forEach(col => {
+  columns.forEach(col => {
     const active = sort.column === col.key;
     const arrow = active ? (sort.direction === 'asc' ? ' ▲' : ' ▼') : '';
     const span = document.createElement('span');
@@ -446,7 +463,7 @@ function buildQueryHeaderRow(sort) {
   return row;
 }
 
-function buildQueryDataRow(q, locations, branded, selected) {
+function buildQueryDataRow(q, locations, branded, selected, columns = GSC_QUERY_COLUMNS, volAvailable = false) {
   const row = document.createElement('div');
   row.className = 'gsc-query-row gsc-query-row--clickable'
     + (branded ? ' gsc-query-row--branded' : '')
@@ -454,7 +471,7 @@ function buildQueryDataRow(q, locations, branded, selected) {
   row.dataset.query = q.query;
 
   const main = document.createElement('div');
-  main.className = 'gsc-query-main';
+  main.className = 'gsc-query-main' + (volAvailable ? ' gsc-query-main--vol' : '');
 
   // Add-to-branded button (left of the query). Already-branded terms show no
   // button — just an empty cell to keep the grid aligned.
@@ -528,7 +545,8 @@ function buildQueryDataRow(q, locations, branded, selected) {
 
   main.appendChild(wrap);
 
-  GSC_QUERY_COLUMNS.forEach(col => {
+  columns.forEach(col => {
+    if (col.key === 'volume') { main.appendChild(buildGscVolCell(q)); return; }
     const num = document.createElement('span');
     num.className = 'gsc-query-num';
     num.textContent = col.format(q[col.key]);
@@ -551,6 +569,127 @@ function buildQueryDataRow(q, locations, branded, selected) {
   }
 
   return row;
+}
+
+// ─── Ads-sourced query cell: volume + competition dot + hover trend ─────────
+// Only ever called once _gscAdsVolumeState === 'available' (see
+// renderGscQueries), so there's no "Ads not connected" case to render here —
+// a missing map entry just means this specific keyword hasn't resolved yet.
+
+// Compact K/M formatter, no unit suffix — this column is ~44px wide, unlike
+// the Add Keywords panel's wider "Vol/mo" column (addkwFormatVolume).
+function gscFormatVolume(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+  return String(n);
+}
+
+function buildGscVolCell(q) {
+  const cell = document.createElement('span');
+  cell.className = 'gsc-query-vol';
+
+  const lc = q.query.toLowerCase().trim();
+  const v = _gscQueryVolumeMap[lc];
+
+  const num = document.createElement('span');
+  num.className = 'gsc-query-vol-num';
+  num.textContent = (v && v.avgMonthlySearches != null) ? gscFormatVolume(v.avgMonthlySearches) : '—';
+  num.title = (v && v.avgMonthlySearches != null) ? `~${v.avgMonthlySearches.toLocaleString()} avg. monthly searches` : '';
+  cell.appendChild(num);
+
+  if (v && v.competition) {
+    const dot = document.createElement('span');
+    dot.className = 'gsc-query-comp-dot gsc-query-comp-dot--' + v.competition.toLowerCase();
+    const currency = (typeof _adsData !== 'undefined' && _adsData) ? _adsData.currency : null;
+    const bidRange = (typeof adsBidRange === 'function') ? adsBidRange(v.lowTopOfPageBidMicros, v.highTopOfPageBidMicros, currency) : null;
+    dot.title = `Competition: ${v.competition}` + (bidRange ? ` · Top-of-page bid: ${bidRange}` : '');
+    cell.appendChild(dot);
+
+    if (v.monthlySearchVolumes && v.monthlySearchVolumes.length) {
+      cell.addEventListener('mouseenter', () => showGscVolumeTrend(cell, v.monthlySearchVolumes));
+      cell.addEventListener('mouseleave', hideGscVolumeTrend);
+    }
+  }
+
+  return cell;
+}
+
+// 12-month trend hover popover — singleton element, mirrors the favicon
+// hover-preview pattern in popup-inspector.js (showFaviconPreview).
+let _gscVolTrendEl = null;
+
+function buildGscTrendSparkline(monthlySearchVolumes, { width = 70, height = 24 } = {}) {
+  const padL = 2, padR = 2, padT = 2, padB = 2;
+  const innerW = width - padL - padR, innerH = height - padT - padB;
+  const values = monthlySearchVolumes.map(m => Number(m.monthlySearches) || 0);
+  const max = Math.max(...values, 1);
+  const n = values.length;
+  const xFor = i => padL + (n > 1 ? (i / (n - 1)) * innerW : innerW / 2);
+  const yFor = v => padT + (1 - v / max) * innerH;
+  const points = values.map((v, i) => `${xFor(i).toFixed(1)},${yFor(v).toFixed(1)}`).join(' ');
+  return `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"><polyline points="${points}" class="gsc-vol-sparkline" /></svg>`;
+}
+
+function showGscVolumeTrend(anchorEl, monthlySearchVolumes) {
+  if (!_gscVolTrendEl) {
+    _gscVolTrendEl = document.createElement('div');
+    _gscVolTrendEl.className = 'gsc-vol-trend-preview';
+    document.body.appendChild(_gscVolTrendEl);
+  }
+  const peak = monthlySearchVolumes.reduce((best, m) => (Number(m.monthlySearches) || 0) > (Number(best?.monthlySearches) || -1) ? m : best, null);
+  _gscVolTrendEl.replaceChildren();
+  _gscVolTrendEl.appendChild(svgFromString(buildGscTrendSparkline(monthlySearchVolumes)));
+  const cap = document.createElement('div');
+  cap.className = 'gsc-vol-trend-caption';
+  cap.textContent = peak ? `Peak: ${String(peak.month).charAt(0) + String(peak.month).slice(1).toLowerCase()} ${peak.year}` : '12-month trend';
+  _gscVolTrendEl.appendChild(cap);
+  _gscVolTrendEl.classList.add('visible');
+
+  const rect = anchorEl.getBoundingClientRect();
+  const maxW = 140;
+  _gscVolTrendEl.style.top  = `${rect.bottom + 6}px`;
+  _gscVolTrendEl.style.left = `${Math.max(6, Math.min(rect.left, window.innerWidth - maxW - 6))}px`;
+}
+
+function hideGscVolumeTrend() {
+  if (_gscVolTrendEl) _gscVolTrendEl.classList.remove('visible');
+}
+
+// Lazy-fetches Ads volume/competition/CPC/trend for any query not yet in
+// _gscQueryVolumeMap, mirroring ensureIntents' shape (popup-intent.js): a
+// flat term→data cache, topped up with only the missing terms, re-rendering
+// once via onReady. Unlike a per-keyword miss, "no Ads account for this
+// domain" is a distinct state (_gscAdsVolumeState) that gates whether the
+// Vol column exists in the DOM at all — see renderGscQueries.
+async function ensureGscQueryVolume(queries, pageUrl, onReady) {
+  if (_gscQueryVolumeLoading || _gscAdsVolumeState === 'unavailable') return;
+  const need = [];
+  const seen = new Set();
+  (queries || []).forEach(q => {
+    const lc = (q.query || '').toLowerCase().trim();
+    if (!lc || seen.has(lc) || (lc in _gscQueryVolumeMap)) return;
+    seen.add(lc);
+    need.push(q.query);
+  });
+  if (!need.length) return;
+
+  _gscQueryVolumeLoading = true;
+  try {
+    const res = await sendMessageWithTimeout({ action: 'adsGetKeywordIdeas', pageUrl, keywords: need });
+    // A wholesale account/connection failure (not a per-keyword miss) means
+    // this domain has no usable Ads connection — hide the column entirely
+    // and stop trying. Any successful response (even with some keywords
+    // unmatched) confirms the account is usable.
+    if (res && res.error && !Object.keys(res.byKeyword || {}).length) {
+      _gscAdsVolumeState = 'unavailable';
+    } else {
+      _gscAdsVolumeState = 'available';
+      need.forEach(t => { _gscQueryVolumeMap[t.toLowerCase()] = null; }); // placeholder so a per-keyword miss isn't retried every render
+      Object.assign(_gscQueryVolumeMap, res?.byKeyword || {});
+    }
+  } catch { /* transient — leave state as-is, try again next render */ }
+  _gscQueryVolumeLoading = false;
+  onReady();
 }
 
 // Escape regex metacharacters so a literal query can be added to a branded pattern
@@ -655,7 +794,18 @@ function renderGscQueries(queries, pageUrl) {
   // "Request more" shows whenever the property may have more queries to page in
   moreBtn.classList.toggle('hidden', _gscQueriesExhausted);
 
-  const headerRow = buildQueryHeaderRow(gscQuerySort);
+  // Vol/competition/trend only exist once we've confirmed the domain has a
+  // usable Ads connection — see ensureGscQueryVolume below.
+  const volAvailable = _gscAdsVolumeState === 'available';
+  const columns = volAvailable ? [GSC_QUERY_VOL_COLUMN, ...GSC_QUERY_COLUMNS] : GSC_QUERY_COLUMNS;
+  if (volAvailable) {
+    queries.forEach(q => {
+      const v = _gscQueryVolumeMap[(q.query || '').toLowerCase().trim()];
+      q.volume = (v && v.avgMonthlySearches != null) ? v.avgMonthlySearches : 0;
+    });
+  }
+
+  const headerRow = buildQueryHeaderRow(gscQuerySort, columns, volAvailable);
   container.appendChild(headerRow);
   headerRow.querySelectorAll('.gsc-query-sort').forEach(el => {
     el.addEventListener('click', () => {
@@ -692,7 +842,7 @@ function renderGscQueries(queries, pageUrl) {
     if (_gscIntentFilter && intentOf(q.query) !== _gscIntentFilter) return;
     shown++;
     const locations = gscQueryLocations(q.query, pageData);
-    const row = buildQueryDataRow(q, locations, isQueryBranded(q.query, pattern), q.query === _gscSelectedQuery);
+    const row = buildQueryDataRow(q, locations, isQueryBranded(q.query, pattern), q.query === _gscSelectedQuery, columns, volAvailable);
     row.addEventListener('click', () => selectGscQuery(q.query));
     container.appendChild(row);
   });
@@ -703,6 +853,9 @@ function renderGscQueries(queries, pageUrl) {
   if (typeof ensureAdsKeywordSet === 'function') ensureAdsKeywordSet(() => renderGscQueries(queries, pageUrl));
   // Intent classification (Haiku, shared cache): re-renders once when ready
   ensureIntents(queries.map(q => q.query), () => renderGscQueries(_gscQueries, _gscPageUrl));
+  // Ads volume/competition/CPC/trend: re-renders once when the first batch
+  // resolves (either populating the Vol column, or confirming it stays hidden)
+  ensureGscQueryVolume(queries, pageUrl, () => renderGscQueries(_gscQueries, _gscPageUrl));
 }
 
 // ─── Google Search Console: click-to-filter chart by query ──────────────────

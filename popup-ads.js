@@ -46,6 +46,17 @@ function adsCost(n, currency) {
   return '$' + v.toLocaleString();
 }
 function adsPct(v) { return v == null ? '—' : `${Math.round(v * 100)}%`; }
+// Keyword Plan top-of-page bid range, in micros (1 currency unit = 1e6
+// micros). Not adsCost — bid ranges are often sub-dollar and need real
+// decimal precision, whereas adsCost rounds up to whole units.
+function adsBidRange(lowMicros, highMicros, currency) {
+  if (lowMicros == null && highMicros == null) return null;
+  const fmt = v => {
+    try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: currency || 'USD', maximumFractionDigits: 2 }).format(v / 1e6); }
+    catch { return '$' + (v / 1e6).toFixed(2); }
+  };
+  return `${fmt(lowMicros ?? highMicros)}–${fmt(highMicros ?? lowMicros)}`;
+}
 // Google Ads customer IDs are 10 digits, shown as XXX-XXX-XXXX
 function formatAdsId(id) {
   const d = String(id).replace(/\D/g, '');

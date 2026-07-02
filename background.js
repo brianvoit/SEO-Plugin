@@ -2542,6 +2542,14 @@ async function adsAddNegatives({ pageUrl, campaigns }) {
 // ─── Add Keywords (Keyword Plan Idea Service + adGroupCriteria mutate) ──────
 const KW_IDEA_CHUNK = 20; // practical per-request seed-keyword batch size
 
+// A keyword's volume/competition/CPC/trend is page-independent (the request
+// hardcodes English + GOOGLE_SEARCH with no geoTargetConstants — no
+// per-account variance), so this cache is keyed by keyword text alone and
+// shared by every caller: Add Keywords' candidate lookup, blindspot
+// brainstorm, and the Search tab's query enrichment.
+const KW_VOLUME_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const KW_VOLUME_CACHE_CAP = 1000;
+
 // One Keyword Plan Idea Service request. v1 defaults: English language, no
 // geoTargetConstants (global volume — disclosed in the UI), GOOGLE_SEARCH
 // network. Never throws — mirrors adsSearch/adsMutate's { rows/results } or
@@ -2584,9 +2592,13 @@ async function adsGenerateKeywordIdeas(accessToken, customerId, keywords) {
 }
 
 // Fetches volume ideas for an arbitrary-length keyword list, chunking at
-// KW_IDEA_CHUNK per request. Returns { byKeyword: { "<lowercase text>": {avgMonthlySearches, competition} } }
-// — a partial/empty map (never an error) if the account/token isn't ready,
-// since volume is enrichment only and must never block the rest of the panel.
+// KW_IDEA_CHUNK per request. Returns
+// { byKeyword: { "<lowercase text>": {avgMonthlySearches, competition,
+// competitionIndex, lowTopOfPageBidMicros, highTopOfPageBidMicros,
+// monthlySearchVolumes} } } — a partial/empty map (never an error) if the
+// account/token isn't ready, since volume is enrichment only and must never
+// block the rest of the panel. Cache hits (see KW_VOLUME_CACHE_TTL_MS above)
+// never touch the network at all.
 async function adsGetKeywordIdeas({ pageUrl, keywords }) {
   const tokenResult = await adsGetAccessToken();
   if (tokenResult.error) return { byKeyword: {}, error: tokenResult.error };
@@ -2599,19 +2611,59 @@ async function adsGetKeywordIdeas({ pageUrl, keywords }) {
   const wanted = [...new Set((keywords || []).map(k => String(k || '').trim()).filter(Boolean))];
   if (!wanted.length) return { byKeyword: {} };
 
+  const { adsKeywordVolumeCache } = await browser.storage.local.get('adsKeywordVolumeCache');
+  const cache = adsKeywordVolumeCache || {};
+
   const byKeyword = {};
-  for (let i = 0; i < wanted.length; i += KW_IDEA_CHUNK) {
-    const chunk = wanted.slice(i, i + KW_IDEA_CHUNK);
+  const toFetch = [];
+  wanted.forEach(k => {
+    const lc = k.toLowerCase();
+    const cached = cache[lc];
+    if (cached && (Date.now() - cached.fetchedAt < KW_VOLUME_CACHE_TTL_MS)) byKeyword[lc] = cached;
+    else toFetch.push(k);
+  });
+
+  let cacheDirty = false;
+  let lastChunkError = null;
+  for (let i = 0; i < toFetch.length; i += KW_IDEA_CHUNK) {
+    const chunk = toFetch.slice(i, i + KW_IDEA_CHUNK);
     const res = await adsGenerateKeywordIdeas(accessToken, cid, chunk);
-    if (res.error) continue; // graceful no-op per chunk — never block the others
+    if (res.error) { lastChunkError = res; continue; } // graceful no-op per chunk — never block the others
     (res.results || []).forEach(r => {
       const text = r.text || '';
       if (!text) return;
-      byKeyword[text.toLowerCase()] = {
-        avgMonthlySearches: r.keywordIdeaMetrics?.avgMonthlySearches ?? null,
-        competition: r.keywordIdeaMetrics?.competition ?? null
+      const lc = text.toLowerCase();
+      const entry = {
+        avgMonthlySearches:     r.keywordIdeaMetrics?.avgMonthlySearches ?? null,
+        competition:            r.keywordIdeaMetrics?.competition ?? null,
+        competitionIndex:       r.keywordIdeaMetrics?.competitionIndex ?? null,
+        lowTopOfPageBidMicros:  r.keywordIdeaMetrics?.lowTopOfPageBidMicros ?? null,
+        highTopOfPageBidMicros: r.keywordIdeaMetrics?.highTopOfPageBidMicros ?? null,
+        monthlySearchVolumes:   r.keywordIdeaMetrics?.monthlySearchVolumes ?? [],
+        fetchedAt: Date.now()
       };
+      byKeyword[lc] = entry;
+      cache[lc] = entry;
+      cacheDirty = true;
     });
+  }
+
+  if (cacheDirty) {
+    const keys = Object.keys(cache);
+    if (keys.length > KW_VOLUME_CACHE_CAP) {
+      keys.sort((a, b) => cache[a].fetchedAt - cache[b].fetchedAt);
+      keys.slice(0, keys.length - KW_VOLUME_CACHE_CAP).forEach(k => delete cache[k]);
+    }
+    await browser.storage.local.set({ adsKeywordVolumeCache: cache });
+  }
+
+  // Distinguish "every fetch attempt actually failed" (surfaced, so callers
+  // like the Search tab can tell a broken connection apart from genuinely-
+  // zero volume) from "requests succeeded but returned no matches" (not an
+  // error — Keyword Planner just has nothing on these terms) or a partial
+  // success (some chunks worked, don't block on the rest).
+  if (toFetch.length && !cacheDirty && lastChunkError) {
+    return { byKeyword, error: lastChunkError.error, detail: lastChunkError.detail };
   }
   return { byKeyword };
 }

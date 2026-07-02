@@ -93,6 +93,23 @@ browser.windows.onFocusChanged.addListener(async windowId => {
   }
 });
 
+// Inject content.js into a tab on demand. Runs from the background, where
+// browser.scripting is reliably available (unlike the sidebar/popup context,
+// where the same call can silently fail). Used by getPageDataFromTab when the
+// content script isn't answering — a tab that was already open before the
+// extension loaded never got the manifest's auto-injection. content.js guards
+// itself against double-load, so injecting when it's already present is a
+// harmless no-op rather than a redeclaration error.
+async function injectContentScript({ tabId }) {
+  if (tabId == null) return { ok: false, error: 'NO_TAB' };
+  try {
+    await browser.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
 async function getTargetTab() {
   try {
     const { lastNormalTab } = await browser.storage.session.get('lastNormalTab');
@@ -3358,6 +3375,7 @@ browser.runtime.onMessage.addListener((message) => {
     case 'getRedirectInfo':    return getRedirectInfo(message);
     case 'traceUrl':           return traceUrl(message);
     case 'getTargetTab':       return getTargetTab();
+    case 'injectContentScript': return injectContentScript(message);
     case 'openPopout':         return openPopoutWindow();
     case 'getDomainAge':       return getDomainAge(message);
     case 'dnsResolve':         return dnsResolve(message);

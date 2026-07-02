@@ -1,4 +1,16 @@
 // Content scripts run in the page context and cannot access popup-shared.js globals.
+
+// Idempotency guard: this file can be injected both by the manifest
+// (auto-injection at document_idle) AND on demand by the background's
+// injectContentScript (for tabs already open before the extension loaded).
+// Running it twice in the same page would throw "redeclaration of const" on
+// the first declaration and abort. The whole script is wrapped so a second
+// injection is a clean no-op — the first-registered message listener keeps
+// serving. The sentinel lives on window (page context), cleared on every
+// navigation, so a fresh page load always re-runs this cleanly.
+if (!window.__seoInspectorContentLoaded) {
+window.__seoInspectorContentLoaded = true;
+
 // Update this when the model tier used for alt-text generation changes.
 const CONTENT_MODEL_LIGHT = 'claude-haiku-4-5-20251001';
 
@@ -757,8 +769,17 @@ async function generateAltText(srcUrl) {
 
 browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.action === 'getPageData') {
+    // Always respond, even if a single field-reader throws — a page-specific
+    // DOM quirk in one helper must not reject the whole read and strand the
+    // popup on "Cannot read this page".
     browser.storage.local.get('altOverlayActive').then(({ altOverlayActive }) => {
-      sendResponse({ ...getPageData(), altOverlayActive: !!altOverlayActive });
+      let data;
+      try { data = getPageData(); } catch (e) { data = { _readError: String((e && e.message) || e) }; }
+      sendResponse({ ...data, altOverlayActive: !!altOverlayActive });
+    }).catch(() => {
+      let data;
+      try { data = getPageData(); } catch (e) { data = { _readError: String((e && e.message) || e) }; }
+      sendResponse(data);
     });
     return true;
   }
@@ -779,3 +800,5 @@ browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     generateAltText(message.srcUrl);
   }
 });
+
+} // end idempotency guard (window.__seoInspectorContentLoaded)

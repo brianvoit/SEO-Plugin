@@ -240,18 +240,32 @@ async function getActiveTab() {
 // unreadable page — about:, view-source:, the PDF viewer, addons.mozilla.org
 // — which the caller surfaces as the "Cannot read this page" state.
 async function getPageDataFromTab(tabId) {
+  // Fast path: the content script is already there (page loaded after the
+  // extension) and answers immediately.
   try {
     return await browser.tabs.sendMessage(tabId, { action: 'getPageData' });
-  } catch {
-    // No content script answered — inject it, then retry. The injection is
-    // wrapped defensively: if it fails because the script is somehow already
-    // present (a transient miss rather than a truly missing script), the
-    // retry sendMessage below still resolves against the existing listener.
+  } catch { /* not present yet, not injected, or mid-navigation */ }
+
+  // Ask the background to inject content.js. Injection MUST run from the
+  // background — browser.scripting.executeScript called from the sidebar/popup
+  // context can silently no-op, which is why the earlier in-context attempt
+  // didn't help. content.js guards against double-load, so this is safe even
+  // if the manifest also injects it a moment later.
+  try { await sendMessageWithTimeout({ action: 'injectContentScript', tabId }); }
+  catch { /* best effort */ }
+
+  // Retry a few times with a short delay: on a fresh page load the manifest's
+  // own injection lands at document_idle, which can be slightly after this
+  // first read, so give the listener a moment to come up.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await new Promise(r => setTimeout(r, 120));
     try {
-      await browser.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
-    } catch { /* already present, or a restricted page — let the retry decide */ }
-    return await browser.tabs.sendMessage(tabId, { action: 'getPageData' });
+      return await browser.tabs.sendMessage(tabId, { action: 'getPageData' });
+    } catch { /* keep trying */ }
   }
+  // Final attempt — if this throws, the caller shows "Cannot read this page"
+  // (a genuinely unreadable page: about:, view-source:, PDF viewer, AMO).
+  return await browser.tabs.sendMessage(tabId, { action: 'getPageData' });
 }
 
 // Show the connected Google account email to the left of a "Connected" chip.

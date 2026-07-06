@@ -1962,8 +1962,8 @@ body.settings-open #update-footer { margin-top: auto; }
 .asset-row:last-of-type { border-bottom: none; }
 .asset-row--off { opacity: .5; }
 .asset-text { font-size: 12.5px; color: var(--text); line-height: 1.35; min-width: 0; word-break: break-word; }
-/* Intent + sentiment chips under each existing headline/description */
-.asset-insight-chips { display: block; margin-top: 3px; }
+/* Intent + sentiment chips, inline in the badges row just left of the grade */
+.asset-insight-chips { display: inline-flex; align-items: center; }
 .asset-insight-chips:empty { display: none; }
 .asset-badges { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .asset-perf {

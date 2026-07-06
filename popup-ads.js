@@ -2770,16 +2770,17 @@ function makeAssetRow(item, max, onGenerate, matchCount) {
     m.title = `Appears in ${matchCount} search term${matchCount === 1 ? '' : 's'} that triggered ads for this page`;
     text.appendChild(m);
   }
-  // Intent + sentiment chips (filled in async by ensureAdAssetInsights)
-  const chips = document.createElement('span');
-  chips.className = 'asset-insight-chips';
-  const cached = _adAssetInsights[(item.text || '').toLowerCase()];
-  if (cached) { const c = buildInsightChips(cached); if (c) chips.appendChild(c); }
-  text.appendChild(chips);
   row.appendChild(text);
 
   const badges = document.createElement('div');
   badges.className = 'asset-badges';
+  // Intent + sentiment chips, inline just left of the grade (filled in async
+  // by ensureAdAssetInsights → populateAssetInsightChips).
+  const chips = document.createElement('span');
+  chips.className = 'asset-insight-chips';
+  const cached = _adAssetInsights[(item.text || '').toLowerCase()];
+  if (cached) { const c = buildInsightChips(cached); if (c) chips.appendChild(c); }
+  badges.appendChild(chips);
   if (item.label) {
     const b = document.createElement('span');
     b.className = 'asset-perf asset-perf--' + adsPerfClass(item.label);

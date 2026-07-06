@@ -438,10 +438,182 @@ function removeOverlay() {
   if (tt) { tt.style.display = 'none'; }
 }
 
+// ─── Link health overlay ─────────────────────────────────────────────────────
+// Mirrors the image overlay, but marks LINKS whose destination redirects or is
+// broken. The actual status fetching happens in the background (page CORS can't
+// read cross-origin status); this side collects links, requests their statuses,
+// and paints a colored outline + corner dot on the problem ones only.
+
+const LINK_OVERLAY_ATTR = 'data-seo-link-overlay';
+const LINK_CONTAINER_ID = 'seo-inspector-link-overlay';
+const LINK_INDICATOR_ID = 'seo-inspector-link-indicator';
+
+const LINK_COLORS = {
+  redirect:     'rgba(180,95,6,0.95)',   // amber
+  broken:       'rgba(220,38,38,0.95)',  // red
+  inconclusive: 'rgba(100,116,139,0.95)' // gray
+};
+
+// Collect on-page http(s) links, deduped by absolute URL (ignoring the hash),
+// as a Map<url, anchorEl[]> so every anchor to one URL gets the same marker.
+function collectLinks() {
+  const byUrl = new Map();
+  document.querySelectorAll('a[href]').forEach(a => {
+    const raw = a.getAttribute('href') || '';
+    if (!raw || raw.startsWith('#') || /^\s*(mailto:|tel:|javascript:)/i.test(raw)) return;
+    let u;
+    try { u = new URL(a.href, document.baseURI); } catch { return; }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return;
+    // Same-page fragment link (only the hash differs from the current page)
+    const here = new URL(document.baseURI);
+    if (u.href.split('#')[0] === here.href.split('#')[0] && u.hash) return;
+    const key = u.href.split('#')[0];
+    if (!byUrl.has(key)) byUrl.set(key, []);
+    byUrl.get(key).push(a);
+  });
+  return byUrl;
+}
+
+// Classify a background probe result → marker kind (or null = don't mark).
+function linkKindFor(res) {
+  if (!res) return null;
+  const s = res.status;
+  if (s === 401 || s === 403 || s === 429) return 'inconclusive';
+  if (res.error || s === 0) return 'broken';
+  if (s >= 400) return 'broken';
+  if (res.redirected) return 'redirect';
+  return null;   // clean 200, no redirect
+}
+
+function linkTooltipFor(kind, res) {
+  if (kind === 'redirect')     return `Redirects → ${res.finalUrl}\n(final status ${res.status})`;
+  if (kind === 'inconclusive') return `Inconclusive — ${res.status} (login required or bot-blocked)`;
+  if (res.error)               return `Broken — ${res.error}`;
+  return `Broken — status ${res.status}`;
+}
+
+// A small corner progress/summary indicator (fixed, non-interactive).
+function linkIndicator(text) {
+  let el = document.getElementById(LINK_INDICATOR_ID);
+  if (!el) {
+    el = document.createElement('div');
+    el.id = LINK_INDICATOR_ID;
+    el.style.cssText = [
+      'position:fixed', 'bottom:12px', 'right:12px', 'z-index:2147483647',
+      'background:rgba(15,15,15,0.9)', 'color:#fff', 'padding:6px 10px',
+      'border-radius:6px', 'font:600 12px/1.4 -apple-system,system-ui,sans-serif',
+      'pointer-events:none', 'box-shadow:0 2px 10px rgba(0,0,0,0.35)'
+    ].join(';');
+    document.body.appendChild(el);
+  }
+  el.textContent = text;
+  return el;
+}
+function removeLinkIndicator() { document.getElementById(LINK_INDICATOR_ID)?.remove(); }
+
+function applyLinkOverlay() {
+  removeLinkOverlay();
+
+  const container = document.createElement('div');
+  container.id = LINK_CONTAINER_ID;
+  container.style.cssText = [
+    'position:fixed', 'top:0', 'left:0', 'width:0', 'height:0',
+    'overflow:visible', 'z-index:2147483646', 'pointer-events:none'
+  ].join(';');
+  document.body.appendChild(container);
+  container._entries = [];
+
+  const byUrl = collectLinks();
+  const urls = [...byUrl.keys()];
+  if (!urls.length) { linkIndicator('No links to check'); setTimeout(removeLinkIndicator, 2000); return; }
+
+  linkIndicator(`Checking ${urls.length} link${urls.length === 1 ? '' : 's'}…`);
+
+  browser.runtime.sendMessage({ action: 'checkLinks', urls }).then(resp => {
+    // No-op if the overlay was toggled off before results arrived.
+    const live = document.getElementById(LINK_CONTAINER_ID);
+    if (!live || live !== container) return;
+    const results = (resp && resp.results) || {};
+
+    const entries = [];
+    let redirects = 0, broken = 0;
+    byUrl.forEach((anchors, url) => {
+      const kind = linkKindFor(results[url]);
+      if (!kind) return;
+      if (kind === 'redirect') redirects++;
+      if (kind === 'broken') broken++;
+      const tooltip = linkTooltipFor(kind, results[url]);
+      anchors.forEach(anchor => {
+        const outline = document.createElement('div');
+        outline.setAttribute(LINK_OVERLAY_ATTR, 'true');
+        outline.style.cssText = [
+          'position:fixed', `outline:2px solid ${LINK_COLORS[kind]}`, 'outline-offset:1px',
+          'border-radius:2px', 'box-sizing:border-box', 'pointer-events:none', 'z-index:2147483646'
+        ].join(';');
+        const dot = document.createElement('div');
+        dot.setAttribute(LINK_OVERLAY_ATTR, 'true');
+        dot.style.cssText = [
+          'position:fixed', `background:${LINK_COLORS[kind]}`, 'width:10px', 'height:10px',
+          'border-radius:50%', 'border:1.5px solid #fff', 'box-sizing:border-box',
+          'pointer-events:auto', 'cursor:help', 'z-index:2147483647'
+        ].join(';');
+        attachTooltip(dot, tooltip);
+        container.appendChild(outline);
+        container.appendChild(dot);
+        entries.push({ anchor, outline, dot });
+      });
+    });
+    container._entries = entries;
+
+    const parts = [];
+    if (redirects) parts.push(`${redirects} redirect${redirects === 1 ? '' : 's'}`);
+    if (broken) parts.push(`${broken} broken`);
+    if (urls.length > 300) parts.push('checked first 300');
+    linkIndicator(parts.length ? parts.join(' · ') : 'No redirect or broken links');
+    setTimeout(removeLinkIndicator, 4000);
+
+    function updatePositions() {
+      entries.forEach(({ anchor, outline, dot }) => {
+        const r = anchor.getBoundingClientRect();
+        const offscreen = r.bottom < 0 || r.top > window.innerHeight || r.right < 0 || r.left > window.innerWidth;
+        if (offscreen || (r.width < 1 && r.height < 1)) {
+          outline.style.display = 'none'; dot.style.display = 'none'; return;
+        }
+        outline.style.display = ''; dot.style.display = '';
+        outline.style.top = `${r.top}px`;
+        outline.style.left = `${r.left}px`;
+        outline.style.width = `${r.width}px`;
+        outline.style.height = `${r.height}px`;
+        dot.style.top = `${r.top - 5}px`;
+        dot.style.left = `${r.right - 5}px`;
+      });
+    }
+    updatePositions();
+    container._update = () => requestAnimationFrame(updatePositions);
+    window.addEventListener('scroll', container._update, { passive: true });
+    window.addEventListener('resize', container._update, { passive: true });
+  }).catch(() => { linkIndicator('Link check failed'); setTimeout(removeLinkIndicator, 3000); });
+}
+
+function removeLinkOverlay() {
+  const container = document.getElementById(LINK_CONTAINER_ID);
+  if (container) {
+    if (container._update) {
+      window.removeEventListener('scroll', container._update);
+      window.removeEventListener('resize', container._update);
+    }
+    container.remove();
+  }
+  removeLinkIndicator();
+  const tt = document.getElementById(TOOLTIP_ID);
+  if (tt) { tt.style.display = 'none'; }   // shared tooltip: hide only, never remove
+}
+
 // ─── Init: restore overlay if it was active before navigation ────────────────
 
-browser.storage.local.get('altOverlayActive').then(({ altOverlayActive }) => {
+browser.storage.local.get(['altOverlayActive', 'linkOverlayActive']).then(({ altOverlayActive, linkOverlayActive }) => {
   if (altOverlayActive) applyOverlay();
+  if (linkOverlayActive) applyLinkOverlay();
 });
 
 // ─── Alt text generator ──────────────────────────────────────────────────────
@@ -772,10 +944,10 @@ browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // Always respond, even if a single field-reader throws — a page-specific
     // DOM quirk in one helper must not reject the whole read and strand the
     // popup on "Cannot read this page".
-    browser.storage.local.get('altOverlayActive').then(({ altOverlayActive }) => {
+    browser.storage.local.get(['altOverlayActive', 'linkOverlayActive']).then(({ altOverlayActive, linkOverlayActive }) => {
       let data;
       try { data = getPageData(); } catch (e) { data = { _readError: String((e && e.message) || e) }; }
-      sendResponse({ ...data, altOverlayActive: !!altOverlayActive });
+      sendResponse({ ...data, altOverlayActive: !!altOverlayActive, linkOverlayActive: !!linkOverlayActive });
     }).catch(() => {
       let data;
       try { data = getPageData(); } catch (e) { data = { _readError: String((e && e.message) || e) }; }
@@ -791,6 +963,18 @@ browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         if (next) applyOverlay();
         else removeOverlay();
         sendResponse({ altOverlayActive: next });
+      });
+    });
+    return true;
+  }
+
+  if (message.action === 'toggleLinkOverlay') {
+    browser.storage.local.get('linkOverlayActive').then(({ linkOverlayActive }) => {
+      const next = !linkOverlayActive;
+      browser.storage.local.set({ linkOverlayActive: next }).then(() => {
+        if (next) applyLinkOverlay();
+        else removeLinkOverlay();
+        sendResponse({ linkOverlayActive: next });
       });
     });
     return true;

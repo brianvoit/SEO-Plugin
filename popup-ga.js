@@ -281,6 +281,9 @@ async function loadInternalLinkChips(links) {
         if (wcData.rows.some(r => (r.keyword || '').toLowerCase() === anchor)) {
           chipContainer.appendChild(makeInternalLinkChip('Ranking', 'ga-link-chip--ranking',
             'Anchor text appears in Web CEO tracked keywords for the destination page'));
+        } else {
+          chipContainer.appendChild(makeInternalLinkChip('Not ranked', 'ga-link-chip--notranked',
+            'Anchor text is not among the Web CEO tracked keywords for the destination page'));
         }
       }
     });

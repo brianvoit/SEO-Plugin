@@ -22,24 +22,36 @@
     </div>
     <div class="header-actions">
       <div class="alt-header-control" title="Follow active tab — auto-reload when switching tabs (Sidebar and Pop Out)">
-        <svg class="alt-header-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M6.5 9.5a3 3 0 0 0 4.24 0l1.41-1.41a3 3 0 0 0-4.24-4.24L6.5 5.27"/>
-          <path d="M9.5 6.5a3 3 0 0 0-4.24 0L3.85 7.91a3 3 0 0 0 4.24 4.24l1.41-1.41"/>
-        </svg>
         <button id="btn-follow-tab" class="toggle-btn" aria-pressed="true" title="Follow active tab">
           <span class="toggle-track">
+            <svg class="toggle-icon" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M6.5 9.5a3 3 0 0 0 4.24 0l1.41-1.41a3 3 0 0 0-4.24-4.24L6.5 5.27"/>
+              <path d="M9.5 6.5a3 3 0 0 0-4.24 0L3.85 7.91a3 3 0 0 0 4.24 4.24l1.41-1.41"/>
+            </svg>
             <span class="toggle-thumb"></span>
           </span>
         </button>
       </div>
       <div class="alt-header-control" title="Toggle alt-text overlay on the page">
-        <svg class="alt-header-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="1.5" y="3" width="13" height="10" rx="1.5"/>
-          <circle cx="5.5" cy="6.5" r="1.2"/>
-          <path d="M2.5 12l3.2-3 2.3 2 2.5-2.6 3 3.6"/>
-        </svg>
         <button id="btn-overlay" class="toggle-btn" aria-pressed="false" title="Toggle alt-text overlay on the page">
           <span class="toggle-track">
+            <svg class="toggle-icon" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="1.5" y="3" width="13" height="10" rx="1.5"/>
+              <circle cx="5.5" cy="6.5" r="1.2"/>
+              <path d="M2.5 12l3.2-3 2.3 2 2.5-2.6 3 3.6"/>
+            </svg>
+            <span class="toggle-thumb"></span>
+          </span>
+        </button>
+      </div>
+      <div class="alt-header-control" title="Toggle link-health overlay — flag redirecting and broken links on the page">
+        <button id="btn-link-overlay" class="toggle-btn" aria-pressed="false" title="Toggle link-health overlay on the page">
+          <span class="toggle-track">
+            <svg class="toggle-icon" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 2.5h4.5V7"/>
+              <path d="M13.5 2.5L8 8"/>
+              <path d="M11.5 9v3.5a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1H7"/>
+            </svg>
             <span class="toggle-thumb"></span>
           </span>
         </button>
@@ -100,6 +112,13 @@
         <span class="field-label">ALT TEXT OVERLAY</span>
       </div>
       <div class="field-hint">Labels images: <span class="hint-green">alt present</span> · <span class="hint-amber">empty alt / ARIA only</span> · <span class="hint-muted">decorative</span> · <span class="hint-red">missing</span></div>
+    </section>
+
+    <section class="field-section">
+      <div class="field-header">
+        <span class="field-label">LINK HEALTH OVERLAY</span>
+      </div>
+      <div class="field-hint">Flags links: <span class="hint-amber">redirect</span> · <span class="hint-red">broken</span> · <span class="hint-muted">inconclusive (login / bot-blocked)</span>. Clean links are left unmarked. Checks run only while the overlay is on.</div>
     </section>
 
     <section class="field-section">

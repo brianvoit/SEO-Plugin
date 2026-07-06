@@ -64,8 +64,15 @@ const GSC_QUERY_COLUMNS = [
 // this entry exists so the header/sort machinery treats it uniformly.
 const GSC_QUERY_VOL_COLUMN = { key: 'volume', label: 'Vol' };
 
+// Est. CPC (top-of-page bid) and keyword Difficulty (competition) — like the
+// Vol column, these are Ads-sourced, prepended only when volume is available,
+// and special-cased in buildQueryDataRow (a currency value / a color-coded
+// High·Med·Low chip, not plain text).
+const GSC_QUERY_CPC_COLUMN  = { key: 'cpc',        label: 'CPC' };
+const GSC_QUERY_DIFF_COLUMN = { key: 'difficulty', label: 'Diff' };
+
 // Lower position is better, so default that column to ascending
-const GSC_QUERY_SORT_DEFAULT_DIR = { impressions: 'desc', clicks: 'desc', position: 'asc', ctr: 'desc', volume: 'desc' };
+const GSC_QUERY_SORT_DEFAULT_DIR = { impressions: 'desc', clicks: 'desc', position: 'asc', ctr: 'desc', volume: 'desc', cpc: 'desc', difficulty: 'desc' };
 
 // ─── Google Search Console: helpers ──────────────────────────────────────────
 
@@ -547,6 +554,8 @@ function buildQueryDataRow(q, locations, branded, selected, columns = GSC_QUERY_
 
   columns.forEach(col => {
     if (col.key === 'volume') { main.appendChild(buildGscVolCell(q)); return; }
+    if (col.key === 'cpc')    { main.appendChild(buildGscCpcCell(q)); return; }
+    if (col.key === 'difficulty') { main.appendChild(buildGscDiffCell(q)); return; }
     const num = document.createElement('span');
     num.className = 'gsc-query-num';
     num.textContent = col.format(q[col.key]);
@@ -597,20 +606,71 @@ function buildGscVolCell(q) {
   num.title = (v && v.avgMonthlySearches != null) ? `~${v.avgMonthlySearches.toLocaleString()} avg. monthly searches` : '';
   cell.appendChild(num);
 
-  if (v && v.competition) {
-    const dot = document.createElement('span');
-    dot.className = 'gsc-query-comp-dot gsc-query-comp-dot--' + v.competition.toLowerCase();
-    const currency = (typeof _adsData !== 'undefined' && _adsData) ? _adsData.currency : null;
-    const bidRange = (typeof adsBidRange === 'function') ? adsBidRange(v.lowTopOfPageBidMicros, v.highTopOfPageBidMicros, currency) : null;
-    dot.title = `Competition: ${v.competition}` + (bidRange ? ` · Top-of-page bid: ${bidRange}` : '');
-    cell.appendChild(dot);
-
-    if (v.monthlySearchVolumes && v.monthlySearchVolumes.length) {
-      cell.addEventListener('mouseenter', () => showGscVolumeTrend(cell, v.monthlySearchVolumes));
-      cell.addEventListener('mouseleave', hideGscVolumeTrend);
-    }
+  // 12-month trend on hover (competition now lives in its own Diff column).
+  if (v && v.monthlySearchVolumes && v.monthlySearchVolumes.length) {
+    cell.addEventListener('mouseenter', () => showGscVolumeTrend(cell, v.monthlySearchVolumes));
+    cell.addEventListener('mouseleave', hideGscVolumeTrend);
   }
 
+  return cell;
+}
+
+// Est. CPC — average of the low/high top-of-page bid, in micros (1e6 = 1
+// currency unit). Returns 0 when neither bound is known (so it sorts last).
+function gscCpcMicros(v) {
+  if (!v) return 0;
+  const lo = v.lowTopOfPageBidMicros, hi = v.highTopOfPageBidMicros;
+  if (lo != null && hi != null) return (Number(lo) + Number(hi)) / 2;
+  if (hi != null) return Number(hi);
+  if (lo != null) return Number(lo);
+  return 0;
+}
+
+// Difficulty score 0–100 for sorting: prefer Google's competitionIndex, else
+// map the LOW/MEDIUM/HIGH bucket to 20/55/90. 0 when unknown.
+function gscDifficultyScore(v) {
+  if (!v) return 0;
+  if (v.competitionIndex != null) return Number(v.competitionIndex) || 0;
+  const bucket = { LOW: 20, MEDIUM: 55, HIGH: 90 };
+  return bucket[String(v.competition || '').toUpperCase()] || 0;
+}
+
+function buildGscCpcCell(q) {
+  const cell = document.createElement('span');
+  cell.className = 'gsc-query-num gsc-query-cpc';
+  const v = _gscQueryVolumeMap[q.query.toLowerCase().trim()];
+  const micros = gscCpcMicros(v);
+  if (micros > 0) {
+    const currency = (typeof _adsData !== 'undefined' && _adsData) ? _adsData.currency : null;
+    cell.textContent = gscFormatCpc(micros, currency);
+    const range = (typeof adsBidRange === 'function') ? adsBidRange(v.lowTopOfPageBidMicros, v.highTopOfPageBidMicros, currency) : null;
+    cell.title = range ? `Top-of-page bid: ${range}` : 'Estimated cost per click';
+  } else {
+    cell.textContent = '—';
+  }
+  return cell;
+}
+
+// Single-value currency format for the CPC column (2 decimals below $10, whole
+// dollars above — keeps the narrow column tidy).
+function gscFormatCpc(micros, currency) {
+  const val = micros / 1e6;
+  const digits = val >= 10 ? 0 : 2;
+  try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: currency || 'USD', maximumFractionDigits: digits, minimumFractionDigits: digits }).format(val); }
+  catch { return '$' + val.toFixed(digits); }
+}
+
+function buildGscDiffCell(q) {
+  const cell = document.createElement('span');
+  cell.className = 'gsc-query-diff';
+  const v = _gscQueryVolumeMap[q.query.toLowerCase().trim()];
+  const comp = v && v.competition ? String(v.competition).toUpperCase() : null;
+  if (!comp) { cell.textContent = '—'; cell.classList.add('gsc-query-diff--none'); return cell; }
+  const label = { LOW: 'Low', MEDIUM: 'Med', HIGH: 'High' }[comp] || '—';
+  cell.textContent = label;
+  cell.classList.add('gsc-query-diff--' + comp.toLowerCase());
+  const idx = (v.competitionIndex != null) ? ` (index ${v.competitionIndex})` : '';
+  cell.title = `Competition: ${comp.charAt(0) + comp.slice(1).toLowerCase()}${idx}`;
   return cell;
 }
 
@@ -805,11 +865,15 @@ function renderGscQueries(queries, pageUrl) {
   // Vol/competition/trend only exist once we've confirmed the domain has a
   // usable Ads connection — see ensureGscQueryVolume below.
   const volAvailable = _gscAdsVolumeState === 'available';
-  const columns = volAvailable ? [GSC_QUERY_VOL_COLUMN, ...GSC_QUERY_COLUMNS] : GSC_QUERY_COLUMNS;
+  const columns = volAvailable
+    ? [GSC_QUERY_VOL_COLUMN, GSC_QUERY_CPC_COLUMN, GSC_QUERY_DIFF_COLUMN, ...GSC_QUERY_COLUMNS]
+    : GSC_QUERY_COLUMNS;
   if (volAvailable) {
     queries.forEach(q => {
       const v = _gscQueryVolumeMap[(q.query || '').toLowerCase().trim()];
       q.volume = (v && v.avgMonthlySearches != null) ? v.avgMonthlySearches : 0;
+      q.cpc = gscCpcMicros(v);                    // numeric micros, 0 when unknown
+      q.difficulty = gscDifficultyScore(v);       // 0–100, 0 when unknown
     });
   }
 

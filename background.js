@@ -1772,6 +1772,80 @@ async function faviconProbe(url) {
   }
 }
 
+// ─── Link health overlay: check many links' destination status ───────────────
+// The content-script overlay sends every unique on-page http(s) link here; we
+// fetch each from the background (page CORS can't read cross-origin status, but
+// the *://*/* host permission lets us) and report whether it redirects or is
+// broken. Lightweight: HEAD with redirect:follow gives the FINAL status +
+// Response.redirected + Response.url without downloading a body; deeper hop
+// tracing already lives in the Redirect tab (traceUrl).
+const LINK_CHECK_TIMEOUT_MS = 8000;
+const LINK_CHECK_CONCURRENCY = 6;    // small pool — a page can have 100+ links
+const LINK_CHECK_MAX = 300;          // cap per request
+const LINK_CACHE_TTL_MS = 5 * 60 * 1000;
+const linkStatusCache = new Map();   // url -> { status, redirected, finalUrl, error, fetchedAt }
+
+// Bounded-concurrency map: run `worker` over `items`, at most `limit` at a time.
+async function runPool(items, limit, worker) {
+  const results = new Array(items.length);
+  let next = 0;
+  const runner = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await worker(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, runner));
+  return results;
+}
+
+// Probe one URL's final status. Never throws. HEAD first (no body); fall back
+// to GET when HEAD is rejected (405/501) or errors, cancelling the body stream
+// as soon as the status is read.
+async function probeLinkStatus(url) {
+  const cached = linkStatusCache.get(url);
+  if (cached && Date.now() - cached.fetchedAt < LINK_CACHE_TTL_MS) {
+    return { status: cached.status, redirected: cached.redirected, finalUrl: cached.finalUrl, error: cached.error };
+  }
+
+  const attempt = async (method) => {
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), LINK_CHECK_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { method, redirect: 'follow', cache: 'no-store', credentials: 'omit', signal: abort.signal });
+      if (method === 'GET') { try { await res.body?.cancel(); } catch { /* ignore */ } }
+      return { status: res.status, redirected: res.redirected, finalUrl: res.url || url, error: null };
+    } catch (err) {
+      return { status: 0, redirected: false, finalUrl: url, error: String((err && err.message) || err) };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  let out = await attempt('HEAD');
+  // Many servers reject HEAD (405/501) or mishandle it — retry with GET.
+  if (out.status === 405 || out.status === 501 || out.status === 0) {
+    const viaGet = await attempt('GET');
+    if (viaGet.status !== 0) out = viaGet;      // keep GET only if it actually got a status
+    else if (out.status === 0) out = viaGet;    // both failed — report the GET error
+  }
+
+  linkStatusCache.set(url, { ...out, fetchedAt: Date.now() });
+  if (linkStatusCache.size > 1000) {
+    const oldest = [...linkStatusCache.entries()].sort((a, b) => a[1].fetchedAt - b[1].fetchedAt).slice(0, linkStatusCache.size - 1000);
+    oldest.forEach(([k]) => linkStatusCache.delete(k));
+  }
+  return out;
+}
+
+async function checkLinkStatuses({ urls }) {
+  const list = [...new Set((urls || []).filter(u => /^https?:\/\//i.test(u)))].slice(0, LINK_CHECK_MAX);
+  const probed = await runPool(list, LINK_CHECK_CONCURRENCY, probeLinkStatus);
+  const results = {};
+  list.forEach((u, i) => { results[u] = probed[i]; });
+  return { results };
+}
+
 // Live-check every declared icon URL (+ the legacy /favicon.ico) and parse the
 // web app manifest for its icon set. All best-effort; a failed fetch just
 // reports status 0.
@@ -2637,7 +2711,19 @@ async function adsGetKeywordIdeas({ pageUrl, keywords }) {
   if (tokenResult.error) return { byKeyword: {}, error: tokenResult.error };
   const accessToken = tokenResult.accessToken;
 
-  const customerId = await adsGetAccount(gscPageHost(pageUrl));
+  // Keyword Plan Idea data is account-INDEPENDENT (it's Google's global keyword
+  // planner data), so any accessible customer ID can make the call. Prefer the
+  // account mapped to this domain, but fall back to any accessible account (or
+  // the manager ID) so volume shows whenever Ads is connected — not only on
+  // domains the user has explicitly mapped in Setup.
+  let customerId = await adsGetAccount(gscPageHost(pageUrl));
+  if (!customerId) {
+    const listed = await adsListAccounts(accessToken);
+    if (listed.error) return { byKeyword: {}, error: listed.error, detail: listed.detail };
+    const first = (listed.accounts || [])[0];
+    const { adsManagerId } = await browser.storage.local.get('adsManagerId');
+    customerId = (first && first.id) || adsManagerId || null;
+  }
   if (!customerId) return { byKeyword: {}, error: 'NO_ACCOUNT' };
   const cid = adsDigits(customerId);
 
@@ -3380,6 +3466,7 @@ browser.runtime.onMessage.addListener((message) => {
     case 'openPopout':         return openPopoutWindow();
     case 'getDomainAge':       return getDomainAge(message);
     case 'dnsResolve':         return dnsResolve(message);
+    case 'checkLinks':         return checkLinkStatuses(message);
     case 'validateFavicon':    return validateFavicon(message);
     case 'clearFaviconCache':  return clearFaviconCache(message);
     case 'webceoGetStatus':      return webceoGetStatus();

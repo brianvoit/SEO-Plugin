@@ -1627,6 +1627,10 @@ function renderOverlayToggle(active) {
   document.getElementById('btn-overlay').setAttribute('aria-pressed', String(active));
 }
 
+function renderLinkOverlayToggle(active) {
+  document.getElementById('btn-link-overlay').setAttribute('aria-pressed', String(active));
+}
+
 // ─── Render: all ────────────────────────────────────────────────────────────
 
 function render(data, expandMeta = false) {
@@ -1645,6 +1649,7 @@ function render(data, expandMeta = false) {
   renderFavicon(data);
   renderDates(data);
   renderOverlayToggle(data.altOverlayActive);
+  renderLinkOverlayToggle(data.linkOverlayActive);
 }
 
 // ─── Data loading ────────────────────────────────────────────────────────────
@@ -1727,5 +1732,15 @@ document.getElementById('btn-overlay').addEventListener('click', async () => {
   try {
     const response = await browser.tabs.sendMessage(tab.id, { action: 'toggleAltOverlay' });
     renderOverlayToggle(response.altOverlayActive);
+  } catch { /* ignore */ }
+});
+
+// ─── Link health overlay toggle ──────────────────────────────────────────────
+
+document.getElementById('btn-link-overlay').addEventListener('click', async () => {
+  const tab = await getActiveTab();
+  try {
+    const response = await browser.tabs.sendMessage(tab.id, { action: 'toggleLinkOverlay' });
+    renderLinkOverlayToggle(response.linkOverlayActive);
   } catch { /* ignore */ }
 });

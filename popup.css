@@ -487,7 +487,6 @@ textarea.adcopy-field { line-height: 1.4; }
   color: var(--text-muted);
 }
 .alt-header-control:hover { color: var(--text); }
-.alt-header-icon { flex-shrink: 0; }
 
 .alt-header-label {
   font-size: 9px;
@@ -509,6 +508,7 @@ textarea.adcopy-field { line-height: 1.4; }
 }
 
 .toggle-track {
+  position: relative;
   display: inline-flex;
   align-items: center;
   width: 34px;
@@ -524,7 +524,26 @@ textarea.adcopy-field { line-height: 1.4; }
   background: var(--toggle-on);
 }
 
+/* Icon lives inside the track, at the side the thumb slides away from — so
+   it's hidden behind the thumb when off and revealed (faded in, white on the
+   on-fill) when the toggle is on. Saves the horizontal room the separate
+   icon used to take. */
+.toggle-icon {
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+  z-index: 0;
+}
+.toggle-btn[aria-pressed="true"] .toggle-icon { opacity: 1; }
+
 .toggle-thumb {
+  position: relative;
+  z-index: 1;
   width: 16px;
   height: 16px;
   border-radius: 50%;
@@ -2367,7 +2386,7 @@ body.settings-open #update-footer { margin-top: auto; }
 /* Vol/competition column only exists once an Ads connection is confirmed
    for the domain (see _gscAdsVolumeState in popup-gsc.js) — the base
    .gsc-query-main above is untouched for the disconnected case. */
-.gsc-query-main--vol { grid-template-columns: 18px 1fr 46px 48px 44px 40px 40px; }
+.gsc-query-main--vol { grid-template-columns: 18px 1fr 42px 46px 42px 46px 42px 38px 38px; gap: 5px; }
 .gsc-query-row--header { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); border-bottom: 1px solid var(--border); }
 .gsc-query-text-wrap { display: flex; align-items: center; gap: 4px; overflow: hidden; min-width: 0; }
 .gsc-query-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; color: var(--text); cursor: pointer; }
@@ -2430,6 +2449,14 @@ body.settings-open #update-footer { margin-top: auto; }
 .gsc-query-comp-dot--low    { background: var(--hint-green); }
 .gsc-query-comp-dot--medium { background: var(--hint-amber); }
 .gsc-query-comp-dot--high   { background: var(--hint-red); }
+/* Est. CPC column: monospaced currency, right-aligned like the metric cells */
+.gsc-query-cpc { white-space: nowrap; }
+/* Difficulty column: color-coded High/Med/Low label */
+.gsc-query-diff { text-align: right; font-weight: 600; cursor: help; white-space: nowrap; }
+.gsc-query-diff--low    { color: var(--hint-green); }
+.gsc-query-diff--medium { color: var(--hint-amber); }
+.gsc-query-diff--high   { color: var(--hint-red); }
+.gsc-query-diff--none   { color: var(--text-none); font-weight: 400; cursor: default; }
 
 .gsc-vol-trend-preview {
   position: fixed;
@@ -2620,7 +2647,7 @@ body.settings-open #update-footer { margin-top: auto; }
 
 /* ── Internal links (Analytics tab) ────────────────────────────────────────── */
 .ga-link-row {
-  display: grid; grid-template-columns: 1fr 1fr auto;
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 92px;
   align-items: center; gap: 8px;
   padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 12px;
 }
@@ -2629,11 +2656,12 @@ body.settings-open #update-footer { margin-top: auto; }
 .ga-link-dest.ga-next-link { cursor: pointer; }
 .ga-link-dest.ga-next-link:hover { text-decoration: underline; }
 .ga-link-text { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ga-link-chips { display: flex; gap: 4px; flex-wrap: wrap; }
-.ga-link-chip { font-size: 10px !important; padding: 1px 6px !important; }
-.ga-link-chip--gsc     { background: color-mix(in srgb, var(--accent) 15%, transparent) !important; color: var(--accent) !important; }
-.ga-link-chip--ads     { background: color-mix(in srgb, var(--chart-impressions) 15%, transparent) !important; color: var(--chart-impressions) !important; }
-.ga-link-chip--ranking { background: color-mix(in srgb, var(--hint-green) 15%, transparent) !important; color: var(--hint-green) !important; }
+.ga-link-chips { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.ga-link-chip { font-size: 10px !important; padding: 1px 6px !important; white-space: nowrap; }
+.ga-link-chip--gsc      { background: color-mix(in srgb, var(--accent) 15%, transparent) !important; color: var(--accent) !important; }
+.ga-link-chip--ads      { background: color-mix(in srgb, var(--chart-impressions) 15%, transparent) !important; color: var(--chart-impressions) !important; }
+.ga-link-chip--ranking  { background: color-mix(in srgb, var(--hint-green) 15%, transparent) !important; color: var(--hint-green) !important; }
+.ga-link-chip--notranked { background: color-mix(in srgb, var(--text-muted) 15%, transparent) !important; color: var(--text-muted) !important; }
 
 /* ── Schema suggestions (Structured Data panel) ─────────────────────────────── */
 .schema-suggest-btn {

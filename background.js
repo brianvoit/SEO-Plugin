@@ -2973,7 +2973,7 @@ function webceoFlattenRankings(rankingData) {
         previous: previous && previous.pos != null ? previous.pos : null,
         date: current ? current.date : null,
         url: current ? current.url : null,
-        history: scans.slice(0, 12).reverse().map(s => ({ date: s.date, pos: s.pos })) // oldest→newest for a sparkline
+        history: scans.slice(0, 12).reverse().map(s => ({ date: s.date, pos: s.pos, url: s.url || null })) // oldest→newest for a sparkline + URL-drift detection
       });
     });
   });

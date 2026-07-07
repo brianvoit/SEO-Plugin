@@ -1115,6 +1115,8 @@
       </div>
       <div class="field-sub" id="ranking-meta"></div>
 
+      <div id="ranking-scorecard" class="ranking-scorecard hidden"></div>
+
       <section class="field-section" id="ranking-chart-section">
         <div class="field-header">
           <span class="field-label" id="ranking-chart-label">AVERAGE POSITION</span>
@@ -1126,7 +1128,10 @@
       <section class="field-section">
         <div class="field-header">
           <span class="field-label">KEYWORD RANKINGS</span>
-          <label class="ranking-onpage-toggle"><input type="checkbox" id="ranking-onpage-only" /> This page only</label>
+          <span class="ranking-filter-toggles">
+            <label class="ranking-onpage-toggle"><input type="checkbox" id="ranking-striking-only" /> Quick wins</label>
+            <label class="ranking-onpage-toggle"><input type="checkbox" id="ranking-onpage-only" /> This page only</label>
+          </span>
         </div>
         <div id="ranking-intent-filters" class="gsc-intent-filters hidden"></div>
         <div id="ranking-table"></div>

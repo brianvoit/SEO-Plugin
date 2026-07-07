@@ -6,7 +6,8 @@
 let webceoSelectedDepth = 2;          // history_depth (number of recent scans)
 let _webceoHost = null;
 let _webceoData = null;               // last webceoGetRankings response
-let _webceoOnPageOnly = false;        // filter to keywords ranking for this page
+let _webceoOnPageOnly = true;         // default: focus on keywords ranking for this page
+let _webceoStrikingOnly = false;      // filter to striking-distance (pos 4–20) quick wins
 let _webceoIntent = null;             // intent filter (null = All, else one of INTENTS)
 
 const WEBCEO_ERRORS = {
@@ -61,7 +62,10 @@ function webceoChangeEl(current, previous) {
   el.className = 'ranking-change';
   const c = webceoRanked(current) ? current : null;
   const p = webceoRanked(previous) ? previous : null;
-  if (c == null) return el;                                  // not ranked → blank
+  if (c == null) {                                           // not ranked now
+    if (p != null) { el.textContent = 'lost'; el.classList.add('ranking-change--down'); } // was ranked last scan → dropped off
+    return el;
+  }
   if (p == null) { el.textContent = 'new'; el.classList.add('ranking-change--up'); return el; }
   const delta = p - c;
   if (delta === 0) return el;
@@ -76,6 +80,100 @@ function webceoEngineKey(r) {
   return r.mobile ? `${se} ${r.mobile === 2 ? 'tablet' : 'mobile'}` : se;
 }
 function webceoEngineLabel(eng) { return eng.replace(/\b\w/g, c => c.toUpperCase()); }
+
+// ─── Rankings intelligence helpers (scorecard / movers / opportunities) ──────
+
+// Best (lowest) ranked position for a pivoted keyword across its engines, using
+// the given field ('position' = current, 'previous' = last scan). null = unranked.
+function webceoBestPos(kw, field = 'position') {
+  let best = null;
+  Object.values(kw.engines || {}).forEach(e => {
+    const p = e && e[field];
+    if (webceoRanked(p) && (best == null || p < best)) best = p;
+  });
+  return best;
+}
+
+// Rough Google organic CTR-by-position curve, used to weight visibility &
+// traffic value. Index 0 unused; 1–10 are page-one, then page-two and beyond
+// taper off. Deliberately approximate — it's a relative weighting, not a claim.
+const WEBCEO_CTR_CURVE = [0, 0.28, 0.15, 0.11, 0.08, 0.06, 0.045, 0.035, 0.03, 0.025, 0.02];
+function webceoCtrForPosition(pos) {
+  if (!webceoRanked(pos)) return 0;
+  if (pos <= 10) return WEBCEO_CTR_CURVE[pos];
+  if (pos <= 20) return 0.01;
+  return 0.004;
+}
+
+// Striking distance = positions 4–20: page-one-adjacent + page two, where a
+// small push yields outsized traffic. (Top 3 are already won.)
+function webceoIsStriking(pos) { return webceoRanked(pos) && pos >= 4 && pos <= 20; }
+
+// Normalize a ranking URL to host+path (drop www + trailing slash) so the same
+// page under different query strings/protocols counts once.
+function webceoNormalizeUrl(url) {
+  try { const u = new URL(url); return u.hostname.replace(/^www\./, '') + u.pathname.replace(/\/$/, ''); }
+  catch { return null; }
+}
+
+// Map of keyword → distinct ranking URLs seen across all scans/engines. ≥2
+// distinct = Google is flip-flopping which of your pages ranks = possible
+// cannibalization. Built once per render from the flat rows' per-scan history.
+function webceoDriftMap() {
+  const map = new Map();               // keyword → Map(normalized → original url)
+  ((_webceoData && _webceoData.rows) || []).forEach(r => {
+    if (!map.has(r.keyword)) map.set(r.keyword, new Map());
+    const seen = map.get(r.keyword);
+    (r.history || []).forEach(pt => {
+      if (!webceoRanked(pt.pos) || !pt.url) return;
+      const n = webceoNormalizeUrl(pt.url);
+      if (n && !seen.has(n)) seen.set(n, pt.url);
+    });
+  });
+  const out = new Map();
+  map.forEach((seen, kw) => { if (seen.size >= 2) out.set(kw, [...seen.values()]); });
+  return out;
+}
+
+// ─── CPC enrichment (Google Ads Keyword Ideas) for the $ traffic-value stat ──
+// Mirrors the Search tab's ensureGscQueryVolume: a flat keyword→CPC(dollars)
+// cache topped up with the missing terms, re-rendering once via onReady. CPC is
+// account-independent Keyword Plan data, so it works whenever Ads is connected.
+let _webceoCpcMap = {};                 // keyword(lower) → cpc dollars | null
+let _webceoCpcLoading = false;
+let _webceoCpcState = 'unknown';        // 'unknown' | 'available' | 'unavailable'
+let _webceoCpcHost = null;              // reset the cache when the domain changes
+
+async function ensureWebceoCpc(keywords, onReady) {
+  if (_webceoCpcLoading || _webceoCpcState === 'unavailable') return;
+  const need = [];
+  const seen = new Set();
+  (keywords || []).forEach(k => {
+    const lc = (k || '').toLowerCase().trim();
+    if (!lc || seen.has(lc) || (lc in _webceoCpcMap)) return;
+    seen.add(lc); need.push(k);
+  });
+  if (!need.length) return;
+
+  _webceoCpcLoading = true;
+  try {
+    const tab = await getActiveTab();
+    const res = await sendMessageWithTimeout({ action: 'adsGetKeywordIdeas', pageUrl: tab.url, keywords: need });
+    const NO_ADS = new Set(['NOT_CONNECTED', 'REAUTH_REQUIRED', 'NO_DEV_TOKEN', 'NO_ACCOUNT']);
+    if (res && NO_ADS.has(res.error) && !Object.keys(res.byKeyword || {}).length) {
+      _webceoCpcState = 'unavailable';
+    } else if (res) {
+      _webceoCpcState = 'available';
+      need.forEach(t => { const lc = (t || '').toLowerCase().trim(); if (!(lc in _webceoCpcMap)) _webceoCpcMap[lc] = null; });
+      Object.entries(res.byKeyword || {}).forEach(([lc, v]) => {
+        const micros = (typeof gscCpcMicros === 'function') ? gscCpcMicros(v) : 0;
+        _webceoCpcMap[lc] = micros > 0 ? micros / 1e6 : null;
+      });
+    }
+  } catch { /* transient — try again next render */ }
+  _webceoCpcLoading = false;
+  onReady();
+}
 
 // ─── Chart: avg position over scans (click a row to focus one keyword) ───────
 
@@ -223,7 +321,9 @@ function renderRankingTable() {
   container.appendChild(header);
 
   const engPos = (k, eng) => { const e = k.engines[eng]; return (e && webceoRanked(e.position)) ? e.position : null; };
-  const onPageVisible = keywords.filter(k => !_webceoOnPageOnly || webceoKeywordOnPage(k));
+  const driftMap = webceoDriftMap();
+  let onPageVisible = keywords.filter(k => !_webceoOnPageOnly || webceoKeywordOnPage(k));
+  if (_webceoStrikingOnly) onPageVisible = onPageVisible.filter(k => webceoIsStriking(webceoBestPos(k, 'position')));
   // Intent chips count over the on-page-filtered set, then narrow the rows
   renderIntentChips(document.getElementById('ranking-intent-filters'), onPageVisible, k => k.keyword, _webceoIntent, (intent) => {
     _webceoIntent = intent;
@@ -267,6 +367,14 @@ function renderRankingTable() {
     if (k.starred) { const s = document.createElement('span'); s.className = 'ranking-star'; s.textContent = '★'; term.appendChild(s); }
     const chips = rankingTermChips(k.keyword);
     if (chips) term.appendChild(chips);
+    const drift = driftMap.get(k.keyword);
+    if (drift) {
+      const dc = document.createElement('span');
+      dc.className = 'gsc-chip ranking-drift-chip';
+      dc.textContent = '⚠ URL drift';
+      dc.title = 'Google has ranked more than one of your pages for this term (possible cannibalization):\n' + drift.join('\n');
+      term.appendChild(dc);
+    }
     row.appendChild(term);
 
     engines.forEach(eng => {
@@ -281,7 +389,12 @@ function renderRankingTable() {
         const ch = webceoChangeEl(e.position, e.previous);
         if (ch.textContent) cell.appendChild(ch);
       } else {
-        cell.textContent = '—';
+        const dash = document.createElement('span');
+        dash.textContent = '—';
+        cell.appendChild(dash);
+        // Dropped off since last scan → show a "lost" chip beside the dash
+        const ch = webceoChangeEl(e ? e.position : null, e ? e.previous : null);
+        if (ch.textContent) cell.appendChild(ch);
       }
       row.appendChild(cell);
     });
@@ -305,6 +418,103 @@ function selectRankingKeyword(keyword) {
   renderRankingChart();
 }
 
+// ─── Scorecard: distribution buckets + Visibility % + est. traffic value ─────
+
+function renderRankingScorecard() {
+  const el = document.getElementById('ranking-scorecard');
+  if (!el) return;
+  const { keywords } = webceoPivot((_webceoData && _webceoData.rows) || []);
+  if (!keywords.length) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+
+  // Best current/previous position per keyword
+  const stats = keywords.map(k => ({
+    vol: k.volume == null ? 0 : k.volume,
+    now: webceoBestPos(k, 'position'),
+    prev: webceoBestPos(k, 'previous'),
+    kw: k.keyword
+  }));
+
+  // Distribution buckets by best current position
+  const buckets = { top3: 0, top10: 0, top20: 0, rest: 0, unranked: 0 };
+  stats.forEach(s => {
+    if (!webceoRanked(s.now)) buckets.unranked++;
+    else if (s.now <= 3) buckets.top3++;
+    else if (s.now <= 10) buckets.top10++;
+    else if (s.now <= 20) buckets.top20++;
+    else buckets.rest++;
+  });
+
+  // SEO Visibility %: Σ(vol·CTR(pos)) / Σ(vol·CTR(1)) — share of the clicks a
+  // set of all-#1 rankings would earn. WoW delta uses each keyword's prev pos.
+  let earned = 0, earnedPrev = 0, ideal = 0;
+  stats.forEach(s => {
+    const w = s.vol || 0;
+    ideal += w * webceoCtrForPosition(1);
+    earned += w * webceoCtrForPosition(s.now);
+    earnedPrev += w * webceoCtrForPosition(s.prev);
+  });
+  const vis = ideal > 0 ? (earned / ideal) * 100 : null;
+  const visPrev = ideal > 0 ? (earnedPrev / ideal) * 100 : null;
+  const visDelta = (vis != null && visPrev != null) ? vis - visPrev : null;
+
+  // Est. monthly traffic value: Σ(vol·CTR(pos)·CPC). Needs Ads CPC — kick off
+  // enrichment and re-render this card once it lands.
+  let value = 0, haveCpc = false;
+  stats.forEach(s => {
+    const cpc = _webceoCpcMap[(s.kw || '').toLowerCase().trim()];
+    if (cpc == null || !webceoRanked(s.now)) return;
+    haveCpc = true;
+    value += (s.vol || 0) * webceoCtrForPosition(s.now) * cpc;
+  });
+
+  const stat = (label, value, sub, cls) => {
+    const box = document.createElement('div');
+    box.className = 'ranking-stat' + (cls ? ' ' + cls : '');
+    const v = document.createElement('div'); v.className = 'ranking-stat-val'; v.textContent = value;
+    const l = document.createElement('div'); l.className = 'ranking-stat-label'; l.textContent = label;
+    box.append(v, l);
+    if (sub) { const s = document.createElement('div'); s.className = 'ranking-stat-sub'; s.append(sub); box.appendChild(s); }
+    return box;
+  };
+
+  el.replaceChildren();
+
+  // Visibility % with WoW delta chip
+  let visSub = null;
+  if (visDelta != null && Math.abs(visDelta) >= 0.05) {
+    visSub = document.createElement('span');
+    visSub.className = 'ranking-change ' + (visDelta > 0 ? 'ranking-change--up' : 'ranking-change--down');
+    visSub.textContent = `${visDelta > 0 ? '▲' : '▼'}${Math.abs(visDelta).toFixed(1)}pt`;
+  }
+  el.appendChild(stat('Visibility', vis == null ? '—' : `${vis.toFixed(vis < 10 ? 1 : 0)}%`, visSub, 'ranking-stat--primary'));
+
+  // Distribution as a single stat with a mini breakdown
+  const distSub = document.createElement('span');
+  distSub.className = 'ranking-dist';
+  [['Top 3', buckets.top3, 'g'], ['4–10', buckets.top10, 'a'], ['11–20', buckets.top20, 'o'], ['20+', buckets.rest + buckets.unranked, 'm']]
+    .forEach(([lbl, n, c]) => {
+      const seg = document.createElement('span');
+      seg.className = 'ranking-dist-seg ranking-dist-seg--' + c;
+      seg.textContent = n;
+      seg.title = `${n} keyword${n === 1 ? '' : 's'} · ${lbl}`;
+      distSub.appendChild(seg);
+    });
+  el.appendChild(stat('Positions', String(stats.length), distSub));
+
+  // Traffic value (only when Ads CPC is available)
+  if (haveCpc) {
+    const currency = (typeof _adsData !== 'undefined' && _adsData) ? _adsData.currency : null;
+    const money = (typeof adsCost === 'function') ? adsCost(value, currency) : ('$' + Math.round(value).toLocaleString());
+    const vBox = stat('Traffic value', money + '/mo', null, 'ranking-stat--value');
+    vBox.title = 'Estimated monthly value of these rankings in equivalent Google Ads spend (volume × CTR-by-position × CPC)';
+    el.appendChild(vBox);
+  }
+
+  // Enrich CPC in the background; re-render the card when it arrives.
+  ensureWebceoCpc(keywords.map(k => k.keyword), () => renderRankingScorecard());
+}
+
 function renderWebceoPanel(response) {
   const ids = ['ranking-no-key', 'ranking-no-project', 'ranking-error', 'ranking-data'];
   ids.forEach(id => document.getElementById(id).classList.add('hidden'));
@@ -322,14 +532,20 @@ function renderWebceoPanel(response) {
     return;
   }
 
+  // Reset the Ads-CPC cache when the domain changes (keyword set differs)
+  if (response.host !== _webceoCpcHost) { _webceoCpcMap = {}; _webceoCpcState = 'unknown'; _webceoCpcHost = response.host; }
+
   _webceoData = response;
   _webceoSelectedKeyword = null;
   _webceoIntent = null;
   setWebceoDepthUI(webceoSelectedDepth);
   document.getElementById('ranking-onpage-only').checked = _webceoOnPageOnly;
+  const striking = document.getElementById('ranking-striking-only');
+  if (striking) striking.checked = _webceoStrikingOnly;
   const kwCount = new Set((response.rows || []).map(r => r.keyword)).size;
   document.getElementById('ranking-meta').textContent =
     `${response.projectName || response.domain || ''} · ${kwCount} keywords · Updated ${gscRelativeTime(response.fetchedAt)}`;
+  renderRankingScorecard();
   renderRankingChart();
   renderRankingTable();
   // "Ad" chips appear once the page's ad-keyword set has loaded
@@ -358,6 +574,11 @@ document.querySelectorAll('#ranking-depth-group .mode-option').forEach(btn => {
 
 document.getElementById('ranking-onpage-only').addEventListener('change', (e) => {
   _webceoOnPageOnly = e.target.checked;
+  if (_webceoData) renderRankingTable();
+});
+
+document.getElementById('ranking-striking-only').addEventListener('change', (e) => {
+  _webceoStrikingOnly = e.target.checked;
   if (_webceoData) renderRankingTable();
 });
 

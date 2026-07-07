@@ -1650,6 +1650,7 @@ function render(data, expandMeta = false) {
   renderDates(data);
   renderOverlayToggle(data.altOverlayActive);
   renderLinkOverlayToggle(data.linkOverlayActive);
+  if (typeof loadBacklinksData === 'function') loadBacklinksData(false);
 }
 
 // ─── Data loading ────────────────────────────────────────────────────────────

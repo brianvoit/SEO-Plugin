@@ -15,6 +15,7 @@ const adcopyPanel     = document.getElementById('adcopy-panel');
 const negativesPanel  = document.getElementById('negatives-panel');
 const addkwPanel      = document.getElementById('addkw-panel');
 const adgroupPanel    = document.getElementById('adgroup-panel');
+const backlinksPanel  = document.getElementById('backlinks-panel');
 const searchTab     = document.getElementById('search-tab');
 const analyticsTab  = document.getElementById('analytics-tab');
 const adsTab        = document.getElementById('ads-tab');
@@ -42,6 +43,7 @@ function hideDetailPanels() {
   negativesPanel.classList.add('hidden');
   addkwPanel.classList.add('hidden');
   adgroupPanel.classList.add('hidden');
+  backlinksPanel.classList.add('hidden');
 }
 
 function showActiveTab() {
@@ -145,6 +147,14 @@ function showAdGroupPanel() {
   if (typeof openAdGroupPanel === 'function') openAdGroupPanel();
 }
 
+function showBacklinksPanel() {
+  enterDetailPanel();
+  backlinksPanel.classList.remove('hidden');
+  // Render whatever we already have, then (re)load — cache-backed, so instant on repeat
+  if (typeof renderBacklinksPanel === 'function') renderBacklinksPanel();
+  if (typeof loadBacklinksData === 'function') loadBacklinksData(false);
+}
+
 function hideDetailPanelToTab() {
   showActiveTab();
 }
@@ -232,6 +242,8 @@ document.getElementById('btn-addkw-export-txt').addEventListener('click', () => 
 document.getElementById('btn-addkw-export-copy').addEventListener('click', () => { if (typeof handleAddKwExportCopy === 'function') handleAddKwExportCopy(document.getElementById('btn-addkw-export-copy')); });
 document.getElementById('btn-addkw-export-doc').addEventListener('click', () => { if (typeof handleAddKwExportDoc === 'function') handleAddKwExportDoc(document.getElementById('btn-addkw-export-doc')); });
 document.getElementById('btn-adgroup-back').addEventListener('click', hideDetailPanelToTab);
+document.getElementById('btn-backlinks').addEventListener('click', showBacklinksPanel);
+document.getElementById('btn-backlinks-back').addEventListener('click', hideDetailPanelToTab);
 
 // ─── Main tabs (Overview / Search / Analytics / DNS / Redirect) ──────────────
 // The status pill is also a tab trigger (data-tab="redirect"), so the handler
@@ -250,7 +262,8 @@ document.querySelectorAll('#main-tabs [data-tab]').forEach(btn => {
       || !adcopyPanel.classList.contains('hidden')
       || !negativesPanel.classList.contains('hidden')
       || !addkwPanel.classList.contains('hidden')
-      || !adgroupPanel.classList.contains('hidden');
+      || !adgroupPanel.classList.contains('hidden')
+      || !backlinksPanel.classList.contains('hidden');
     if (tab === activeTab && !inPanel) return;
     activeTab = tab;
     // Settings reloads page data on exit; other panels just return to the tab

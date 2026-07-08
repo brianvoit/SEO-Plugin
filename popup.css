@@ -524,26 +524,24 @@ textarea.adcopy-field { line-height: 1.4; }
   background: var(--toggle-on);
 }
 
-/* Icon lives inside the track, at the side the thumb slides away from — so
-   it's hidden behind the thumb when off and revealed (faded in, white on the
-   on-fill) when the toggle is on. Saves the horizontal room the separate
-   icon used to take. */
+/* Icon lives ON the thumb so it's always visible — the button shows what it
+   does regardless of state; only the track colour signals active/inactive.
+   The thumb is always white, so the icon uses a fixed dark tint that reads in
+   both light and dark themes. */
 .toggle-icon {
-  position: absolute;
-  left: 4px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: #fff;
-  opacity: 0;
-  transition: opacity 0.2s;
+  width: 10px;
+  height: 10px;
+  color: #4b5563;
   pointer-events: none;
-  z-index: 0;
+  flex-shrink: 0;
 }
-.toggle-btn[aria-pressed="true"] .toggle-icon { opacity: 1; }
 
 .toggle-thumb {
   position: relative;
   z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 16px;
   height: 16px;
   border-radius: 50%;
@@ -2148,6 +2146,46 @@ body.settings-open #update-footer { margin-top: auto; }
 .bl-target-url { font-size: 11px; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; cursor: pointer; }
 .bl-target-url:hover { text-decoration: underline; }
 .bl-target-count { font-size: 10.5px; font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--text-muted); flex-shrink: 0; }
+
+/* ── Site Audit (Web CEO) detail panel ────────────────────────────────────── */
+#siteaudit-content { padding: 12px 14px; }
+.sa-header-toggle { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; margin-right: 8px; font-size: 10.5px; color: var(--text-muted); cursor: pointer; user-select: none; white-space: nowrap; }
+.sa-header-toggle input { margin: 0; }
+
+/* Scorecard value colouring by score band */
+.ranking-stat.sa-stat-good .ranking-stat-val { color: var(--hint-green); }
+.ranking-stat.sa-stat-mid  .ranking-stat-val { color: var(--hint-amber); }
+.ranking-stat.sa-stat-bad  .ranking-stat-val { color: var(--hint-red); }
+
+/* Issue list */
+.sa-issue-list { display: flex; flex-direction: column; }
+.sa-issue-list > * { border-bottom: 1px solid var(--border); }
+.sa-issue-list > *:last-child { border-bottom: none; }
+.sa-issue { display: flex; align-items: center; gap: 8px; padding: 6px 2px; font-size: 11.5px; }
+.sa-issue-btn { width: 100%; background: none; border: none; cursor: pointer; text-align: left; color: inherit; }
+.sa-issue-btn:hover { background: var(--hover-bg, rgba(127,127,127,.06)); border-radius: 5px; }
+.sa-issue-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: var(--text-muted); }
+.sa-issue--warn   .sa-issue-dot { background: var(--hint-amber); }
+.sa-issue--broken .sa-issue-dot { background: var(--hint-red); }
+.sa-issue-label { color: var(--text); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-issue-right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.sa-issue-count { font-size: 10.5px; font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--text-muted); }
+.sa-issue-caret { width: 10px; text-align: center; color: var(--text-muted); }
+
+/* Expanded issue explanation */
+.sa-issue-detail { padding: 2px 4px 9px 16px; font-size: 11px; display: flex; flex-direction: column; gap: 5px; }
+.sa-detail-what { color: var(--text); line-height: 1.4; }
+.sa-detail-spec { color: var(--text-muted); font-style: italic; line-height: 1.4; word-break: break-word; }
+.sa-detail-fix { color: var(--text-muted); line-height: 1.4; }
+.sa-detail-fix strong { color: var(--hint-green); font-weight: 700; font-style: normal; }
+
+/* Broken-link rows inside the issue list */
+.sa-broken-kind { color: var(--text-muted); flex-shrink: 0; }
+.sa-broken-url { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; cursor: pointer; }
+.sa-broken-url:hover { text-decoration: underline; }
+.sa-broken-code { color: var(--hint-red); flex-shrink: 0; }
+.sa-broken-more { margin-top: 6px; }
+.sa-clean { color: var(--hint-green); margin-top: 6px; }
 
 /* "Request more" queries button (Search tab) */
 .gsc-more-queries-btn {

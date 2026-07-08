@@ -16,6 +16,7 @@ const negativesPanel  = document.getElementById('negatives-panel');
 const addkwPanel      = document.getElementById('addkw-panel');
 const adgroupPanel    = document.getElementById('adgroup-panel');
 const backlinksPanel  = document.getElementById('backlinks-panel');
+const siteauditPanel  = document.getElementById('siteaudit-panel');
 const searchTab     = document.getElementById('search-tab');
 const analyticsTab  = document.getElementById('analytics-tab');
 const adsTab        = document.getElementById('ads-tab');
@@ -44,6 +45,7 @@ function hideDetailPanels() {
   addkwPanel.classList.add('hidden');
   adgroupPanel.classList.add('hidden');
   backlinksPanel.classList.add('hidden');
+  siteauditPanel.classList.add('hidden');
 }
 
 function showActiveTab() {
@@ -155,6 +157,13 @@ function showBacklinksPanel() {
   if (typeof loadBacklinksData === 'function') loadBacklinksData(false);
 }
 
+function showSiteAuditPanel() {
+  enterDetailPanel();
+  siteauditPanel.classList.remove('hidden');
+  if (typeof renderSiteAuditPanel === 'function') renderSiteAuditPanel();
+  if (typeof loadSiteAuditData === 'function') loadSiteAuditData(false);
+}
+
 function hideDetailPanelToTab() {
   showActiveTab();
 }
@@ -244,6 +253,8 @@ document.getElementById('btn-addkw-export-doc').addEventListener('click', () => 
 document.getElementById('btn-adgroup-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-backlinks').addEventListener('click', showBacklinksPanel);
 document.getElementById('btn-backlinks-back').addEventListener('click', hideDetailPanelToTab);
+document.getElementById('btn-siteaudit').addEventListener('click', showSiteAuditPanel);
+document.getElementById('btn-siteaudit-back').addEventListener('click', hideDetailPanelToTab);
 
 // ─── Main tabs (Overview / Search / Analytics / DNS / Redirect) ──────────────
 // The status pill is also a tab trigger (data-tab="redirect"), so the handler
@@ -263,7 +274,8 @@ document.querySelectorAll('#main-tabs [data-tab]').forEach(btn => {
       || !negativesPanel.classList.contains('hidden')
       || !addkwPanel.classList.contains('hidden')
       || !adgroupPanel.classList.contains('hidden')
-      || !backlinksPanel.classList.contains('hidden');
+      || !backlinksPanel.classList.contains('hidden')
+      || !siteauditPanel.classList.contains('hidden');
     if (tab === activeTab && !inPanel) return;
     activeTab = tab;
     // Settings reloads page data on exit; other panels just return to the tab

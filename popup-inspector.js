@@ -1651,6 +1651,7 @@ function render(data, expandMeta = false) {
   renderOverlayToggle(data.altOverlayActive);
   renderLinkOverlayToggle(data.linkOverlayActive);
   if (typeof loadBacklinksData === 'function') loadBacklinksData(false);
+  if (typeof loadSiteAuditData === 'function') loadSiteAuditData(false);
 }
 
 // ─── Data loading ────────────────────────────────────────────────────────────

@@ -2932,6 +2932,7 @@ const WEBCEO_API_DEFAULT = 'https://seo.plaudit.com/api/';
 const WEBCEO_PROJECTS_STALE_MS = 7 * 24 * 60 * 60 * 1000;
 const WEBCEO_STALE_MS = 6 * 60 * 60 * 1000;
 const WEBCEO_BACKLINKS_STALE_MS = 24 * 60 * 60 * 1000;   // backlinks change slowly
+const WEBCEO_AUDIT_STALE_MS = 24 * 60 * 60 * 1000;       // site audit changes slowly
 
 async function webceoConfig() {
   const { webceoApiKey, webceoBaseUrl } = await browser.storage.local.get(['webceoApiKey', 'webceoBaseUrl']);
@@ -3192,6 +3193,100 @@ async function webceoGetBacklinks({ pageUrl, forceRefresh = false }) {
   return { connected: true, ...entry, fromCache: false };
 }
 
+// Site Audit (get_site_audit_data). Trims the (potentially large) per-page
+// payload to just what the panel shows: each page's Problem factors, a capped
+// sample of its broken links, optimization %, and speed scores. Whole-site
+// headline metrics + site-wide Problem factors ride alongside.
+const SITE_AUDIT_BROKEN_KINDS = {
+  ilinks: 'Internal broken link', elinks: 'External broken link',
+  pictures: 'Broken image', anchors: 'Broken anchor',
+  i_server: 'Internal server error', e_server: 'External server error',
+  i_page: 'Internal page error', e_page: 'External page error',
+  mixed_content: 'Mixed content', ijavascript: 'Broken JS (internal)',
+  ejavascript: 'Broken JS (external)', icss: 'Broken CSS (internal)', ecss: 'Broken CSS (external)'
+};
+// Keys of a factor object whose value is { status: 'Problem' }.
+function webceoAuditProblems(obj) {
+  const out = [];
+  Object.keys(obj || {}).forEach(k => {
+    const v = obj[k];
+    if (v && typeof v === 'object' && v.status === 'Problem') out.push(k);
+  });
+  return out;
+}
+function webceoAggregateSiteAudit(d) {
+  const pages = (d.pages || []).map(p => {
+    const broken = [];
+    let brokenCount = 0;
+    Object.keys(SITE_AUDIT_BROKEN_KINDS).forEach(kind => {
+      const list = p[kind] || [];
+      brokenCount += list.length;
+      list.forEach(item => { if (broken.length < 60) broken.push({ kind, url: item.url, status: item.status, line: item.line ?? null }); });
+    });
+    const landing = p.landing || {};
+    const speed = p.speed_optimization || {};
+    return {
+      url: p.url,
+      unavailable: !!p.page_unavailable,
+      optimization: (landing.page_optimization != null) ? landing.page_optimization : null,
+      totalWords: landing.total_words ?? null,
+      desktopSpeed: speed.desktop_speed_score ?? null,
+      mobileSpeed: speed.mobile_speed_score ?? null,
+      generalProblems: webceoAuditProblems(p.general),
+      landingProblems: webceoAuditProblems(landing),
+      broken,
+      brokenCount
+    };
+  });
+  return {
+    siteOptimization: d.site_optimization ?? null,
+    generalErrors: d.general_errors ?? null,
+    optimizerErrors: d.optimizer_errors ?? null,
+    brokenLinks: d.broken_links ?? null,
+    brokenAnchors: d.broken_anchors ?? null,
+    scannedPages: d.scanned_pages ?? null,
+    scannedObjects: d.scanned_objects ?? null,
+    domainAge: d.domain_age ?? null,
+    summary: webceoAuditProblems(d.summary),
+    pages
+  };
+}
+
+// Cached 24h in webceoAuditCache; { connected:false } / NO_PROJECT gate the
+// Overview entry the same way the backlinks handler does.
+async function webceoGetSiteAudit({ pageUrl, forceRefresh = false }) {
+  const { apiKey } = await webceoConfig();
+  if (!apiKey) return { connected: false };
+  const host = gscPageHost(pageUrl);
+  const project = await webceoResolveProject({ pageUrl });
+  if (project.error) return { connected: true, error: project.error, detail: project.detail };
+  if (!project.project) return { connected: true, error: 'NO_PROJECT', host };
+
+  const cacheKey = `${host}::${project.project}`;
+  const { webceoAuditCache } = await browser.storage.local.get('webceoAuditCache');
+  const cache = webceoAuditCache || {};
+  const cached = cache[cacheKey];
+  if (!forceRefresh && cached && (Date.now() - cached.fetchedAt < WEBCEO_AUDIT_STALE_MS)) {
+    return { connected: true, ...cached, fromCache: true };
+  }
+
+  const res = await webceoCall('get_site_audit_data', { project: project.project });
+  if (res.error) return { connected: true, error: res.error, detail: res.detail };
+
+  const projInfo = project.projects.find(p => p.project === project.project);
+  const agg = webceoAggregateSiteAudit(res.data || {});
+  const entry = {
+    fetchedAt: Date.now(), host, project: project.project,
+    projectName: projInfo ? projInfo.name : '',
+    domain: (res.data && res.data.domain) || (projInfo && projInfo.domain) || host,
+    scannedDate: (res.data && res.data.d_scan) || null,
+    ...agg
+  };
+  cache[cacheKey] = entry;
+  await browser.storage.local.set({ webceoAuditCache: cache });
+  return { connected: true, ...entry, fromCache: false };
+}
+
 // Add a WebCEO "event" (chart annotation) to the domain's project for a date.
 // Events show as notes on the rank/traffic/backlink charts (tools list below).
 async function webceoAddEvent({ pageUrl, date, text }) {
@@ -3217,12 +3312,12 @@ function webceoSaveConfig({ apiKey, baseUrl }) {
   if (apiKey !== undefined) update.webceoApiKey = apiKey;
   if (baseUrl !== undefined) update.webceoBaseUrl = baseUrl;
   return browser.storage.local.set(update)
-    .then(() => browser.storage.local.remove(['webceoProjects', 'webceoCache', 'webceoBacklinksCache']))
+    .then(() => browser.storage.local.remove(['webceoProjects', 'webceoCache', 'webceoBacklinksCache', 'webceoAuditCache']))
     .then(() => ({ ok: true }));
 }
 
 function webceoDisconnect() {
-  return browser.storage.local.remove(['webceoApiKey', 'webceoProjects', 'webceoCache', 'webceoBacklinksCache', 'webceoProjectOverrides'])
+  return browser.storage.local.remove(['webceoApiKey', 'webceoProjects', 'webceoCache', 'webceoBacklinksCache', 'webceoAuditCache', 'webceoProjectOverrides'])
     .then(() => ({ ok: true }));
 }
 
@@ -3650,6 +3745,7 @@ browser.runtime.onMessage.addListener((message) => {
     case 'webceoAddKeywords':    return webceoAddKeywords(message);
     case 'webceoGetTrackedKeywords': return webceoGetTrackedKeywords(message);
     case 'webceoGetBacklinks':   return webceoGetBacklinks(message);
+    case 'webceoGetSiteAudit':   return webceoGetSiteAudit(message);
     case 'webceoAddEvent':       return webceoAddEvent(message);
     case 'gaConnectEdit':        return gaConnectEdit();
     case 'ga4AddAnnotation':     return ga4AddAnnotation(message);

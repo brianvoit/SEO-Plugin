@@ -24,35 +24,38 @@
       <div class="alt-header-control" title="Follow active tab — auto-reload when switching tabs (Sidebar and Pop Out)">
         <button id="btn-follow-tab" class="toggle-btn" aria-pressed="true" title="Follow active tab">
           <span class="toggle-track">
-            <svg class="toggle-icon" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M6.5 9.5a3 3 0 0 0 4.24 0l1.41-1.41a3 3 0 0 0-4.24-4.24L6.5 5.27"/>
-              <path d="M9.5 6.5a3 3 0 0 0-4.24 0L3.85 7.91a3 3 0 0 0 4.24 4.24l1.41-1.41"/>
-            </svg>
-            <span class="toggle-thumb"></span>
+            <span class="toggle-thumb">
+              <svg class="toggle-icon" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6.5 9.5a3 3 0 0 0 4.24 0l1.41-1.41a3 3 0 0 0-4.24-4.24L6.5 5.27"/>
+                <path d="M9.5 6.5a3 3 0 0 0-4.24 0L3.85 7.91a3 3 0 0 0 4.24 4.24l1.41-1.41"/>
+              </svg>
+            </span>
           </span>
         </button>
       </div>
       <div class="alt-header-control" title="Toggle alt-text overlay on the page">
         <button id="btn-overlay" class="toggle-btn" aria-pressed="false" title="Toggle alt-text overlay on the page">
           <span class="toggle-track">
-            <svg class="toggle-icon" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="1.5" y="3" width="13" height="10" rx="1.5"/>
-              <circle cx="5.5" cy="6.5" r="1.2"/>
-              <path d="M2.5 12l3.2-3 2.3 2 2.5-2.6 3 3.6"/>
-            </svg>
-            <span class="toggle-thumb"></span>
+            <span class="toggle-thumb">
+              <svg class="toggle-icon" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="1.5" y="3" width="13" height="10" rx="1.5"/>
+                <circle cx="5.5" cy="6.5" r="1.2"/>
+                <path d="M2.5 12l3.2-3 2.3 2 2.5-2.6 3 3.6"/>
+              </svg>
+            </span>
           </span>
         </button>
       </div>
       <div class="alt-header-control" title="Toggle link-health overlay — flag redirecting and broken links on the page">
         <button id="btn-link-overlay" class="toggle-btn" aria-pressed="false" title="Toggle link-health overlay on the page">
           <span class="toggle-track">
-            <svg class="toggle-icon" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M9 2.5h4.5V7"/>
-              <path d="M13.5 2.5L8 8"/>
-              <path d="M11.5 9v3.5a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1H7"/>
-            </svg>
-            <span class="toggle-thumb"></span>
+            <span class="toggle-thumb">
+              <svg class="toggle-icon" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 2.5h4.5V7"/>
+                <path d="M13.5 2.5L8 8"/>
+                <path d="M11.5 9v3.5a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1H7"/>
+              </svg>
+            </span>
           </span>
         </button>
       </div>
@@ -554,6 +557,22 @@
       <button id="btn-backlinks-refresh" class="redirect-retrace-btn" title="Re-fetch from Web CEO">Refresh</button>
     </div>
     <div id="backlinks-content"></div>
+  </div>
+
+  <!-- Site Audit detail panel (WebCEO) -->
+  <div id="siteaudit-panel" class="hidden">
+    <div class="settings-header">
+      <button id="btn-siteaudit-back" class="settings-back-btn">
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="10 3 4 8 10 13"/>
+        </svg>
+        Back
+      </button>
+      <span class="bl-header-meta" id="siteaudit-header-meta"></span>
+      <label class="sa-header-toggle"><input type="checkbox" id="siteaudit-pageonly" checked /> This page only</label>
+      <button id="btn-siteaudit-refresh" class="redirect-retrace-btn" title="Re-fetch from Web CEO">Refresh</button>
+    </div>
+    <div id="siteaudit-content"></div>
   </div>
 
   <!-- AI Action Plan detail panel -->
@@ -1401,6 +1420,19 @@
       </button>
     </section>
 
+    <!-- Site Audit (detail screen) — only shown once a WebCEO project resolves for this domain -->
+    <section class="field-section hidden" id="overview-siteaudit">
+      <button class="field-nav-btn" id="btn-siteaudit">
+        <span class="field-label">SITE AUDIT</span>
+        <div class="field-nav-right">
+          <span id="siteaudit-summary" class="field-nav-summary"></span>
+          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 3 11 8 6 13"/>
+          </svg>
+        </div>
+      </button>
+    </section>
+
 
     <!-- Open Graph (detail screen) -->
     <section class="field-section">
@@ -1553,6 +1585,7 @@
   <script src="popup-addkw.js"></script>
   <script src="popup-webceo.js"></script>
   <script src="popup-backlinks.js"></script>
+  <script src="popup-siteaudit.js"></script>
   <script src="popup-annotations.js"></script>
   <script src="popup-redirects.js"></script>
   <script src="popup-dns.js"></script>

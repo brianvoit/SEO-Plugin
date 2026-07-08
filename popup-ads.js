@@ -143,6 +143,97 @@ function adsFilterLabel() {
   return _adsFilter.label || _adsFilter.text || '';
 }
 
+// ─── "+ Keyword": add a search term to an ad group as a keyword ───────────────
+// Reuses the adsAddKeywords background path. The picker offers the ad groups
+// present for this page (defaulting to the term's own ad group) + a match type.
+
+// Ad groups seen in the current (page-scoped) Ads data, for the picker dropdown.
+function adsAdGroupOptions() {
+  const map = new Map();
+  (typeof _adsData !== 'undefined' && _adsData ? _adsData.ads || [] : []).forEach(a => {
+    if (!map.has(a.adGroupId)) map.set(a.adGroupId, { id: a.adGroupId, name: a.adGroup || 'Ad Group', campaignName: a.campaign || '' });
+  });
+  return [...map.values()].sort((a, b) => `${a.campaignName}${a.name}`.localeCompare(`${b.campaignName}${b.name}`));
+}
+
+let _adsAddKwPop = null;
+function closeAdsAddKwPop() {
+  if (!_adsAddKwPop) return;
+  _adsAddKwPop.remove();
+  _adsAddKwPop = null;
+  document.removeEventListener('mousedown', _adsAddKwOutside, true);
+}
+function _adsAddKwOutside(e) { if (_adsAddKwPop && !_adsAddKwPop.contains(e.target)) closeAdsAddKwPop(); }
+
+function openAdsAddKwPop(anchorEl, termText, defaultAdGroupId) {
+  closeAdsAddKwPop();
+  const pop = document.createElement('div');
+  pop.className = 'ads-addkw-pop';
+
+  const title = document.createElement('div');
+  title.className = 'ads-addkw-title';
+  title.textContent = `Add “${termText}” as a keyword`;
+  pop.appendChild(title);
+
+  const agLabel = document.createElement('label'); agLabel.className = 'ads-addkw-label'; agLabel.textContent = 'Ad group';
+  const agSel = document.createElement('select'); agSel.className = 'ads-addkw-select';
+  adsAdGroupOptions().forEach(o => {
+    const opt = document.createElement('option');
+    opt.value = o.id;
+    opt.textContent = o.campaignName ? `${o.campaignName} › ${o.name}` : o.name;
+    if (o.id === defaultAdGroupId) opt.selected = true;
+    agSel.appendChild(opt);
+  });
+
+  const mtLabel = document.createElement('label'); mtLabel.className = 'ads-addkw-label'; mtLabel.textContent = 'Match type';
+  const mtSel = document.createElement('select'); mtSel.className = 'ads-addkw-select';
+  [['PHRASE', 'Phrase'], ['EXACT', 'Exact'], ['BROAD', 'Broad']].forEach(([v, l]) => {
+    const o = document.createElement('option'); o.value = v; o.textContent = l; mtSel.appendChild(o);
+  });
+
+  const err = document.createElement('div'); err.className = 'ads-addkw-err hidden';
+
+  const actions = document.createElement('div'); actions.className = 'ads-addkw-actions';
+  const cancel = document.createElement('button'); cancel.className = 'ads-addkw-cancel'; cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', closeAdsAddKwPop);
+  const add = document.createElement('button'); add.className = 'ads-addkw-add'; add.textContent = 'Add keyword';
+  add.addEventListener('click', async () => {
+    add.disabled = true; add.textContent = 'Adding…'; err.classList.add('hidden');
+    const agId = agSel.value;
+    const o = adsAdGroupOptions().find(x => x.id === agId) || {};
+    let pageUrl = '';
+    try { pageUrl = (await getActiveTab()).url; } catch { /* resolve by host fails → NO_ACCOUNT below */ }
+    let res;
+    try {
+      res = await sendMessageWithTimeout({ action: 'adsAddKeywords', pageUrl, groups: [{ adGroupId: agId, adGroupName: o.name, campaignName: o.campaignName, terms: [{ text: termText, matchType: mtSel.value }] }] });
+    } catch { res = null; }
+    const r0 = res && res.results && res.results[0];
+    if (r0 && !r0.error && (r0.added.length || r0.skipped.length)) {
+      anchorEl.textContent = r0.added.length ? 'Added' : 'Exists';
+      anchorEl.disabled = true;
+      anchorEl.classList.add('gsc-track-chip--done');
+      closeAdsAddKwPop();
+    } else {
+      add.disabled = false; add.textContent = 'Add keyword';
+      err.textContent = (r0 && r0.error) ? String(r0.error)
+        : (res && res.error) ? adsErrorMessage(res.error, res.detail)
+        : (res && res.connected === false) ? 'Connect Google Ads in Settings.'
+        : 'Could not add keyword.';
+      err.classList.remove('hidden');
+    }
+  });
+  actions.append(cancel, add);
+
+  pop.append(agLabel, agSel, mtLabel, mtSel, err, actions);
+  document.body.appendChild(pop);
+  _adsAddKwPop = pop;
+
+  const rect = anchorEl.getBoundingClientRect();
+  pop.style.top = `${rect.bottom + 4}px`;
+  pop.style.left = `${Math.max(6, Math.min(rect.left, window.innerWidth - pop.offsetWidth - 6))}px`;
+  setTimeout(() => document.addEventListener('mousedown', _adsAddKwOutside, true), 0);
+}
+
 // Ad groups belonging to dead (paused + zero-impression) campaigns are hidden
 // across the whole Ads tab. Recomputed on each data load (computeAdsHidden).
 let _adsHiddenAdGroups = new Set();
@@ -161,6 +252,18 @@ function computeAdsHidden() {
     if (statusByCamp.get(campId) === 'PAUSED' && impr === 0) {
       (groupsByCamp.get(campId) || new Set()).forEach(agId => _adsHiddenAdGroups.add(agId));
     }
+  });
+
+  // Also hide ad groups that are themselves paused with no activity in-window,
+  // even under an active campaign (paused AND 0 impressions/clicks/cost).
+  const statusByAg = new Map();
+  const activityByAg = new Map();
+  (_adsData.ads || []).forEach(a => {
+    if (a.adGroupStatus) statusByAg.set(a.adGroupId, a.adGroupStatus);
+    activityByAg.set(a.adGroupId, (activityByAg.get(a.adGroupId) || 0) + (a.impressions || 0) + (a.clicks || 0) + (a.cost || 0));
+  });
+  statusByAg.forEach((status, agId) => {
+    if (status === 'PAUSED' && (activityByAg.get(agId) || 0) === 0) _adsHiddenAdGroups.add(agId);
   });
 }
 
@@ -457,7 +560,7 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
         if (typeof isQueryBranded === 'function' && isQueryBranded(termText, existing)) return;
         const escaped = termText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         allBrandedTerms[_adsHost] = existing ? `${existing}|${escaped}` : escaped;
-        browser.storage.local.set({ brandedTerms: { ...allBrandedTerms } });
+        saveBrandedTerms();
         renderAdsAll();
       });
       term.appendChild(addBtn);
@@ -496,6 +599,21 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
         });
       }
       term.appendChild(trackChip);
+
+      // Search-terms table only: "+ Keyword" adds the term as a keyword (asks
+      // the ad group + match type via a small popover).
+      if (!withQs && r.text) {
+        const kwChip = document.createElement('button');
+        kwChip.className = 'gsc-track-chip ads-addkw-chip';
+        kwChip.textContent = '+ Keyword';
+        kwChip.title = 'Add this search term as a keyword in Google Ads';
+        kwChip.addEventListener('click', e => {
+          e.stopPropagation();
+          openAdsAddKwPop(kwChip, r.text, r.adGroupId);
+        });
+        term.appendChild(kwChip);
+      }
+
       const spacer = document.createElement('span');
       spacer.className = 'ads-term-spacer';
       term.appendChild(spacer);

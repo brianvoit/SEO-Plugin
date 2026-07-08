@@ -557,8 +557,12 @@ async function googleOAuthConnectRequireScope(scope, authKey, missingScopeError)
   if (res && res.connected) {
     const stored = await browser.storage.local.get(authKey);
     const auth = stored[authKey];
-    const re = new RegExp(`(^|\\s)${scope.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`);
-    if (!auth || !re.test(auth.scope || '')) {
+    // Every requested scope must actually be present (scope may be a
+    // space-separated list, e.g. analytics.readonly + analytics.edit).
+    const granted = (auth && auth.scope) || '';
+    const allPresent = scope.split(/\s+/).filter(Boolean).every(s =>
+      new RegExp(`(^|\\s)${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`).test(granted));
+    if (!auth || !allPresent) {
       await browser.storage.local.remove(authKey);
       return { error: missingScopeError };
     }
@@ -1180,6 +1184,69 @@ async function gaGetStatus() {
 
 function gaConnect() {
   return googleOAuthConnectRequireScope(GA_SCOPE, 'gaAuth', 'GA_SCOPE_MISSING');
+}
+
+// Writing GA4 annotations needs the analytics.edit scope (config write), which
+// the read-only default connection doesn't include. This upgrades the existing
+// gaAuth token to readonly+edit via re-consent — only requested when the user
+// actually adds an annotation, so read-only users are never forced to grant it.
+const GA_EDIT_SCOPE = `${GA_SCOPE} https://www.googleapis.com/auth/analytics.edit`;
+async function gaConnectEdit() {
+  // Back up the current (read-only) connection first: if the upgrade consents
+  // but Google drops the edit scope, require-scope removes gaAuth — restore it
+  // so a failed annotation-permission upgrade never disconnects working GA.
+  const { gaAuth: backup } = await browser.storage.local.get('gaAuth');
+  const res = await googleOAuthConnectRequireScope(GA_EDIT_SCOPE, 'gaAuth', 'GA_EDIT_SCOPE_MISSING');
+  if (res && res.error === 'GA_EDIT_SCOPE_MISSING' && backup) {
+    await browser.storage.local.set({ gaAuth: backup });
+  }
+  return res;
+}
+async function gaHasEditScope() {
+  const { gaAuth } = await browser.storage.local.get('gaAuth');
+  return /(^|\s)https:\/\/www\.googleapis\.com\/auth\/analytics\.edit(\s|$)/.test((gaAuth && gaAuth.scope) || '');
+}
+
+// Create a GA4 reporting-data annotation on the domain's property for a single
+// date. Returns { error:'GA_EDIT_SCOPE_MISSING' } when the connection is still
+// read-only, so the popup can offer a one-click upgrade (gaConnectEdit).
+async function ga4AddAnnotation({ pageUrl, date, title, description }) {
+  const tokenResult = await gaGetAccessToken();
+  if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
+  if (tokenResult.error === 'REAUTH_REQUIRED') return { connected: false, reauthRequired: true };
+  if (tokenResult.error) return { connected: true, error: tokenResult.error };
+
+  if (!(await gaHasEditScope())) return { connected: true, error: 'GA_EDIT_SCOPE_MISSING' };
+
+  const resolved = await gaResolveProperty({ pageUrl });
+  if (!resolved.connected) return { connected: false };
+  if (resolved.error) return { connected: true, error: resolved.error, detail: resolved.detail };
+  if (!resolved.property) return { connected: true, error: 'NO_PROPERTY' };
+
+  const [y, m, d] = String(date || '').split('-').map(n => parseInt(n, 10));
+  if (!y || !m || !d) return { connected: true, error: 'BAD_DATE' };
+
+  const body = {
+    title: String(title || '').slice(0, 128) || 'Annotation',
+    annotationDate: { year: y, month: m, day: d }
+  };
+  if (description) body.description = String(description).slice(0, 1024);
+
+  let res;
+  try {
+    res = await fetch(`https://analyticsadmin.googleapis.com/v1alpha/${resolved.property}/reportingDataAnnotations`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tokenResult.accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+  } catch { return { connected: true, error: 'NETWORK' }; }
+  if (res.status === 401 || res.status === 403) return { connected: true, error: 'GA_EDIT_SCOPE_MISSING' };
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    return { connected: true, error: 'API_ERROR', detail: (err && err.error && err.error.message) || `HTTP ${res.status}` };
+  }
+  const data = await res.json().catch(() => ({}));
+  return { connected: true, ok: true, property: resolved.property, id: data.name || null };
 }
 
 function gaDisconnect() {
@@ -2168,7 +2235,7 @@ async function adsGetPageData({ pageUrl, range, forceRefresh }) {
 
   // 1) Ads + their final URLs/metrics, filtered client-side to this page
   const adRes = await adsSearch(accessToken, customerId,
-    `SELECT campaign.id, campaign.name, ad_group.id, ad_group.name, ad_group_ad.ad.id, ad_group_ad.ad.name,
+    `SELECT campaign.id, campaign.name, ad_group.id, ad_group.name, ad_group.status, ad_group_ad.ad.id, ad_group_ad.ad.name,
             ad_group_ad.ad.type, ad_group_ad.ad.final_urls, ad_group_ad.status,
             metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
      FROM ad_group_ad WHERE ${dateWhere} AND ad_group_ad.status != 'REMOVED'`);
@@ -2184,7 +2251,7 @@ async function adsGetPageData({ pageUrl, range, forceRefresh }) {
     campaignIds.add(String(r.campaign.id));
     ads.push({
       campaignId: String(r.campaign.id), campaign: r.campaign.name,
-      adGroupId: String(r.adGroup.id), adGroup: r.adGroup.name,
+      adGroupId: String(r.adGroup.id), adGroup: r.adGroup.name, adGroupStatus: r.adGroup?.status || null,
       adId: String(r.adGroupAd.ad.id), adName: r.adGroupAd.ad.name || '',
       type: r.adGroupAd.ad.type || '', finalUrls: urls,
       ...adsMetrics(r.metrics)
@@ -3125,6 +3192,26 @@ async function webceoGetBacklinks({ pageUrl, forceRefresh = false }) {
   return { connected: true, ...entry, fromCache: false };
 }
 
+// Add a WebCEO "event" (chart annotation) to the domain's project for a date.
+// Events show as notes on the rank/traffic/backlink charts (tools list below).
+async function webceoAddEvent({ pageUrl, date, text }) {
+  const resolved = await webceoResolveProject({ pageUrl });
+  if (!resolved.connected) return { connected: false };
+  if (resolved.error) return { connected: true, error: resolved.error, detail: resolved.detail };
+  if (!resolved.project) return { connected: true, error: 'NO_PROJECT' };
+
+  const res = await webceoCall('add_event', {
+    projects: [resolved.project],
+    date,
+    text: String(text || '').slice(0, 500),
+    visibility: 'public',
+    tools: ['ranker', 'stats', 'backlinks', 'auditor'],
+    charts_visibility: 1
+  });
+  if (res.error) return { connected: true, error: res.error, detail: res.detail };
+  return { connected: true, ok: true, project: resolved.project, event: (res.data && res.data.event) || null };
+}
+
 function webceoSaveConfig({ apiKey, baseUrl }) {
   const update = {};
   if (apiKey !== undefined) update.webceoApiKey = apiKey;
@@ -3563,6 +3650,9 @@ browser.runtime.onMessage.addListener((message) => {
     case 'webceoAddKeywords':    return webceoAddKeywords(message);
     case 'webceoGetTrackedKeywords': return webceoGetTrackedKeywords(message);
     case 'webceoGetBacklinks':   return webceoGetBacklinks(message);
+    case 'webceoAddEvent':       return webceoAddEvent(message);
+    case 'gaConnectEdit':        return gaConnectEdit();
+    case 'ga4AddAnnotation':     return ga4AddAnnotation(message);
     case 'docsConnect':          return docsConnect();
     case 'docsGetStatus':        return docsGetStatus();
     case 'docsDisconnect':       return docsDisconnect();

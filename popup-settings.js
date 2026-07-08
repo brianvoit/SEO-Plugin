@@ -228,7 +228,7 @@ function renderBrandDomains() {
   list.querySelectorAll('.wp-site-remove').forEach(btn => {
     btn.addEventListener('click', () => {
       delete allBrandedTerms[btn.dataset.host];
-      browser.storage.local.set({ brandedTerms: allBrandedTerms }).then(renderBrandDomains);
+      saveBrandedTerms().then(renderBrandDomains);
     });
   });
 }
@@ -246,10 +246,7 @@ function openBrandEdit(host) {
 }
 
 function loadBrandedTerms() {
-  return browser.storage.local.get('brandedTerms').then(({ brandedTerms }) => {
-    allBrandedTerms = brandedTerms ?? {};
-    renderBrandDomains();
-  });
+  return loadBrandedTermsStore().then(renderBrandDomains);
 }
 
 document.getElementById('btn-add-brand-domain').addEventListener('click', async () => {
@@ -290,7 +287,7 @@ document.getElementById('btn-save-brand-domain').addEventListener('click', () =>
   }
 
   allBrandedTerms[host] = pattern;
-  browser.storage.local.set({ brandedTerms: allBrandedTerms }).then(() => {
+  saveBrandedTerms().then(() => {
     renderBrandDomains();
     brandDomainForm.classList.add('hidden');
   });

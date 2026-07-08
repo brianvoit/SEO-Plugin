@@ -857,7 +857,10 @@
           <button class="mode-option" data-range="90">90D</button>
           <button class="mode-option" data-range="365">12M</button>
         </div>
-        <div class="field-hint" id="ga-fetched-meta"></div>
+        <div class="annotation-meta-row">
+          <div class="field-hint" id="ga-fetched-meta"></div>
+          <button id="btn-ga-annotation" class="annotation-btn" title="Add a dated annotation to GA4 and/or Web CEO">+ Annotation</button>
+        </div>
       </section>
 
       <div class="gsc-query-filter-bar hidden" id="ga-channel-filter-bar">
@@ -1129,7 +1132,10 @@
           <button class="mode-option" data-depth="20">20 scans</button>
         </div>
       </div>
-      <div class="field-sub" id="ranking-meta"></div>
+      <div class="annotation-meta-row">
+        <div class="field-sub" id="ranking-meta"></div>
+        <button id="btn-ranking-annotation" class="annotation-btn" title="Add a dated annotation to Web CEO and/or GA4">+ Annotation</button>
+      </div>
 
       <div id="ranking-scorecard" class="ranking-scorecard hidden"></div>
 
@@ -1515,6 +1521,26 @@
     </div>
   </footer>
 
+  <!-- Annotation modal (shared by Analytics + Tracked tabs) -->
+  <div id="annotation-modal" class="annotation-overlay hidden">
+    <div class="annotation-card">
+      <div class="annotation-card-title">Add annotation</div>
+      <label class="ads-addkw-label" for="annotation-date">Date</label>
+      <input type="date" id="annotation-date" class="ads-addkw-select" />
+      <label class="ads-addkw-label" for="annotation-text">Note</label>
+      <input type="text" id="annotation-text" class="ads-addkw-select" placeholder="What happened on this date?" maxlength="128" autocomplete="off" />
+      <div class="annotation-targets">
+        <label class="annotation-target"><input type="checkbox" id="annotation-ga" /> <span id="annotation-ga-label">Google Analytics</span></label>
+        <label class="annotation-target"><input type="checkbox" id="annotation-webceo" /> <span id="annotation-webceo-label">Web CEO</span></label>
+      </div>
+      <div id="annotation-status" class="annotation-status hidden"></div>
+      <div class="ads-addkw-actions">
+        <button id="btn-annotation-cancel" class="ads-addkw-cancel">Cancel</button>
+        <button id="btn-annotation-save" class="ads-addkw-add">Add</button>
+      </div>
+    </div>
+  </div>
+
   <script src="popup-shared.js"></script>
   <script src="popup-intent.js"></script>
   <script src="popup-nav.js"></script>
@@ -1527,6 +1553,7 @@
   <script src="popup-addkw.js"></script>
   <script src="popup-webceo.js"></script>
   <script src="popup-backlinks.js"></script>
+  <script src="popup-annotations.js"></script>
   <script src="popup-redirects.js"></script>
   <script src="popup-dns.js"></script>
   <script src="popup-actionplan.js"></script>

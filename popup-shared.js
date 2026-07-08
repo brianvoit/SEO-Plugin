@@ -27,6 +27,55 @@ let allBrandedTerms = {};
 // Structured data found on the page, used by the schema detail panel
 let _schemas = [];
 
+// ─── Branded terms: cross-device sync ────────────────────────────────────────
+// Branded-query patterns sync across browsers via storage.sync so they don't
+// have to be re-entered on each machine. ONLY branded terms sync — API keys,
+// OAuth tokens, and everything else stay device-local in storage.local. A
+// one-time migration lifts any pre-existing local terms up to sync so upgrading
+// users keep what they already had.
+function _brandedSyncArea() {
+  return (typeof browser !== 'undefined' && browser.storage && browser.storage.sync) ? browser.storage.sync : null;
+}
+
+async function loadBrandedTermsStore() {
+  const sync = _brandedSyncArea();
+  if (sync) {
+    let syncData;
+    try { syncData = (await sync.get('brandedTerms')).brandedTerms; } catch { syncData = undefined; }
+    if (syncData && Object.keys(syncData).length) { allBrandedTerms = syncData; return allBrandedTerms; }
+  }
+  // Sync empty or unavailable → fall back to local, and migrate up if possible
+  let localData;
+  try { localData = (await browser.storage.local.get('brandedTerms')).brandedTerms; } catch { localData = undefined; }
+  allBrandedTerms = localData || {};
+  if (sync && localData && Object.keys(localData).length) {
+    try { await sync.set({ brandedTerms: allBrandedTerms }); } catch { /* sync unavailable → stay local */ }
+  }
+  return allBrandedTerms;
+}
+
+async function saveBrandedTerms() {
+  const sync = _brandedSyncArea();
+  if (sync) {
+    try { await sync.set({ brandedTerms: allBrandedTerms }); return; }
+    catch { /* fall through to local when sync is unavailable */ }
+  }
+  await browser.storage.local.set({ brandedTerms: allBrandedTerms });
+}
+
+// Live cross-device refresh: when another browser edits branded terms, update
+// the in-memory copy and re-render any visible branded-dependent UI.
+if (typeof browser !== 'undefined' && browser.storage && browser.storage.onChanged) {
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'sync' || !changes.brandedTerms) return;
+    allBrandedTerms = changes.brandedTerms.newValue || {};
+    if (typeof renderBrandDomains === 'function') { try { renderBrandDomains(); } catch { /* settings not mounted */ } }
+    if (typeof renderGscQueries === 'function' && typeof _gscQueries !== 'undefined' && _gscQueries) {
+      try { renderGscQueries(_gscQueries, typeof _gscPageUrl !== 'undefined' ? _gscPageUrl : null); } catch { /* search tab idle */ }
+    }
+  });
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function escapeHtml(s) {

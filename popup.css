@@ -2528,6 +2528,61 @@ body.settings-open #update-footer { margin-top: auto; }
 /* the result stays visible even after the pointer leaves the row */
 .gsc-track-chip--done { display: inline-block; border-color: var(--hint-green); color: var(--hint-green); cursor: default; }
 .gsc-track-chip--err  { display: inline-block; border-color: var(--hint-red);   color: var(--hint-red); }
+/* "+ Keyword" chip — violet to distinguish from the accent-blue "+ Track" */
+.ads-addkw-chip { border-color: var(--chart-impressions); color: var(--chart-impressions); }
+.ads-addkw-chip:hover { background: var(--chart-impressions); color: #fff; }
+
+/* "+ Keyword" picker popover */
+.ads-addkw-pop {
+  position: fixed; z-index: 1000; width: 214px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.18); padding: 10px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.ads-addkw-title { font-size: 11px; font-weight: 600; color: var(--text); margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ads-addkw-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
+.ads-addkw-select { width: 100%; font-size: 11px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-section); color: var(--text); }
+.ads-addkw-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 4px; }
+.ads-addkw-cancel, .ads-addkw-add { font-size: 10.5px; font-weight: 600; padding: 4px 10px; border-radius: 6px; cursor: pointer; border: 1px solid var(--border); }
+.ads-addkw-cancel { background: none; color: var(--text-muted); }
+.ads-addkw-add { background: var(--accent); color: #fff; border-color: var(--accent); }
+.ads-addkw-add:disabled { opacity: .6; cursor: default; }
+.ads-addkw-err { font-size: 10px; color: var(--hint-red); }
+
+/* ── "+ Annotation" (GA4 + Web CEO) ───────────────────────────────────────── */
+.annotation-meta-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.annotation-meta-row .field-hint,
+.annotation-meta-row .field-sub { margin: 0; flex: 1 1 auto; min-width: 0; }
+.annotation-btn {
+  flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 6px;
+  border: 1px solid var(--accent); color: var(--accent); background: transparent; cursor: pointer;
+  white-space: nowrap; transition: background .1s, color .1s;
+}
+.annotation-btn:hover { background: var(--accent); color: #fff; }
+
+.annotation-overlay {
+  position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.45); padding: 16px;
+}
+.annotation-card {
+  width: 100%; max-width: 320px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.25); padding: 14px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.annotation-card-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+.annotation-targets { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.annotation-target { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text); cursor: pointer; }
+.annotation-target input { margin: 0; }
+.annotation-target input:disabled { cursor: default; }
+.annotation-target input:disabled + span { color: var(--text-none); }
+.annotation-status { font-size: 10.5px; margin-top: 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.annotation-status--err { color: var(--hint-red); }
+.annotation-status--ok  { color: var(--hint-green); }
+.annotation-status-action {
+  font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 5px;
+  border: 1px solid var(--accent); color: var(--accent); background: transparent; cursor: pointer;
+}
+.annotation-status-action:hover { background: var(--accent); color: #fff; }
 .gsc-chip {
   font-size: 9px;
   font-weight: 700;

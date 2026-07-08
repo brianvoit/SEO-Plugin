@@ -778,7 +778,7 @@ function addQueryToBranded(query) {
   if (existing && isQueryBranded(term, existing)) return;   // already covered
 
   allBrandedTerms[host] = existing ? `${existing}|${gscEscapeRegex(term)}` : gscEscapeRegex(term);
-  browser.storage.local.set({ brandedTerms: allBrandedTerms }).then(() => {
+  saveBrandedTerms().then(() => {
     renderGscQueries(_gscQueries, _gscPageUrl);
     if (typeof renderBrandDomains === 'function') renderBrandDomains();
     // Newly branded query drops out of the table — backfill to keep ~25 visible,
@@ -1410,10 +1410,13 @@ document.getElementById('gsc-status-badge').addEventListener('click', async (e) 
 // ─── Google Search Console: preferences ──────────────────────────────────────
 
 function loadGscPrefs() {
-  return browser.storage.local.get(['gscSelectedRange', 'gscHideBranded', 'brandedTerms', 'gscActiveMetrics', 'gscQuerySort']).then(({ gscSelectedRange: storedRange, gscHideBranded: storedHide, brandedTerms, gscActiveMetrics: storedMetrics, gscQuerySort: storedSort }) => {
+  // Branded terms come from the cross-device sync store; the rest stay local.
+  return Promise.all([
+    browser.storage.local.get(['gscSelectedRange', 'gscHideBranded', 'gscActiveMetrics', 'gscQuerySort']),
+    loadBrandedTermsStore()
+  ]).then(([{ gscSelectedRange: storedRange, gscHideBranded: storedHide, gscActiveMetrics: storedMetrics, gscQuerySort: storedSort }]) => {
     gscSelectedRange = storedRange || 30;
     gscHideBranded = storedHide !== undefined ? storedHide : true;
-    allBrandedTerms = brandedTerms ?? {};
     gscActiveMetrics = storedMetrics || { clicks: true, impressions: true, position: true };
     gscQuerySort = storedSort || { column: 'clicks', direction: 'desc' };
     setGscRangeUI(gscSelectedRange);

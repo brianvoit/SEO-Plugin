@@ -553,10 +553,24 @@
         Back
       </button>
       <span class="bl-header-meta" id="backlinks-header-meta"></span>
+      <button id="btn-backlinks-toxic" class="redirect-retrace-btn hidden" title="Download toxic backlinks as a Search Console disavow file">Export toxic</button>
       <button id="btn-backlinks-gsc" class="redirect-retrace-btn" title="Open the Links report in Search Console (GSC has no links API)">Search Console</button>
       <button id="btn-backlinks-refresh" class="redirect-retrace-btn" title="Re-fetch from Web CEO">Refresh</button>
     </div>
     <div id="backlinks-content"></div>
+  </div>
+
+  <!-- UTM Generator detail panel -->
+  <div id="utm-panel" class="hidden">
+    <div class="settings-header">
+      <button id="btn-utm-back" class="settings-back-btn">
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="10 3 4 8 10 13"/>
+        </svg>
+        Back
+      </button>
+    </div>
+    <div id="utm-content"></div>
   </div>
 
   <!-- Site Audit detail panel (WebCEO) -->
@@ -1507,6 +1521,19 @@
       </button>
     </section>
 
+    <!-- UTM Generator (detail screen) -->
+    <section class="field-section">
+      <button class="field-nav-btn" id="btn-utm">
+        <span class="field-label">UTM GENERATOR</span>
+        <div class="field-nav-right">
+          <span id="utm-summary" class="field-nav-summary"></span>
+          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 3 11 8 6 13"/>
+          </svg>
+        </div>
+      </button>
+    </section>
+
     <!-- Dates -->
     <section class="field-section dates-section">
       <div class="dates-row">
@@ -1584,6 +1611,7 @@
   <script src="popup-settings.js"></script>
   <script src="popup-gsc.js"></script>
   <script src="popup-ga.js"></script>
+  <script src="popup-utm.js"></script>
   <script src="popup-ads.js"></script>
   <script src="popup-addkw.js"></script>
   <script src="popup-webceo.js"></script>

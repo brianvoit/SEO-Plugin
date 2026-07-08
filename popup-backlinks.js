@@ -6,6 +6,7 @@
 let _backlinksData = null;
 let _backlinksLoading = false;
 let _blDomainSort = 'tf';                // 'tf' | 'count'
+let _blThisPageOnly = true;              // default: only backlinks pointing at the current page
 const _blExpanded = new Set();           // referring-domain rows currently expanded
 
 function blNum(n) { return (n == null ? 0 : n).toLocaleString(); }
@@ -78,28 +79,62 @@ function renderBacklinksPanel() {
   const d = _backlinksData;
   if (!el) return;
   const headerMeta = document.getElementById('backlinks-header-meta');
+  const toxicBtn = document.getElementById('btn-backlinks-toxic');
   el.replaceChildren();
   if (!d) {
     if (headerMeta) headerMeta.textContent = '';
+    if (toxicBtn) toxicBtn.classList.add('hidden');
     const h = document.createElement('div'); h.className = 'field-hint'; h.textContent = 'No backlink data.'; el.appendChild(h); return;
   }
 
   // Header meta (in the panel header, between Back and the buttons): scan date + freshness only
   if (headerMeta) headerMeta.textContent = (d.scannedDate ? `scanned ${d.scannedDate}` : '') + (d.fetchedAt ? `${d.scannedDate ? ' · ' : ''}updated ${gscRelativeTime(d.fetchedAt)}` : '');
 
+  // Toxic-export button lives in the header; visible whenever the project has
+  // any toxic referring domains (project-wide, independent of the page filter).
+  if (toxicBtn) {
+    const n = (d.toxicDomains || []).length;
+    toxicBtn.classList.toggle('hidden', !n);
+    toxicBtn.textContent = `Export toxic (${n})`;
+  }
+
+  // "This page only" toggle — filters the whole view to backlinks pointing at
+  // the current page (d.thisPage), on by default.
+  const pageAgg = d.thisPage || null;
+  const toggle = document.createElement('label');
+  toggle.className = 'bl-scope-toggle';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = _blThisPageOnly;
+  cb.addEventListener('change', () => { _blThisPageOnly = cb.checked; _blExpanded.clear(); renderBacklinksPanel(); });
+  const span = document.createElement('span');
+  span.textContent = `This page only${pageAgg ? ` (${blNum(pageAgg.total)})` : ''}`;
+  toggle.append(cb, span);
+  el.appendChild(toggle);
+
+  const view = (_blThisPageOnly && pageAgg) ? pageAgg : d;
+
+  if (_blThisPageOnly && pageAgg && !pageAgg.total) {
+    const h = document.createElement('div');
+    h.className = 'field-hint hint-muted';
+    h.textContent = 'No backlinks point directly at this page. Uncheck “This page only” to see the whole domain.';
+    el.appendChild(h);
+    return;
+  }
+
   // Scorecard
-  const followPct = d.total ? Math.round((d.follow / d.total) * 100) : 0;
+  const followPct = view.total ? Math.round((view.follow / view.total) * 100) : 0;
   const card = document.createElement('div');
   card.className = 'ranking-scorecard bl-scorecard';
-  card.appendChild(blStat('Backlinks', blNum(d.total), d.newLinks ? `${blNum(d.newLinks)} new` : null, ''));
-  card.appendChild(blStat('Ref. domains', blNum(d.referringDomains), (d.avgTF != null ? `TF avg ${d.avgTF}` : null), 'ranking-stat--primary'));
-  card.appendChild(blStat('Follow', followPct + '%', `${blNum(d.nofollow)} nofollow`, ''));
-  card.appendChild(blStat('Toxic', blNum(d.toxic), null, d.toxic ? 'bl-stat--warn' : ''));
+  card.appendChild(blStat('Backlinks', blNum(view.total), view.newLinks ? `${blNum(view.newLinks)} new` : null, ''));
+  card.appendChild(blStat('Ref. domains', blNum(view.referringDomains), (view.avgTF != null ? `TF avg ${view.avgTF}` : null), 'ranking-stat--primary'));
+  card.appendChild(blStat('Follow', followPct + '%', `${blNum(view.nofollow)} nofollow`, ''));
+  card.appendChild(blStat('Toxic', blNum(view.toxic), null, view.toxic ? 'bl-stat--warn' : ''));
   el.appendChild(card);
 
-  renderBlReferringDomains(el, d);
-  renderBlAnchors(el, d);
-  renderBlTargets(el, d);
+  renderBlReferringDomains(el, view);
+  renderBlAnchors(el, view);
+  renderBlTargets(el, view);
 }
 
 function renderBlReferringDomains(el, d) {
@@ -268,7 +303,36 @@ function renderBlTargets(el, d) {
   el.appendChild(sec);
 }
 
+// Build + download a Google Search Console disavow file for the project's
+// toxic referring domains. Domain-level (`domain:<host>`) entries are the
+// recommended granularity for spammy/toxic links — one line disavows every
+// URL from that domain. Format ref:
+// https://support.google.com/webmasters/answer/2648487
+function exportToxicDisavow() {
+  const d = _backlinksData;
+  const domains = (d && d.toxicDomains) || [];
+  if (!domains.length) return;
+  const stamp = new Date().toISOString().slice(0, 10);
+  const lines = [
+    `# Disavow file — toxic backlinks for ${d.domain || d.host || 'site'}`,
+    `# Generated ${stamp} by SEO Inspector`,
+    '# Upload at https://search.google.com/search-console/disavow-links',
+    '',
+    ...domains.map(dom => `domain:${dom}`)
+  ];
+  const blob = new Blob([lines.join('\n') + '\n'], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `disavow-${(d.domain || d.host || 'site').replace(/[^a-z0-9.-]/gi, '_')}-${stamp}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 // Panel header buttons
+document.getElementById('btn-backlinks-toxic').addEventListener('click', exportToxicDisavow);
 document.getElementById('btn-backlinks-refresh').addEventListener('click', () => loadBacklinksData(true));
 // Search Console has no links API — open its native Links report for this property
 document.getElementById('btn-backlinks-gsc').addEventListener('click', () => {

@@ -506,7 +506,7 @@ function appendOGRow(container, key, value, insights = null) {
     valueEl = document.createElement('span');
     valueEl.className = isUrl ? 'og-value og-value--link' : 'og-value';
     valueEl.title = value;
-    valueEl.textContent = value.length > 42 ? value.slice(0, 42) + '…' : value;
+    valueEl.textContent = value;   // full value — the row wraps rather than truncating
     line.appendChild(valueEl);
   }
 

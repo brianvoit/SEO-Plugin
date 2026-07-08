@@ -1390,6 +1390,70 @@ async function gaRunReport(accessToken, property, body) {
   return res.json();
 }
 
+// Distinct source / medium / campaign values GA4 has already recorded for the
+// current page (last 90d) — used by the UTM Generator to offer autofill
+// chips of values that already exist for this URL. Never throws: any failure
+// (not connected, no property, API error) resolves to a graceful shape the
+// panel treats as "no GA chips", so UTM building always works.
+const GA_UTM_VALUES_TTL_MS = 10 * 60 * 1000;
+const _gaUtmValuesCache = new Map();   // `${property}::${path}` → { at, sources, mediums, campaigns }
+async function gaGetPageUtmValues({ pageUrl, measurementId }) {
+  const tokenResult = await gaGetAccessToken();
+  if (tokenResult.error) return { connected: false };
+  const accessToken = tokenResult.accessToken;
+
+  const host = gscPageHost(pageUrl);
+  let property = await gaGetProperty(host);
+  if (!property && measurementId) {
+    try {
+      const properties = await gaFetchProperties(accessToken);
+      property = await gaMatchMeasurementId(measurementId, properties, accessToken);
+    } catch { /* fall through */ }
+  }
+  if (!property) return { connected: true, property: null };
+
+  let path = '/';
+  try { path = new URL(pageUrl).pathname; } catch { /* keep root */ }
+
+  const cacheKey = `${property}::${path}`;
+  const hit = _gaUtmValuesCache.get(cacheKey);
+  if (hit && (Date.now() - hit.at < GA_UTM_VALUES_TTL_MS)) {
+    return { connected: true, property, sources: hit.sources, mediums: hit.mediums, campaigns: hit.campaigns };
+  }
+
+  const NOISE = new Set(['', '(not set)', '(none)', '(direct)', '(data not available)']);
+  let data;
+  try {
+    data = await gaRunReport(accessToken, property, {
+      dateRanges: [{ startDate: '90daysAgo', endDate: 'yesterday' }],
+      dimensions: [{ name: 'sessionSource' }, { name: 'sessionMedium' }, { name: 'sessionCampaignName' }],
+      metrics: [{ name: 'sessions' }],
+      dimensionFilter: { filter: { fieldName: 'pagePath', stringFilter: { matchType: 'EXACT', value: path } } },
+      orderBys: [{ metric: { metricName: 'sessions' }, desc: true }],
+      limit: 50
+    });
+  } catch (err) {
+    return { connected: true, property, error: err.code || 'API_ERROR', detail: err.detail };
+  }
+
+  // Preserve GA's sessions-desc order while de-duping each dimension.
+  const pick = (idx) => {
+    const seen = new Set();
+    const out = [];
+    (data.rows || []).forEach(r => {
+      const v = (r.dimensionValues && r.dimensionValues[idx] && r.dimensionValues[idx].value || '').trim();
+      const lc = v.toLowerCase();
+      if (NOISE.has(lc) || seen.has(lc)) return;
+      seen.add(lc);
+      out.push(v);
+    });
+    return out.slice(0, 15);
+  };
+  const result = { sources: pick(0), mediums: pick(1), campaigns: pick(2) };
+  _gaUtmValuesCache.set(cacheKey, { at: Date.now(), ...result });
+  return { connected: true, property, ...result };
+}
+
 // GA data lags ~1 day (vs. GSC's ~3), so ranges end yesterday
 function gaDateRanges(range) {
   const end = new Date();
@@ -3121,6 +3185,55 @@ function webceoBacklinkDomain(url) {
   try { return new URL(/^https?:\/\//.test(url) ? url : 'http://' + url).hostname.replace(/^www\./, ''); }
   catch { return String(url || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0]; }
 }
+
+// Same on-site page? Compares host + path (www-insensitive, trailing-slash-
+// insensitive, ignoring query/hash) so a backlink's target page can be
+// matched against the page currently being inspected.
+function webceoSamePage(a, b) {
+  const norm = (u) => {
+    if (!u) return '';
+    try {
+      const url = new URL(/^https?:\/\//.test(u) ? u : 'https://' + u);
+      const host = url.hostname.replace(/^www\./i, '').toLowerCase();
+      const path = url.pathname.replace(/\/+$/, '') || '/';
+      return host + path;
+    } catch { return String(u).trim().toLowerCase(); }
+  };
+  return !!a && !!b && norm(a) === norm(b);
+}
+
+// The raw get_backlinks list is large and only needed for client-side
+// re-aggregation (all vs. this-page) and the toxic export — keep just the
+// fields webceoAggregateBacklinks reads, capped so the cache stays well
+// under the storage quota.
+const WEBCEO_RAW_BACKLINK_CAP = 6000;
+function webceoTrimBacklinks(list) {
+  return (list || []).slice(0, WEBCEO_RAW_BACKLINK_CAP).map(l => ({
+    page_url: l.page_url, title: l.title, link_text: l.link_text,
+    link_target_page: l.link_target_page, link_nofollow: l.link_nofollow,
+    link_status: l.link_status, link_sitewide: l.link_sitewide, is_new: l.is_new,
+    domain_trusted_flow: l.domain_trusted_flow, domain_citation_flow: l.domain_citation_flow,
+    domain_primary_topic: l.domain_primary_topic, url_trusted_flow: l.url_trusted_flow,
+    first_discovered: l.first_discovered
+  }));
+}
+
+// Builds the popup payload from a cached raw-link entry: the whole-project
+// aggregate, a page-scoped aggregate (links whose target is the current
+// page), and the full deduped list of toxic referring domains for the
+// disavow export (uncapped, unlike the per-domain link samples).
+function webceoBuildBacklinksView(entry, pageUrl) {
+  const raw = entry.rawLinks || [];
+  const all = webceoAggregateBacklinks(raw);
+  const thisPage = webceoAggregateBacklinks(raw.filter(l => webceoSamePage(l.link_target_page, pageUrl)));
+  const toxSet = new Set();
+  raw.forEach(l => { if ((l.link_status || '') === 'toxic') { const d = webceoBacklinkDomain(l.page_url); if (d) toxSet.add(d); } });
+  return {
+    host: entry.host, project: entry.project, projectName: entry.projectName,
+    domain: entry.domain, scannedDate: entry.scannedDate, fetchedAt: entry.fetchedAt,
+    ...all, thisPage, toxicDomains: [...toxSet].sort()
+  };
+}
 function webceoAggregateBacklinks(links) {
   const domMap = new Map(), anchorMap = new Map(), targetMap = new Map();
   let follow = 0, nofollow = 0, toxic = 0, disavowed = 0, newLinks = 0, sitewide = 0;
@@ -3176,25 +3289,26 @@ async function webceoGetBacklinks({ pageUrl, forceRefresh = false }) {
   const { webceoBacklinksCache } = await browser.storage.local.get('webceoBacklinksCache');
   const cache = webceoBacklinksCache || {};
   const cached = cache[cacheKey];
-  if (!forceRefresh && cached && (Date.now() - cached.fetchedAt < WEBCEO_BACKLINKS_STALE_MS)) {
-    return { connected: true, ...cached, fromCache: true };
+  // `rawLinks` guard: entries cached by an older build hold only the
+  // aggregate, so treat those as stale and re-fetch to populate rawLinks.
+  if (!forceRefresh && cached && cached.rawLinks && (Date.now() - cached.fetchedAt < WEBCEO_BACKLINKS_STALE_MS)) {
+    return { connected: true, ...webceoBuildBacklinksView(cached, pageUrl), fromCache: true };
   }
 
   const res = await webceoCall('get_backlinks', { project: project.project });
   if (res.error) return { connected: true, error: res.error, detail: res.detail };
 
   const projInfo = project.projects.find(p => p.project === project.project);
-  const agg = webceoAggregateBacklinks(res.data && res.data.data);
   const entry = {
     fetchedAt: Date.now(), host, project: project.project,
     projectName: projInfo ? projInfo.name : '',
     domain: (res.data && res.data.domain) || (projInfo && projInfo.domain) || host,
     scannedDate: (res.data && res.data.scanned_date) || null,
-    ...agg
+    rawLinks: webceoTrimBacklinks(res.data && res.data.data)
   };
   cache[cacheKey] = entry;
   await browser.storage.local.set({ webceoBacklinksCache: cache });
-  return { connected: true, ...entry, fromCache: false };
+  return { connected: true, ...webceoBuildBacklinksView(entry, pageUrl), fromCache: false };
 }
 
 // Site Audit (get_site_audit_data). Trims the (potentially large) per-page
@@ -3719,6 +3833,7 @@ browser.runtime.onMessage.addListener((message) => {
     case 'gaResolveProperty':  return gaResolveProperty(message);
     case 'gaSetProperty':      return gaSetProperty(message);
     case 'gaGetPageData':      return gaGetPageData(message);
+    case 'gaGetPageUtmValues': return gaGetPageUtmValues(message);
     case 'gaGetChannelData':   return gaGetChannelData(message);
     case 'adsGetStatus':       return adsGetStatus();
     case 'adsConnect':         return adsConnect();

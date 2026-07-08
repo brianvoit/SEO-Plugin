@@ -1228,6 +1228,10 @@ async function ga4AddAnnotation({ pageUrl, date, title, description }) {
 
   const body = {
     title: String(title || '').slice(0, 128) || 'Annotation',
+    // Required enum — omitting it makes the API default to COLOR_UNSPECIFIED,
+    // which it then rejects ("invalid enum value COLOR_UNSPECIFIED"). Valid
+    // values: PURPLE, BROWN, BLUE, GREEN, RED, CYAN, ORANGE.
+    color: 'BLUE',
     annotationDate: { year: y, month: m, day: d }
   };
   if (description) body.description = String(description).slice(0, 1024);
@@ -3295,12 +3299,17 @@ async function webceoAddEvent({ pageUrl, date, text }) {
   if (resolved.error) return { connected: true, error: resolved.error, detail: resolved.detail };
   if (!resolved.project) return { connected: true, error: 'NO_PROJECT' };
 
+  // The API wants a singular `project` (an array yields "'project' parameter
+  // is required") and a required, explicit `tools` list (omitting it yields
+  // "'tools' parameter is required"). The full tool set below applies the
+  // event to every tool — matching Web CEO's native "Create a new event"
+  // dialog, which checks all tools by default.
   const res = await webceoCall('add_event', {
-    projects: [resolved.project],
+    project: resolved.project,
     date,
     text: String(text || '').slice(0, 500),
     visibility: 'public',
-    tools: ['ranker', 'stats', 'backlinks', 'auditor'],
+    tools: ['advisor', 'auditor', 'backlinks', 'business', 'competitorlinks', 'competitorstats', 'buzz', 'facebook', 'interlinks', 'links', 'partners', 'ranker', 'social', 'stats', 'submission', 'webmasters'],
     charts_visibility: 1
   });
   if (res.error) return { connected: true, error: res.error, detail: res.detail };

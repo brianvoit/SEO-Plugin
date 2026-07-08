@@ -312,10 +312,59 @@ function attachTooltip(label, tooltipText) {
 
 // ─── Overlay: fixed-position container, never touches page DOM structure ──────
 
-function buildLabel(img) {
+function makeOverlayLabel(bg, statusText, tooltipText) {
   const label = document.createElement('div');
   label.setAttribute(OVERLAY_ATTR, 'true');
+  label.style.cssText = [
+    'position:fixed',          // positioned by applyOverlay / updatePositions
+    `background:${bg}`,
+    'color:#fff',
+    'padding:3px 6px',
+    'font:600 11px/1.4 -apple-system,system-ui,"Segoe UI",sans-serif',
+    'overflow:hidden',
+    'white-space:nowrap',
+    'text-overflow:ellipsis',
+    'z-index:2147483647',
+    'pointer-events:auto',
+    'box-sizing:border-box',
+    'cursor:default',
+  ].join(';');
+  label.textContent = statusText;
+  attachTooltip(label, tooltipText);
+  return label;
+}
 
+// A link's accessible name, in the same precedence order a screen reader
+// would use: visible text, aria-label, aria-labelledby, title, then an inner
+// image's alt text. Empty string means nothing announces anything.
+function linkAccessibleText(a) {
+  const visible = (a.innerText || a.textContent || '').replace(/\s+/g, ' ').trim();
+  if (visible) return visible;
+  const ariaLabel = a.getAttribute('aria-label');
+  if (ariaLabel && ariaLabel.trim()) return ariaLabel.trim();
+  const ariaLabelledBy = a.getAttribute('aria-labelledby');
+  if (ariaLabelledBy) {
+    const t = ariaLabelledBy.split(/\s+/)
+      .map(id => document.getElementById(id)?.textContent?.trim())
+      .filter(Boolean).join(' ');
+    if (t) return t;
+  }
+  const title = a.getAttribute('title');
+  if (title && title.trim()) return title.trim();
+  const imgWithAlt = a.querySelector('img[alt]:not([alt=""])');
+  if (imgWithAlt) return imgWithAlt.getAttribute('alt').trim();
+  return '';
+}
+
+function buildEmptyLinkLabel() {
+  return makeOverlayLabel(
+    'rgba(220,38,38,0.92)',
+    'EMPTY LINK TEXT',
+    'This link has no accessible text — screen readers announce nothing meaningful. Add visible text, an aria-label, or alt text on an inner image.'
+  );
+}
+
+function buildLabel(img) {
   const hasAlt        = img.hasAttribute('alt');
   const altText       = img.getAttribute('alt') ?? '';
   const ariaLabel     = img.getAttribute('aria-label');
@@ -354,24 +403,7 @@ function buildLabel(img) {
     tooltipText = altText;
   }
 
-  label.style.cssText = [
-    'position:fixed',          // positioned by applyOverlay / updatePositions
-    `background:${bg}`,
-    'color:#fff',
-    'padding:3px 6px',
-    'font:600 11px/1.4 -apple-system,system-ui,"Segoe UI",sans-serif',
-    'overflow:hidden',
-    'white-space:nowrap',
-    'text-overflow:ellipsis',
-    'z-index:2147483647',
-    'pointer-events:auto',
-    'box-sizing:border-box',
-    'cursor:default',
-  ].join(';');
-
-  label.textContent = statusText;
-  attachTooltip(label, tooltipText);
-  return label;
+  return makeOverlayLabel(bg, statusText, tooltipText);
 }
 
 function applyOverlay() {
@@ -390,22 +422,32 @@ function applyOverlay() {
   ].join(';');
   document.body.appendChild(container);
 
-  // Build one label per visible image and store img reference
+  // Build one label per visible image, plus one per link with no accessible
+  // text (nothing a screen reader would announce) — both share the same
+  // fixed-position label + reposition-on-scroll machinery below.
   const entries = [];
   document.querySelectorAll('img').forEach(img => {
     const rect = img.getBoundingClientRect();
     if (rect.width < 4 || rect.height < 4) return;
     const label = buildLabel(img);
     container.appendChild(label);
-    entries.push({ img, label });
+    entries.push({ el: img, label });
+  });
+  document.querySelectorAll('a[href]').forEach(a => {
+    const rect = a.getBoundingClientRect();
+    if (rect.width < 4 || rect.height < 4) return;
+    if (linkAccessibleText(a)) return;
+    const label = buildEmptyLinkLabel();
+    container.appendChild(label);
+    entries.push({ el: a, label });
   });
 
   container._entries = entries;
 
-  // Position every label to match its image's current viewport rect
+  // Position every label to match its element's current viewport rect
   function updatePositions() {
-    entries.forEach(({ img, label }) => {
-      const r = img.getBoundingClientRect();
+    entries.forEach(({ el, label }) => {
+      const r = el.getBoundingClientRect();
       const offscreen = r.bottom < 0 || r.top > window.innerHeight ||
                         r.right  < 0 || r.left > window.innerWidth;
       if (offscreen || r.width < 4 || r.height < 4) {

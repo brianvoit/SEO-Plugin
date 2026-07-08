@@ -806,6 +806,18 @@ function renderFavicon(data) {
   setNavStatus('favicon-status', faviconStaticLevel(fav));
 }
 
+// Numeric sort key for "largest first" ordering — SVGs scale to any size so
+// they sort as largest; unresolved/unreachable icons sort last (not 0, so
+// they don't outrank a genuinely tiny 16×16 raster icon).
+function faviconSortArea(live, href) {
+  const r = live && live.results ? live.results[href] : null;
+  if (!r) return -1;
+  if (r.scalable) return Infinity;
+  if (r.icoSizes && r.icoSizes.length) return r.icoSizes.reduce((max, s) => Math.max(max, s.width * s.height), 0);
+  if (r.width && r.height) return r.width * r.height;
+  return -1;
+}
+
 // Human-readable actual pixel size of a probed icon (null until the live check
 // resolves, or if it couldn't be measured).
 function faviconActualSize(live, href) {
@@ -883,7 +895,7 @@ function buildFaviconChecks(fav, live) {
   const std = icons.filter(faviconIsStandard);
   const apple = icons.filter(faviconIsApple);
   const raster = faviconRasterSizes(icons);
-  const push = (group, label, level) => checks.push({ group, label, level });
+  const push = (group, label, level, value) => checks.push({ group, label, level, value: value || null });
 
   // ── Classic & SVG favicon ──
   const G1 = 'CLASSIC & SVG FAVICON';
@@ -903,20 +915,18 @@ function buildFaviconChecks(fav, live) {
   const has96 = raster.has('96x96');
   push(G1, has96 ? '96x96 desktop PNG favicon declared' : 'No 96x96 desktop PNG favicon', has96 ? 'pass' : 'warn');
 
-  push(G1, icoIcon ? 'ICO favicon is declared' : 'No .ico favicon declared (browsers still request /favicon.ico as a fallback)',
+  // "Declared" = markup says there's an .ico (a <link> tag points at one).
+  // "Reachable" = the actual URL (that declared link, or /favicon.ico as the
+  // browser-default fallback when nothing declares one) was fetched live and
+  // returned a working image. A site can pass one and fail the other —
+  // e.g. a declared .ico that 404s, or no <link> at all but /favicon.ico
+  // still works.
+  push(G1, icoIcon ? 'ICO favicon declared via <link> tag' : 'No .ico <link> tag declared (browsers still request /favicon.ico as a fallback)',
     icoIcon ? 'pass' : 'warn');
 
   if (live) {
-    push(G1, icoWorks ? 'ICO favicon found' : 'ICO favicon not found (checked ' + (icoIcon ? 'declared icon' : '/favicon.ico') + ')',
+    push(G1, icoWorks ? `ICO file is reachable (${icoIcon ? 'declared link' : '/favicon.ico fallback'})` : `ICO file not reachable at ${icoUrl || '/favicon.ico'}`,
       icoWorks ? 'pass' : 'warn');
-
-    if (icoWorks) {
-      const icoDims = new Set((icoLive.icoSizes || []).map(s => `${s.width}x${s.height}`));
-      const wantIco = ['16x16', '32x32', '48x48'];
-      const missingIco = wantIco.filter(d => !icoDims.has(d));
-      push(G1, missingIco.length ? `ICO favicon is missing expected sizes (${missingIco.join(', ')})` : 'ICO favicon has the expected sizes (48x48, 32x32, 16x16)',
-        missingIco.length ? 'warn' : 'pass');
-    }
   }
 
   if (icons.length && live && live.results) {
@@ -929,11 +939,28 @@ function buildFaviconChecks(fav, live) {
       broken.length ? 'fail' : notImage.length ? 'warn' : 'pass');
   }
 
-  const has16 = raster.has('16x16'), has32 = raster.has('32x32');
-  push(G1, has16 && has32 ? '16x16 and 32x32 sizes declared'
-    : raster.size ? 'Missing a recommended 16x16 or 32x32 size'
-    : 'No explicit raster sizes declared (16x16 / 32x32)',
-    has16 && has32 ? 'pass' : 'warn');
+  // One answer per key raster size, satisfied by EITHER a declared sizes=""
+  // attribute OR that size being packed inside the .ico file — the two
+  // sources are combined so they can never appear to contradict each other
+  // (e.g. "no sizes=16x16 attribute" while the .ico clearly contains a
+  // 16x16). The value column notes which source provided it. Gated on the
+  // live probe so the .ico contents are known before we judge. 48x48 only
+  // ever comes from an .ico, so it's only reported when one is reachable.
+  if (live) {
+    const icoDims = new Set((icoWorks && icoLive.icoSizes || []).map(s => `${s.width}x${s.height}`));
+    const sizeSource = d => {
+      const inAttr = raster.has(d), inIco = icoDims.has(d);
+      return { have: inAttr || inIco, src: (inAttr && inIco) ? 'declared + .ico' : inIco ? 'in .ico file' : inAttr ? 'declared' : '' };
+    };
+    ['16x16', '32x32'].forEach(d => {
+      const { have, src } = sizeSource(d);
+      push(G1, have ? `${d} favicon available` : `No ${d} favicon (declared size or inside .ico)`, have ? 'pass' : 'warn', src);
+    });
+    if (icoWorks) {
+      const { have, src } = sizeSource('48x48');
+      push(G1, have ? '48x48 favicon available' : 'No 48x48 image inside the .ico file', have ? 'pass' : 'warn', src);
+    }
+  }
 
   // ── Touch icon ──
   const G2 = 'TOUCH ICON';
@@ -956,12 +983,13 @@ function buildFaviconChecks(fav, live) {
       push(G3, 'Web app manifest referenced but could not be read', 'warn');
     } else {
       push(G3, 'Web app manifest referenced', 'pass');
-      push(G3, m.name ? 'Web app manifest has a name' : 'Web app manifest has no name', m.name ? 'pass' : 'warn');
-      push(G3, m.shortName ? 'Web app manifest has a short_name' : 'Web app manifest has no short_name', m.shortName ? 'pass' : 'warn');
+      push(G3, m.name ? 'Web app manifest has a name' : 'Web app manifest has no name', m.name ? 'pass' : 'warn', m.name);
+      push(G3, m.shortName ? 'Web app manifest has a short_name' : 'Web app manifest has no short_name', m.shortName ? 'pass' : 'warn', m.shortName);
       push(G3, m.has192 ? 'Web app manifest has a 192x192 icon' : 'Web app manifest has no 192x192 icon', m.has192 ? 'pass' : 'warn');
       push(G3, m.has512 ? 'Web app manifest has a 512x512 icon' : 'Web app manifest has no 512x512 icon', m.has512 ? 'pass' : 'warn');
+      const colorVal = [m.backgroundColor && `bg ${m.backgroundColor}`, m.themeColor && `theme ${m.themeColor}`].filter(Boolean).join(' · ');
       push(G3, m.backgroundColor && m.themeColor ? 'Web app manifest declares background and theme color' : 'Web app manifest is missing a background_color or theme_color',
-        m.backgroundColor && m.themeColor ? 'pass' : 'warn');
+        m.backgroundColor && m.themeColor ? 'pass' : 'warn', colorVal);
     }
   } else {
     push(G3, 'No web app manifest (optional, for PWA install)', 'warn');
@@ -991,21 +1019,34 @@ function renderFaviconDetail() {
   th.appendChild(tl);
   tableSec.appendChild(th);
 
-  if (!icons.length) {
+  // The default /favicon.ico location is always probed (validateFavicon
+  // includes it regardless of whether a <link> declares it), but wasn't
+  // shown as its own row unless something already declared that exact URL —
+  // synthesize a display-only entry so it's visible even when undeclared.
+  const displayIcons = icons.slice();
+  if (fav && fav.defaultIcoUrl && !icons.some(i => i.href === fav.defaultIcoUrl)) {
+    displayIcons.push({ href: fav.defaultIcoUrl, rel: 'icon', type: '', sizes: '', synthetic: true });
+  }
+  // Largest first — a scan of "what do we have" reads better biggest-to-smallest.
+  displayIcons.sort((a, b) => faviconSortArea(live, b.href) - faviconSortArea(live, a.href));
+
+  if (!displayIcons.length) {
     const hint = document.createElement('div');
     hint.className = 'field-hint hint-muted';
     hint.textContent = 'No <link> icon tags on this page.';
     tableSec.appendChild(hint);
   } else {
-    icons.forEach(i => {
+    displayIcons.forEach(i => {
       const row = document.createElement('div');
       row.className = 'hl-row';
 
       const tag = document.createElement('span');
       tag.className = 'hl-lang';
-      tag.textContent = faviconSizeTokens(i)[0]
-        || (faviconIsApple(i) ? 'apple' : faviconIsMask(i) ? 'mask' : faviconIsSvg(i) ? 'svg' : 'icon');
-      tag.title = [i.rel, i.type, i.sizes].filter(Boolean).join(' · ');
+      tag.textContent = i.synthetic ? 'default'
+        : faviconSizeTokens(i)[0] || (faviconIsApple(i) ? 'apple' : faviconIsMask(i) ? 'mask' : faviconIsSvg(i) ? 'svg' : 'icon');
+      tag.title = i.synthetic
+        ? 'Not declared via <link> — found at the default /favicon.ico location'
+        : [i.rel, i.type, i.sizes].filter(Boolean).join(' · ');
 
       const hrefEl = document.createElement('span');
       hrefEl.className = 'hl-href favicon-href';
@@ -1055,6 +1096,12 @@ function renderFaviconDetail() {
       label.className = 'hl-check-label';
       label.textContent = c.label;
       row.append(icon, label);
+      if (c.value) {
+        const val = document.createElement('span');
+        val.className = 'hl-check-value';
+        val.textContent = c.value;
+        row.appendChild(val);
+      }
       checkSec.appendChild(row);
     });
     content.appendChild(checkSec);
@@ -1245,12 +1292,25 @@ function schemaImageUrl(s) {
   return /^https?:\/\/\S+\.(jpe?g|png|webp|gif|svg|avif|bmp|ico)(\?\S*)?$/i.test(t) ? t : null;
 }
 
+// schema.org property/type pages live at https://schema.org/<Name> for both
+// (e.g. schema.org/name, schema.org/WebPage) — array-index keys like
+// "itemListElement[1]" need the "[n]" suffix stripped first or the link 404s.
+function schemaOrgUrl(name) {
+  return `https://schema.org/${encodeURIComponent(name.replace(/\[\d+\]$/, ''))}`;
+}
+
 function appendSchemaRow(container, key, valueText, title) {
   const row = document.createElement('div');
   row.className = 'schema-prop';
-  const keyEl = document.createElement('span');
+  const keyEl = document.createElement('a');
   keyEl.className = 'schema-key';
   keyEl.textContent = key;
+  keyEl.href = '#';
+  keyEl.title = `View "${key}" on schema.org`;
+  keyEl.addEventListener('click', e => {
+    e.preventDefault();
+    browser.tabs.create({ url: schemaOrgUrl(key) });
+  });
   const valEl = document.createElement('span');
   valEl.className = 'schema-val';
   valEl.textContent = valueText;
@@ -1404,13 +1464,29 @@ function renderSchemaEntityBody(node, container, byId, seenIds) {
 // A top-level entity card: blue type header + body. Inlined linked entities
 // use renderSchemaEntityBody directly (their type is already on the key row).
 function renderSchemaEntity(node, container, byId, seenIds) {
-  const type = [].concat(node['@type']).join(' + ') || 'Unknown';
+  const types = [].concat(node['@type']).filter(Boolean);
   const card = document.createElement('div');
   card.className = 'schema-card';
 
   const header = document.createElement('div');
   header.className = 'schema-type-name';
-  header.textContent = type;
+  if (types.length) {
+    types.forEach((t, i) => {
+      if (i > 0) header.appendChild(document.createTextNode(' + '));
+      const link = document.createElement('a');
+      link.className = 'schema-type-link';
+      link.textContent = t;
+      link.href = '#';
+      link.title = `View "${t}" on schema.org`;
+      link.addEventListener('click', e => {
+        e.preventDefault();
+        browser.tabs.create({ url: schemaOrgUrl(t) });
+      });
+      header.appendChild(link);
+    });
+  } else {
+    header.textContent = 'Unknown';
+  }
   card.appendChild(header);
 
   renderSchemaEntityBody(node, card, byId, seenIds);
@@ -1506,7 +1582,7 @@ function renderSchemaSuggestions() {
       typeLink.href = '#';
       typeLink.addEventListener('click', e => {
         e.preventDefault();
-        browser.tabs.create({ url: `https://schema.org/${encodeURIComponent(s.type)}` });
+        browser.tabs.create({ url: schemaOrgUrl(s.type) });
       });
       const badge = document.createElement('span');
       badge.className = `schema-suggestion-priority schema-suggestion-priority--${s.priority}`;
@@ -1533,7 +1609,7 @@ function renderSchemaSuggestions() {
     const btn = document.createElement('button');
     btn.className = 'schema-suggest-btn';
     btn.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M8 1l1.4 4.6L14 7l-4.6 1.4L8 13l-1.4-4.6L2 7l4.6-1.4z"/></svg>'));
-    btn.appendChild(document.createTextNode(' Suggest with Claude'));
+    btn.appendChild(document.createTextNode(' Optimize'));
     btn.addEventListener('click', () => loadSchemaSuggestions(claudeApiKey));
     sec.appendChild(btn);
   });

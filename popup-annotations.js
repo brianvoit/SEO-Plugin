@@ -35,11 +35,18 @@ async function openAnnotationModal() {
   dateEl.value = annotationTodayISO();
   dateEl.max = annotationTodayISO();
   document.getElementById('annotation-status').classList.add('hidden');
+  document.getElementById('annotation-ga-check').classList.add('hidden');
+  document.getElementById('annotation-webceo-check').classList.add('hidden');
   const gaCb = document.getElementById('annotation-ga');
   const wcCb = document.getElementById('annotation-webceo');
-  gaCb.checked = false; wcCb.checked = false; gaCb.disabled = true; wcCb.disabled = true;
-  document.getElementById('annotation-ga-label').textContent = 'Google Analytics — checking…';
-  document.getElementById('annotation-webceo-label').textContent = 'Web CEO — checking…';
+  const gaRow = gaCb.closest('.annotation-target');
+  const wcRow = wcCb.closest('.annotation-target');
+  // Only connected destinations are shown at all — hide both rows until the
+  // resolve below confirms which apply to this page, rather than listing
+  // disconnected tools as disabled rows.
+  gaCb.checked = false; wcCb.checked = false;
+  gaRow.classList.add('hidden'); wcRow.classList.add('hidden');
+  showAnnotationStatus('Checking connections…', false);
   overlay.classList.remove('hidden');
   document.getElementById('annotation-text').focus();
 
@@ -55,13 +62,13 @@ async function openAnnotationModal() {
 
   const gaOk = !!(ga && ga.connected && !ga.error && ga.property);
   const wcOk = !!(wc && wc.connected && !wc.error && wc.project);
-  gaCb.disabled = !gaOk; gaCb.checked = gaOk;
-  wcCb.disabled = !wcOk; wcCb.checked = wcOk;
-  document.getElementById('annotation-ga-label').textContent = gaOk ? 'Google Analytics'
-    : (ga && ga.connected ? 'Google Analytics — no property here' : 'Google Analytics — not connected');
-  document.getElementById('annotation-webceo-label').textContent = wcOk ? 'Web CEO'
-    : (wc && wc.connected ? 'Web CEO — no project here' : 'Web CEO — not connected');
-  if (!gaOk && !wcOk) showAnnotationStatus('Connect GA4 or Web CEO for this domain first.', true);
+  gaRow.classList.toggle('hidden', !gaOk); gaCb.checked = gaOk;
+  wcRow.classList.toggle('hidden', !wcOk); wcCb.checked = wcOk;
+  if (!gaOk && !wcOk) {
+    showAnnotationStatus('Connect GA4 or Web CEO for this domain first.', true);
+  } else {
+    document.getElementById('annotation-status').classList.add('hidden');
+  }
 }
 
 function closeAnnotationModal() {
@@ -100,21 +107,26 @@ async function saveAnnotation() {
       showAnnotationStatus('GA4 needs one-time permission to write annotations.', true, 'Grant access', grantGaEditAndRetry);
       return;
     }
-    results.push(['Google Analytics', !!(r && r.ok), r]);
+    results.push(['Google Analytics', !!(r && r.ok), r, 'annotation-ga-check']);
   }
   if (doWc) {
     const r = await sendMessageWithTimeout({ action: 'webceoAddEvent', pageUrl: _annotationPageUrl, date, text }).catch(() => null);
-    results.push(['Web CEO', !!(r && r.ok), r]);
+    results.push(['Web CEO', !!(r && r.ok), r, 'annotation-webceo-check']);
   }
 
   _annotationBusy = false;
   saveBtn.disabled = false; saveBtn.textContent = 'Add';
 
+  // Success shows as a green check on that destination's own row; only
+  // failures fall through to the status line below the list.
+  results.forEach(([, ok, , checkId]) => {
+    document.getElementById(checkId).classList.toggle('hidden', !ok);
+  });
+
   if (results.every(x => x[1])) {
-    showAnnotationStatus('Annotation added ✓', false);
     setTimeout(closeAnnotationModal, 900);
   } else {
-    showAnnotationStatus(results.map(([name, ok, r]) => `${name}: ${ok ? 'added' : annotationErr(r)}`).join(' · '), true);
+    showAnnotationStatus(results.filter(x => !x[1]).map(([name, , r]) => `${name}: ${annotationErr(r)}`).join(' · '), true);
   }
 }
 
@@ -132,6 +144,7 @@ async function grantGaEditAndRetry() {
 
 document.getElementById('btn-ga-annotation').addEventListener('click', openAnnotationModal);
 document.getElementById('btn-ranking-annotation').addEventListener('click', openAnnotationModal);
+document.getElementById('btn-ads-annotation').addEventListener('click', openAnnotationModal);
 document.getElementById('btn-annotation-cancel').addEventListener('click', closeAnnotationModal);
 document.getElementById('btn-annotation-save').addEventListener('click', saveAnnotation);
 document.getElementById('annotation-modal').addEventListener('mousedown', (e) => {

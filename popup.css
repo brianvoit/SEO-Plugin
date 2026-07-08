@@ -1377,6 +1377,8 @@ body.settings-open #update-footer { margin-top: auto; }
   color: var(--accent);
   margin-bottom: 6px;
 }
+.schema-type-link { color: inherit; text-decoration: none; cursor: pointer; }
+.schema-type-link:hover { text-decoration: underline; }
 .schema-prop {
   display: flex;
   gap: 8px;
@@ -1389,7 +1391,10 @@ body.settings-open #update-footer { margin-top: auto; }
   font-weight: 500;
   min-width: 90px;
   flex-shrink: 0;
+  text-decoration: none;
+  cursor: pointer;
 }
+.schema-key:hover { text-decoration: underline; }
 .schema-val {
   color: var(--text-muted);
   flex: 1;
@@ -2588,9 +2593,7 @@ body.settings-open #update-footer { margin-top: auto; }
 .ads-addkw-err { font-size: 10px; color: var(--hint-red); }
 
 /* ── "+ Annotation" (GA4 + Web CEO) ───────────────────────────────────────── */
-.annotation-meta-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.annotation-meta-row .field-hint,
-.annotation-meta-row .field-sub { margin: 0; flex: 1 1 auto; min-width: 0; }
+.annotation-row { display: flex; justify-content: flex-end; margin-bottom: 6px; }
 .annotation-btn {
   flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 6px;
   border: 1px solid var(--accent); color: var(--accent); background: transparent; cursor: pointer;
@@ -2613,6 +2616,7 @@ body.settings-open #update-footer { margin-top: auto; }
 .annotation-target input { margin: 0; }
 .annotation-target input:disabled { cursor: default; }
 .annotation-target input:disabled + span { color: var(--text-none); }
+.annotation-target-check { margin-left: auto; color: var(--hint-green); font-weight: 700; }
 .annotation-status { font-size: 10.5px; margin-top: 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .annotation-status--err { color: var(--hint-red); }
 .annotation-status--ok  { color: var(--hint-green); }
@@ -2827,6 +2831,7 @@ body.settings-open #update-footer { margin-top: auto; }
 .hl-check--pass .hl-check-icon { color: var(--hint-green); }
 .hl-check--fail .hl-check-icon { color: var(--hint-red); }
 .hl-check-label { color: var(--text); line-height: 1.4; }
+.hl-check-value { margin-left: auto; padding-left: 8px; flex-shrink: 0; color: var(--text-muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; text-align: right; }
 .hl-check--fail .hl-check-label { color: var(--hint-red); }
 .hl-check--warn .hl-check-icon { color: var(--hint-amber); }
 .hl-chip--err     { color: var(--hint-red);   background: color-mix(in srgb, var(--hint-red) 12%, transparent); }

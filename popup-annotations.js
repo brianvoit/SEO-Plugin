@@ -124,6 +124,7 @@ async function saveAnnotation() {
   });
 
   if (results.every(x => x[1])) {
+    if (typeof loadChartAnnotations === 'function') loadChartAnnotations(true);   // repaint chart stars
     setTimeout(closeAnnotationModal, 900);
   } else {
     showAnnotationStatus(results.filter(x => !x[1]).map(([name, , r]) => `${name}: ${annotationErr(r)}`).join(' · '), true);

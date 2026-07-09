@@ -762,6 +762,7 @@ function renderAdsChart() {
   const built = buildCombinedChart(_adsFilled, adsActiveMetrics, { width, metrics: ADS_METRICS });
   container.replaceChildren(svgFromString(built.svg));
   attachChartHover(container.querySelector('svg'), _adsFilled, adsActiveMetrics, built);
+  if (typeof overlayChartAnnotations === 'function') overlayChartAnnotations(container, _adsFilled, built);
 }
 
 // Recompute the displayed series + scorecards for the current filter, then draw.

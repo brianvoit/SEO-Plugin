@@ -385,6 +385,7 @@ function renderCombinedChart() {
   const built = buildCombinedChart(_gscFilled, gscActiveMetrics, { width });
   container.replaceChildren(svgFromString(built.svg));
   attachChartHover(container.querySelector('svg'), _gscFilled, gscActiveMetrics, built);
+  if (typeof overlayChartAnnotations === 'function') overlayChartAnnotations(container, _gscFilled, built);
 }
 
 // Re-render the chart whenever its container is resized (e.g. the sidebar

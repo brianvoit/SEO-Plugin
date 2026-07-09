@@ -2530,7 +2530,31 @@ body.settings-open #update-footer { margin-top: auto; }
 .gsc-chart-change--down { color: var(--hint-red); }
 
 /* Combined chart */
+.gsc-chart-svg { position: relative; }
 .gsc-chart-svg svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+/* Annotation stars overlaid on the Search / Analytics / Ads charts */
+.chart-annot-layer { position: absolute; inset: 0; pointer-events: none; }
+.chart-annot-star {
+  position: absolute; top: -1px; transform: translateX(-50%);
+  font-size: 11px; line-height: 1; color: var(--hint-amber);
+  cursor: help; pointer-events: auto; text-shadow: 0 0 2px var(--bg), 0 0 2px var(--bg);
+}
+.chart-annot-star:hover { color: var(--chart-conv); }
+.chart-annot-tip {
+  position: fixed; z-index: 1200; max-width: 240px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 7px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.22); padding: 7px 9px;
+  font-size: 11px; color: var(--text);
+  opacity: 0; pointer-events: none; transition: opacity .1s;
+}
+.chart-annot-tip.visible { opacity: 1; }
+.chart-annot-tip-date { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); margin-bottom: 4px; }
+.chart-annot-tip-row { padding: 3px 0; border-top: 1px solid var(--border); }
+.chart-annot-tip-row:first-of-type { border-top: none; }
+.chart-annot-tip-text { color: var(--text); line-height: 1.35; }
+.chart-annot-tip-src { font-size: 9.5px; color: var(--text-muted); margin-top: 1px; }
+.chart-annot-tip-src--all { color: var(--hint-green); font-weight: 700; }
 .gsc-chart-line { fill: none; stroke-width: 1.5; }
 .gsc-chart-line[data-metric="clicks"]      { stroke: var(--chart-clicks); }
 .gsc-chart-line[data-metric="impressions"] { stroke: var(--chart-impressions); }
@@ -2673,11 +2697,13 @@ body.settings-open #update-footer { margin-top: auto; }
   background: rgba(0,0,0,.45); padding: 16px;
 }
 .annotation-card {
-  width: 100%; max-width: 320px; background: var(--bg); border: 1px solid var(--border);
-  border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.25); padding: 14px;
+  width: 100%; max-width: 384px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.25); padding: 16px;
   display: flex; flex-direction: column; gap: 6px;
 }
 .annotation-card-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+/* Roomier note field — the shared .ads-addkw-select is too cramped here */
+#annotation-text { font-size: 13px; padding: 9px 11px; }
 .annotation-targets { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
 .annotation-target { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text); cursor: pointer; }
 .annotation-target input { margin: 0; }

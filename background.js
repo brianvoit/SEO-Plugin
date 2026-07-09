@@ -1253,6 +1253,32 @@ async function ga4AddAnnotation({ pageUrl, date, title, description }) {
   return { connected: true, ok: true, property: resolved.property, id: data.name || null };
 }
 
+// List GA4 annotations for the domain's property (read-only scope is enough).
+// Returns [{ date:'YYYY-MM-DD', text }]. Used to place stars on the charts.
+async function ga4ListAnnotations({ pageUrl }) {
+  const tokenResult = await gaGetAccessToken();
+  if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
+  if (tokenResult.error) return { connected: true, error: tokenResult.error };
+  const resolved = await gaResolveProperty({ pageUrl });
+  if (!resolved.connected) return { connected: false };
+  if (resolved.error || !resolved.property) return { connected: true, error: resolved.error || 'NO_PROPERTY' };
+
+  let res;
+  try {
+    res = await fetch(`https://analyticsadmin.googleapis.com/v1alpha/${resolved.property}/reportingDataAnnotations?pageSize=200`, {
+      headers: { Authorization: `Bearer ${tokenResult.accessToken}` }
+    });
+  } catch { return { connected: true, error: 'NETWORK' }; }
+  if (!res.ok) return { connected: true, error: 'API_ERROR', detail: `HTTP ${res.status}` };
+  const data = await res.json().catch(() => ({}));
+  const fmt = d => (d && d.year) ? `${d.year}-${String(d.month).padStart(2, '0')}-${String(d.day).padStart(2, '0')}` : null;
+  const annotations = (data.reportingDataAnnotations || []).map(a => ({
+    date: fmt(a.annotationDate) || fmt(a.annotationDateRange && a.annotationDateRange.startDate),
+    text: a.title || a.description || ''
+  })).filter(a => a.date);
+  return { connected: true, annotations };
+}
+
 function gaDisconnect() {
   return googleDisconnect('gaAuth', ['gaProperties', 'gaCache']);
 }
@@ -3430,6 +3456,49 @@ async function webceoAddEvent({ pageUrl, date, text }) {
   return { connected: true, ok: true, project: resolved.project, event: (res.data && res.data.event) || null };
 }
 
+// List WebCEO events (chart annotations) for the domain's project. Skips
+// auto-generated "system" events. Returns [{ date:'YYYY-MM-DD', text }].
+async function webceoGetEvents({ pageUrl }) {
+  const resolved = await webceoResolveProject({ pageUrl });
+  if (!resolved.connected) return { connected: false };
+  if (resolved.error || !resolved.project) return { connected: true, error: resolved.error || 'NO_PROJECT' };
+  const idsRes = await webceoCall('get_event_ids', { project: resolved.project });
+  if (idsRes.error) return { connected: true, error: idsRes.error };
+  const ids = (idsRes.data && idsRes.data.ids) || [];
+  if (!ids.length) return { connected: true, events: [] };
+  const evRes = await webceoCall('get_events', { project: resolved.project, ids });
+  if (evRes.error) return { connected: true, error: evRes.error };
+  const events = ((evRes.data && evRes.data.events) || [])
+    .filter(e => e.visibility !== 'system')
+    .map(e => ({ date: e.date, text: e.text || '' }))
+    .filter(e => e.date);
+  return { connected: true, events };
+}
+
+// Merge GA4 + WebCEO annotations by date for the chart-star overlay. Same text
+// on the same date across sources collapses into one entry whose `sources`
+// lists every place it lives (so the UI can flag "in all").
+async function getChartAnnotations({ pageUrl }) {
+  const connectedSources = [];
+  const all = [];
+  const ga = await ga4ListAnnotations({ pageUrl });
+  if (ga.connected && !ga.error) { connectedSources.push('ga4'); (ga.annotations || []).forEach(a => all.push({ ...a, source: 'ga4' })); }
+  const wc = await webceoGetEvents({ pageUrl });
+  if (wc.connected && !wc.error) { connectedSources.push('webceo'); (wc.events || []).forEach(a => all.push({ ...a, source: 'webceo' })); }
+
+  const byDate = {};
+  all.forEach(a => {
+    if (!a.date) return;
+    const norm = (a.text || '').trim().toLowerCase();
+    const list = byDate[a.date] || (byDate[a.date] = []);
+    const existing = norm && list.find(e => e._norm === norm);
+    if (existing) { if (!existing.sources.includes(a.source)) existing.sources.push(a.source); }
+    else list.push({ text: a.text, _norm: norm, sources: [a.source] });
+  });
+  Object.values(byDate).forEach(list => list.forEach(e => { delete e._norm; }));
+  return { connectedSources, byDate };
+}
+
 function webceoSaveConfig({ apiKey, baseUrl }) {
   const update = {};
   if (apiKey !== undefined) update.webceoApiKey = apiKey;
@@ -3873,6 +3942,7 @@ browser.runtime.onMessage.addListener((message) => {
     case 'webceoAddEvent':       return webceoAddEvent(message);
     case 'gaConnectEdit':        return gaConnectEdit();
     case 'ga4AddAnnotation':     return ga4AddAnnotation(message);
+    case 'getChartAnnotations':  return getChartAnnotations(message);
     case 'docsConnect':          return docsConnect();
     case 'docsGetStatus':        return docsGetStatus();
     case 'docsDisconnect':       return docsDisconnect();

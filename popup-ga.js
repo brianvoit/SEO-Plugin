@@ -42,6 +42,7 @@ function renderGaChart() {
   const built = buildCombinedChart(_gaFilled, gaActiveMetrics, { width, metrics: GA_METRICS });
   container.replaceChildren(svgFromString(built.svg));
   attachChartHover(container.querySelector('svg'), _gaFilled, gaActiveMetrics, built);
+  if (typeof overlayChartAnnotations === 'function') overlayChartAnnotations(container, _gaFilled, built);
 }
 
 let _gaChartResizeRAF = null;

@@ -1728,6 +1728,7 @@ function render(data, expandMeta = false) {
   renderLinkOverlayToggle(data.linkOverlayActive);
   if (typeof loadBacklinksData === 'function') loadBacklinksData(false);
   if (typeof loadSiteAuditData === 'function') loadSiteAuditData(false);
+  if (typeof loadChartAnnotations === 'function') loadChartAnnotations(false);
 }
 
 // ─── Data loading ────────────────────────────────────────────────────────────

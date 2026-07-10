@@ -465,15 +465,46 @@ const ADS_KW_COLS = [
   { key: 'impressions', label: 'Impr' },
   { key: 'clicks', label: 'Clicks' },
   { key: 'cost', label: 'Cost' },
-  { key: 'conversions', label: 'Conv' }
+  { key: 'conversions', label: 'Conv' },
+  { key: 'vol', label: 'Vol' },
+  { key: 'cpc', label: 'CPC' },
+  { key: 'comp', label: 'Comp.' }
 ];
 const ADS_TERM_COLS = [
   { key: 'text', label: 'Search term', term: true },
   { key: 'impressions', label: 'Impr' },
   { key: 'clicks', label: 'Clicks' },
   { key: 'cost', label: 'Cost' },
-  { key: 'conversions', label: 'Conv' }
+  { key: 'conversions', label: 'Conv' },
+  { key: 'vol', label: 'Vol' },
+  { key: 'cpc', label: 'CPC' },
+  { key: 'comp', label: 'Comp.' }
 ];
+
+// Keyword-planner enrichment (Vol/CPC/Comp) for the Ads tables — same source as
+// the Search tab (adsGetKeywordIdeas), keyed by lowercased term text.
+let _adsVolumeMap = {};
+let _adsVolumeHost = null;
+async function ensureAdsVolume(texts, onReady) {
+  if (_adsHost !== _adsVolumeHost) { _adsVolumeMap = {}; _adsVolumeHost = _adsHost; }   // reset on domain change
+  const need = [];
+  const seen = new Set();
+  (texts || []).forEach(t => {
+    const lc = (t || '').toLowerCase().trim();
+    if (!lc || seen.has(lc) || (lc in _adsVolumeMap)) return;
+    seen.add(lc); need.push(t);
+    _adsVolumeMap[lc] = null;   // seed synchronously so a concurrent call (the other table) doesn't re-fetch the same terms
+  });
+  if (!need.length) return;
+  try {
+    const tab = await getActiveTab();
+    const res = await sendMessageWithTimeout({ action: 'adsGetKeywordIdeas', pageUrl: tab.url, keywords: need });
+    if (res) Object.assign(_adsVolumeMap, res.byKeyword || {});   // real data overwrites the null placeholders
+  } catch {
+    need.forEach(t => { delete _adsVolumeMap[(t || '').toLowerCase().trim()]; });   // failed → drop placeholders so it retries
+  }
+  if (onReady) onReady();
+}
 
 function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = null } = {}) {
   const cols = withQs ? ADS_KW_COLS : ADS_TERM_COLS;
@@ -485,11 +516,19 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
   const render = () => {
     container.replaceChildren();
 
+    // Attach planner values for sorting (Vol/CPC/Comp), from the keyword-ideas map
+    rows.forEach(r => {
+      const pv = _adsVolumeMap[(r.text || '').toLowerCase().trim()];
+      r.vol = (pv && pv.avgMonthlySearches != null) ? pv.avgMonthlySearches : null;
+      r.cpc = (typeof gscCpcMicros === 'function') ? gscCpcMicros(pv) : 0;
+      r.comp = (typeof gscDifficultyScore === 'function') ? gscDifficultyScore(pv) : 0;
+    });
+
     const header = document.createElement('div');
     header.className = 'ads-row ads-row--header' + (withQs ? ' ads-row--kw' : '');
     cols.forEach(c => {
       const cell = document.createElement('span');
-      const centered = ['clicks', 'cost', 'conversions'].includes(c.key);
+      const centered = ['clicks', 'cost', 'conversions', 'vol', 'cpc', 'comp'].includes(c.key);
       cell.className = (c.term ? 'ads-cell-term' : ('ads-cell-num' + (centered ? ' ads-cell-num--c' : ''))) + ' ads-sort';
       const active = sort.column === c.key;
       cell.textContent = c.label + (active ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
@@ -647,6 +686,36 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
         row.appendChild(cell);
       });
 
+      // Keyword-planner columns: Vol (with 12-mo trend hover) / CPC / Comp
+      const pv = _adsVolumeMap[(r.text || '').toLowerCase().trim()];
+      const volCell = document.createElement('span');
+      volCell.className = 'ads-cell-num ads-cell-num--c';
+      volCell.textContent = (pv && pv.avgMonthlySearches != null) ? gscFormatVolume(pv.avgMonthlySearches) : '—';
+      if (pv && pv.monthlySearchVolumes && pv.monthlySearchVolumes.length) {
+        volCell.classList.add('ads-vol-cell');
+        volCell.addEventListener('mouseenter', () => showGscVolumeTrend(volCell, pv.monthlySearchVolumes, pv.avgMonthlySearches));
+        volCell.addEventListener('mouseleave', hideGscVolumeTrend);
+      }
+      row.appendChild(volCell);
+
+      const cpcCell = document.createElement('span');
+      cpcCell.className = 'ads-cell-num ads-cell-num--c';
+      const micros = gscCpcMicros(pv);
+      cpcCell.textContent = micros > 0 ? gscFormatCpc(micros, container._currency) : '—';
+      row.appendChild(cpcCell);
+
+      const compCell = document.createElement('span');
+      compCell.className = 'ads-cell-num ads-cell-num--c';
+      const comp = pv && pv.competition ? String(pv.competition).toUpperCase() : null;
+      if (comp) {
+        compCell.textContent = { LOW: 'Low', MEDIUM: 'Med', HIGH: 'High' }[comp] || '—';
+        compCell.classList.add('gsc-query-diff--' + comp.toLowerCase());
+      } else {
+        compCell.textContent = '—';
+        compCell.classList.add('gsc-query-diff--none');
+      }
+      row.appendChild(compCell);
+
       row.addEventListener('click', () => {
         if (withQs) setAdsFilter({ type: 'keyword', text: r.text, matchType: r.matchType, adGroupId: r.adGroupId, criterionId: r.criterionId, label: adsFormatKeyword(r.text, r.matchType) });
         else setAdsFilter({ type: 'searchTerm', text: r.text, adGroupId: r.adGroupId, keyword: r.keyword, label: r.text });
@@ -671,6 +740,9 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
       more.addEventListener('click', () => requestMoreAdsSearchTerms(more));
       container.appendChild(more);
     }
+
+    // Lazy-load Vol/CPC/Comp for the rendered rows; re-render once they arrive.
+    if (typeof ensureAdsVolume === 'function') ensureAdsVolume(toRender.map(r => r.text), render);
   };
 
   render();

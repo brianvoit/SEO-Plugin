@@ -69,7 +69,7 @@ const GSC_QUERY_VOL_COLUMN = { key: 'volume', label: 'Vol' };
 // and special-cased in buildQueryDataRow (a currency value / a color-coded
 // High·Med·Low chip, not plain text).
 const GSC_QUERY_CPC_COLUMN  = { key: 'cpc',        label: 'CPC' };
-const GSC_QUERY_DIFF_COLUMN = { key: 'difficulty', label: 'Diff' };
+const GSC_QUERY_DIFF_COLUMN = { key: 'difficulty', label: 'Comp.' };
 
 // Lower position is better, so default that column to ascending
 const GSC_QUERY_SORT_DEFAULT_DIR = { impressions: 'desc', clicks: 'desc', position: 'asc', ctr: 'desc', volume: 'desc', cpc: 'desc', difficulty: 'desc' };
@@ -604,12 +604,12 @@ function buildGscVolCell(q) {
   const num = document.createElement('span');
   num.className = 'gsc-query-vol-num';
   num.textContent = (v && v.avgMonthlySearches != null) ? gscFormatVolume(v.avgMonthlySearches) : '—';
-  num.title = (v && v.avgMonthlySearches != null) ? `~${v.avgMonthlySearches.toLocaleString()} avg. monthly searches` : '';
   cell.appendChild(num);
 
-  // 12-month trend on hover (competition now lives in its own Diff column).
+  // 12-month trend on hover — a mini chart popover that also carries the exact
+  // avg (no separate native title tooltip obscuring the main chart).
   if (v && v.monthlySearchVolumes && v.monthlySearchVolumes.length) {
-    cell.addEventListener('mouseenter', () => showGscVolumeTrend(cell, v.monthlySearchVolumes));
+    cell.addEventListener('mouseenter', () => showGscVolumeTrend(cell, v.monthlySearchVolumes, v.avgMonthlySearches));
     cell.addEventListener('mouseleave', hideGscVolumeTrend);
   }
 
@@ -691,7 +691,7 @@ function buildGscTrendSparkline(monthlySearchVolumes, { width = 70, height = 24 
   return `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"><polyline points="${points}" class="gsc-vol-sparkline" /></svg>`;
 }
 
-function showGscVolumeTrend(anchorEl, monthlySearchVolumes) {
+function showGscVolumeTrend(anchorEl, monthlySearchVolumes, avg) {
   if (!_gscVolTrendEl) {
     _gscVolTrendEl = document.createElement('div');
     _gscVolTrendEl.className = 'gsc-vol-trend-preview';
@@ -702,7 +702,9 @@ function showGscVolumeTrend(anchorEl, monthlySearchVolumes) {
   _gscVolTrendEl.appendChild(svgFromString(buildGscTrendSparkline(monthlySearchVolumes)));
   const cap = document.createElement('div');
   cap.className = 'gsc-vol-trend-caption';
-  cap.textContent = peak ? `Peak: ${String(peak.month).charAt(0) + String(peak.month).slice(1).toLowerCase()} ${peak.year}` : '12-month trend';
+  const avgTxt = (avg != null) ? `~${Number(avg).toLocaleString()}/mo` : '12-month trend';
+  const peakTxt = peak ? ` · peak ${String(peak.month).charAt(0) + String(peak.month).slice(1).toLowerCase()} ${peak.year}` : '';
+  cap.textContent = avgTxt + peakTxt;
   _gscVolTrendEl.appendChild(cap);
   _gscVolTrendEl.classList.add('visible');
 

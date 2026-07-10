@@ -2843,7 +2843,11 @@ async function adsGenerateKeywordIdeas(accessToken, customerId, keywords) {
 
   let res;
   try {
-    res = await fetch(`${GA_ADS_API}/customers/${adsDigits(customerId)}/keywordPlanIdeas:generateKeywordIdeas`, {
+    // GenerateKeywordIdeas is a custom method ON the customer resource — the
+    // path is customers/{id}:generateKeywordIdeas, with NO /keywordPlanIdeas
+    // segment (unlike googleAds:searchStream). The extra segment 404'd every
+    // request, which is why Vol/CPC/DIFF were always empty.
+    res = await fetch(`${GA_ADS_API}/customers/${adsDigits(customerId)}:generateKeywordIdeas`, {
       method: 'POST', headers, body: JSON.stringify(body)
     });
   } catch {
@@ -3458,6 +3462,20 @@ async function webceoAddEvent({ pageUrl, date, text }) {
 
 // List WebCEO events (chart annotations) for the domain's project. Skips
 // auto-generated "system" events. Returns [{ date:'YYYY-MM-DD', text }].
+// WebCEO event text can contain HTML markup; the chart tooltip renders it as
+// plain text, so strip tags + decode the common entities to a clean note.
+function webceoStripHtml(s) {
+  return String(s || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0?39;|&apos;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 async function webceoGetEvents({ pageUrl }) {
   const resolved = await webceoResolveProject({ pageUrl });
   if (!resolved.connected) return { connected: false };
@@ -3470,7 +3488,7 @@ async function webceoGetEvents({ pageUrl }) {
   if (evRes.error) return { connected: true, error: evRes.error };
   const events = ((evRes.data && evRes.data.events) || [])
     .filter(e => e.visibility !== 'system')
-    .map(e => ({ date: e.date, text: e.text || '' }))
+    .map(e => ({ date: e.date, text: webceoStripHtml(e.text) }))
     .filter(e => e.date);
   return { connected: true, events };
 }

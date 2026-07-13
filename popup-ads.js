@@ -10,7 +10,10 @@ let _adsFilter = null;                                 // { type:'adGroup'|'keyw
 let _adsTermIntent = null;                             // Search Terms intent filter (null = All)
 let _adsTermSearch = '';                               // regex filter for the search-terms table
 let _adsTermSearchExclude = false;                     // false = match (include), true = exclude
-let _adsHideBranded = true;                            // hide branded search terms (like gscHideBranded)
+// Branded-term hiding is a single shared setting (the `gscHideBranded` global +
+// storage key declared in popup-gsc.js, loaded before this file) — toggling it
+// on either the Search or Ads tab applies to both, since both read the same
+// allBrandedTerms pattern. See btn-ads-branded-toggle / btn-gsc-branded-toggle.
 let _adsKwIntent = null;                               // keyword intent filter (null = All)
 let _adsKwSearch = '';                                 // regex filter for the keywords table
 let _adsKwSearchExclude = false;                       // false = match (include), true = exclude
@@ -541,7 +544,7 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
     });
     container.appendChild(header);
 
-    const brandPattern = !withQs && _adsHideBranded && _adsHost
+    const brandPattern = !withQs && gscHideBranded && _adsHost
       ? (allBrandedTerms[_adsHost] || '') : '';
     const visible = rows.filter(r =>
       (withQs ? adsKeywordVisible(r) : adsTermVisible(r)) &&
@@ -1369,18 +1372,24 @@ document.querySelectorAll('#ads-range-group .mode-option').forEach(btn => {
   });
 });
 
+// Shared with the Search tab's btn-gsc-branded-toggle: flips the single
+// gscHideBranded setting, keeps both tabs' toggle buttons in sync, and
+// re-renders whichever table(s) are loaded.
 document.getElementById('btn-ads-branded-toggle').addEventListener('click', () => {
-  _adsHideBranded = !_adsHideBranded;
-  document.getElementById('btn-ads-branded-toggle').setAttribute('aria-pressed', String(_adsHideBranded));
-  browser.storage.local.set({ adsHideBranded: _adsHideBranded });
+  gscHideBranded = !gscHideBranded;
+  document.getElementById('btn-ads-branded-toggle').setAttribute('aria-pressed', String(gscHideBranded));
+  const gscToggle = document.getElementById('btn-gsc-branded-toggle');
+  if (gscToggle) gscToggle.setAttribute('aria-pressed', String(gscHideBranded));
+  browser.storage.local.set({ gscHideBranded });
   if (_adsData) renderAdsAll();
+  if (typeof _gscQueries !== 'undefined' && _gscQueries.length && typeof renderGscQueries === 'function') renderGscQueries(_gscQueries, _gscPageUrl);
 });
 
 function loadAdsPrefs() {
-  return browser.storage.local.get(['adsSelectedRange', 'adsActiveMetrics', 'adsHideBranded']).then(({ adsSelectedRange: stored, adsActiveMetrics: metrics, adsHideBranded: storedHide }) => {
+  return browser.storage.local.get(['adsSelectedRange', 'adsActiveMetrics', 'gscHideBranded']).then(({ adsSelectedRange: stored, adsActiveMetrics: metrics, gscHideBranded: storedHide }) => {
     adsSelectedRange = stored || 30;
-    _adsHideBranded = storedHide !== undefined ? storedHide : true;
-    document.getElementById('btn-ads-branded-toggle').setAttribute('aria-pressed', String(_adsHideBranded));
+    gscHideBranded = storedHide !== undefined ? storedHide : true;
+    document.getElementById('btn-ads-branded-toggle').setAttribute('aria-pressed', String(gscHideBranded));
     setAdsRangeUI(adsSelectedRange);
     if (metrics && typeof metrics === 'object') {
       ADS_METRIC_ORDER.forEach(m => { adsActiveMetrics[m] = metrics[m] !== false; });

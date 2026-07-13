@@ -1191,7 +1191,13 @@
             <label class="ranking-onpage-toggle"><input type="checkbox" id="ranking-onpage-only" /> This page only</label>
           </span>
         </div>
+        <div class="gsc-query-search-bar" id="ranking-query-search-bar">
+          <input type="text" id="ranking-query-search" class="gsc-query-search-input"
+            placeholder="Filter keywords (regex: term|term2)" autocomplete="off" spellcheck="false" />
+          <button id="btn-ranking-query-search-mode" class="gsc-query-search-mode-btn" title="Toggle include/exclude">Match</button>
+        </div>
         <div id="ranking-intent-filters" class="gsc-intent-filters hidden"></div>
+        <div id="ranking-tag-filters" class="gsc-intent-filters hidden"></div>
         <div id="ranking-table"></div>
         <div id="ranking-empty" class="field-hint hidden">No ranking data for this project yet.</div>
       </section>

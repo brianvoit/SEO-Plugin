@@ -3031,6 +3031,10 @@ const WEBCEO_PROJECTS_STALE_MS = 7 * 24 * 60 * 60 * 1000;
 const WEBCEO_STALE_MS = 6 * 60 * 60 * 1000;
 const WEBCEO_BACKLINKS_STALE_MS = 24 * 60 * 60 * 1000;   // backlinks change slowly
 const WEBCEO_AUDIT_STALE_MS = 24 * 60 * 60 * 1000;       // site audit changes slowly
+const WEBCEO_LOST_BACKLINKS_STALE_MS = 24 * 60 * 60 * 1000;
+const WEBCEO_LINKING_DOMAINS_STALE_MS = 24 * 60 * 60 * 1000;
+const WEBCEO_COMPETITOR_METRICS_STALE_MS = 24 * 60 * 60 * 1000;
+const WEBCEO_KEYWORD_TAGS_STALE_MS = 24 * 60 * 60 * 1000;
 
 async function webceoConfig() {
   const { webceoApiKey, webceoBaseUrl } = await browser.storage.local.get(['webceoApiKey', 'webceoBaseUrl']);
@@ -3207,6 +3211,39 @@ async function webceoGetTrackedKeywords({ pageUrl }) {
   return { keywords: kws.map(k => (typeof k === 'string' ? k : (k.keyword || k.kw || k.text || ''))).filter(Boolean) };
 }
 
+// Keyword Tags (get_keywords_tags) — project-wide, no page dimension (tags are
+// an attribute of the tracked keyword itself). Cached 24h; returns a plain
+// { "<lowercased keyword>": ["tag1","tag2",...] } map for the popup to key off.
+async function webceoGetKeywordTags({ pageUrl, forceRefresh = false }) {
+  const { apiKey } = await webceoConfig();
+  if (!apiKey) return { connected: false };
+  const host = gscPageHost(pageUrl);
+  const project = await webceoResolveProject({ pageUrl });
+  if (project.error) return { connected: true, error: project.error, detail: project.detail };
+  if (!project.project) return { connected: true, error: 'NO_PROJECT', host };
+
+  const cacheKey = `${host}::${project.project}`;
+  const { webceoKeywordTagsCache } = await browser.storage.local.get('webceoKeywordTagsCache');
+  const cache = webceoKeywordTagsCache || {};
+  const cached = cache[cacheKey];
+  if (!forceRefresh && cached && (Date.now() - cached.fetchedAt < WEBCEO_KEYWORD_TAGS_STALE_MS)) {
+    return { connected: true, tags: cached.tags, fetchedAt: cached.fetchedAt, fromCache: true };
+  }
+
+  const res = await webceoCall('get_keywords_tags', { project: project.project });
+  if (res.error) return { connected: true, error: res.error, detail: res.detail };
+
+  const raw = (res.data && res.data.keyword_tags) || {};
+  const tags = {};
+  Object.keys(raw).forEach(kw => {
+    const list = (raw[kw] || []).filter(Boolean);
+    if (list.length) tags[kw.toLowerCase().trim()] = list;
+  });
+  cache[cacheKey] = { fetchedAt: Date.now(), tags };
+  await browser.storage.local.set({ webceoKeywordTagsCache: cache });
+  return { connected: true, tags, fetchedAt: cache[cacheKey].fetchedAt, fromCache: false };
+}
+
 // Roll the flat get_backlinks list up into the shapes the panel renders:
 // per-referring-domain groups (with a capped sample of their linking pages),
 // an anchor-text distribution, top linked-to pages, and headline counts.
@@ -3339,6 +3376,151 @@ async function webceoGetBacklinks({ pageUrl, forceRefresh = false }) {
   cache[cacheKey] = entry;
   await browser.storage.local.set({ webceoBacklinksCache: cache });
   return { connected: true, ...webceoBuildBacklinksView(entry, pageUrl), fromCache: false };
+}
+
+// ─── Lost Backlinks (get_lost_backlinks) ─────────────────────────────────────
+// Links that pointed to the site on the previous scan and are gone on the
+// latest one — the highest-signal "what did we just lose" view, so unlike the
+// main backlinks list (dedup'd to referring domains) this stays a flat,
+// TF-ranked list of the actual lost links.
+function webceoTrimLostBacklinks(list) {
+  return (list || []).slice(0, WEBCEO_RAW_BACKLINK_CAP).map(l => ({
+    page_url: l.page_url, title: l.title, link_text: l.link_text,
+    link_target_page: l.link_target_page, link_nofollow: l.link_nofollow,
+    last_status: l.last_status, domain_trusted_flow: l.domain_trusted_flow,
+    domain_citation_flow: l.domain_citation_flow, url_trusted_flow: l.url_trusted_flow,
+    first_discovered: l.first_discovered, last_crawled: l.last_crawled
+  }));
+}
+function webceoAggregateLostBacklinks(list) {
+  const rows = (list || []).map(l => ({
+    page_url: l.page_url, title: l.title || '', anchor: l.link_text || '',
+    target: l.link_target_page || '', nofollow: !!l.link_nofollow,
+    status: l.last_status || 'OK', tf: l.domain_trusted_flow ?? null,
+    firstDiscovered: l.first_discovered || null, lastCrawled: l.last_crawled || null
+  }));
+  rows.sort((a, b) => (b.tf ?? -1) - (a.tf ?? -1));
+  return { total: rows.length, links: rows.slice(0, 150) };
+}
+// Same "all" + page-scoped split as webceoBuildBacklinksView, so Lost
+// Backlinks respects the same "This page only" toggle as the rest of the panel.
+function webceoBuildLostBacklinksView(entry, pageUrl) {
+  const raw = entry.rawLostLinks || [];
+  const all = webceoAggregateLostBacklinks(raw);
+  const thisPage = webceoAggregateLostBacklinks(raw.filter(l => webceoSamePage(l.link_target_page, pageUrl)));
+  return { fetchedAt: entry.fetchedAt, ...all, thisPage };
+}
+async function webceoGetLostBacklinks({ pageUrl, forceRefresh = false }) {
+  const { apiKey } = await webceoConfig();
+  if (!apiKey) return { connected: false };
+  const host = gscPageHost(pageUrl);
+  const project = await webceoResolveProject({ pageUrl });
+  if (project.error) return { connected: true, error: project.error, detail: project.detail };
+  if (!project.project) return { connected: true, error: 'NO_PROJECT', host };
+
+  const cacheKey = `${host}::${project.project}`;
+  const { webceoLostBacklinksCache } = await browser.storage.local.get('webceoLostBacklinksCache');
+  const cache = webceoLostBacklinksCache || {};
+  const cached = cache[cacheKey];
+  if (!forceRefresh && cached && cached.rawLostLinks && (Date.now() - cached.fetchedAt < WEBCEO_LOST_BACKLINKS_STALE_MS)) {
+    return { connected: true, ...webceoBuildLostBacklinksView(cached, pageUrl), fromCache: true };
+  }
+
+  const res = await webceoCall('get_lost_backlinks', { project: project.project });
+  if (res.error) return { connected: true, error: res.error, detail: res.detail };
+
+  const entry = { fetchedAt: Date.now(), rawLostLinks: webceoTrimLostBacklinks(res.data && res.data.data) };
+  cache[cacheKey] = entry;
+  await browser.storage.local.set({ webceoLostBacklinksCache: cache });
+  return { connected: true, ...webceoBuildLostBacklinksView(entry, pageUrl), fromCache: false };
+}
+
+// ─── Linking Domains (get_linking_domains) ───────────────────────────────────
+// Per-domain rollup straight from Web CEO — richer than what we can derive
+// client-side from get_backlinks alone: an authoritative nofollow/toxic % and,
+// notably, organic_visits (a real traffic signal for each referring domain we
+// have no other source for). Used to enrich the existing Referring Domains
+// list (merged in by domain name), not to replace it.
+function webceoAggregateLinkingDomains(list) {
+  const rows = (list || []).map(l => ({
+    domain: l.linking_domain, tf: l.domain_trusted_flow ?? null, cf: l.domain_citation_flow ?? null,
+    topic: l.domain_primary_topic || '', totalLinks: l.total_links ?? null, juicyLinks: l.juicy_links ?? null,
+    nofollowPct: l.nofollow ?? null, toxicPct: l.toxic ?? null, organicVisits: l.organic_visits ?? null,
+    isNew: !!l.is_new
+  }));
+  rows.sort((a, b) => (b.tf ?? -1) - (a.tf ?? -1));
+  return { domains: rows.slice(0, 300) };
+}
+async function webceoGetLinkingDomains({ pageUrl, forceRefresh = false }) {
+  const { apiKey } = await webceoConfig();
+  if (!apiKey) return { connected: false };
+  const host = gscPageHost(pageUrl);
+  const project = await webceoResolveProject({ pageUrl });
+  if (project.error) return { connected: true, error: project.error, detail: project.detail };
+  if (!project.project) return { connected: true, error: 'NO_PROJECT', host };
+
+  const cacheKey = `${host}::${project.project}`;
+  const { webceoLinkingDomainsCache } = await browser.storage.local.get('webceoLinkingDomainsCache');
+  const cache = webceoLinkingDomainsCache || {};
+  const cached = cache[cacheKey];
+  if (!forceRefresh && cached && (Date.now() - cached.fetchedAt < WEBCEO_LINKING_DOMAINS_STALE_MS)) {
+    return { connected: true, ...cached.aggregate, fetchedAt: cached.fetchedAt, fromCache: true };
+  }
+
+  const res = await webceoCall('get_linking_domains', { project: project.project });
+  if (res.error) return { connected: true, error: res.error, detail: res.detail };
+
+  const aggregate = webceoAggregateLinkingDomains(res.data && res.data.data);
+  cache[cacheKey] = { fetchedAt: Date.now(), aggregate };
+  await browser.storage.local.set({ webceoLinkingDomainsCache: cache });
+  return { connected: true, ...aggregate, fetchedAt: cache[cacheKey].fetchedAt, fromCache: false };
+}
+
+// ─── Competitor Metrics (get_competitor_metrics) ─────────────────────────────
+// Summarized backlink profile for the site AND whatever competitors are
+// configured in Web CEO's Backlink Quality Check settings (added there, not
+// in this extension — set_competitors is a bigger scope-add left for later).
+// Field names ".gov"/".edu"/".gov_domains"/".edu_domains" are literal per the
+// API, hence the bracket access below.
+function webceoAggregateCompetitorMetrics(list, ownDomain) {
+  const norm = h => String(h || '').replace(/^www\./, '').toLowerCase();
+  const own = norm(ownDomain);
+  const rows = (list || []).map(l => ({
+    domain: l.domain, isYou: norm(l.domain) === own,
+    tf: l.trusted_flow ?? null, cf: l.citation_flow ?? null, mozDA: l.moz_domain_authority ?? null,
+    total: l.total ?? null, referringDomains: l.domains ?? null, subnets: l.subnets ?? null, ips: l.ips ?? null,
+    gov: l['.gov'] ?? null, edu: l['.edu'] ?? null, govDomains: l['.gov_domains'] ?? null, eduDomains: l['.edu_domains'] ?? null,
+    topic: l.primary_topic || ''
+  }));
+  // "You" first, then competitors ranked by referring-domain count (the
+  // closest available proxy for overall backlink authority in this payload).
+  rows.sort((a, b) => (b.isYou - a.isYou) || ((b.referringDomains ?? -1) - (a.referringDomains ?? -1)));
+  return { competitors: rows };
+}
+async function webceoGetCompetitorMetrics({ pageUrl, forceRefresh = false }) {
+  const { apiKey } = await webceoConfig();
+  if (!apiKey) return { connected: false };
+  const host = gscPageHost(pageUrl);
+  const project = await webceoResolveProject({ pageUrl });
+  if (project.error) return { connected: true, error: project.error, detail: project.detail };
+  if (!project.project) return { connected: true, error: 'NO_PROJECT', host };
+
+  const cacheKey = `${host}::${project.project}`;
+  const { webceoCompetitorMetricsCache } = await browser.storage.local.get('webceoCompetitorMetricsCache');
+  const cache = webceoCompetitorMetricsCache || {};
+  const cached = cache[cacheKey];
+  if (!forceRefresh && cached && (Date.now() - cached.fetchedAt < WEBCEO_COMPETITOR_METRICS_STALE_MS)) {
+    return { connected: true, ...cached.aggregate, fetchedAt: cached.fetchedAt, fromCache: true };
+  }
+
+  const res = await webceoCall('get_competitor_metrics', { project: project.project });
+  if (res.error) return { connected: true, error: res.error, detail: res.detail };
+
+  const ownDomain = (res.data && res.data.domain) || host;
+  const aggregate = webceoAggregateCompetitorMetrics(res.data && res.data.data, ownDomain);
+  cache[cacheKey] = { fetchedAt: Date.now(), aggregate };
+  await browser.storage.local.set({ webceoCompetitorMetricsCache: cache });
+  return { connected: true, ...aggregate, fetchedAt: cache[cacheKey].fetchedAt, fromCache: false };
 }
 
 // Site Audit (get_site_audit_data). Trims the (potentially large) per-page
@@ -3522,12 +3704,12 @@ function webceoSaveConfig({ apiKey, baseUrl }) {
   if (apiKey !== undefined) update.webceoApiKey = apiKey;
   if (baseUrl !== undefined) update.webceoBaseUrl = baseUrl;
   return browser.storage.local.set(update)
-    .then(() => browser.storage.local.remove(['webceoProjects', 'webceoCache', 'webceoBacklinksCache', 'webceoAuditCache']))
+    .then(() => browser.storage.local.remove(['webceoProjects', 'webceoCache', 'webceoBacklinksCache', 'webceoAuditCache', 'webceoLostBacklinksCache', 'webceoLinkingDomainsCache', 'webceoCompetitorMetricsCache', 'webceoKeywordTagsCache']))
     .then(() => ({ ok: true }));
 }
 
 function webceoDisconnect() {
-  return browser.storage.local.remove(['webceoApiKey', 'webceoProjects', 'webceoCache', 'webceoBacklinksCache', 'webceoAuditCache', 'webceoProjectOverrides'])
+  return browser.storage.local.remove(['webceoApiKey', 'webceoProjects', 'webceoCache', 'webceoBacklinksCache', 'webceoAuditCache', 'webceoLostBacklinksCache', 'webceoLinkingDomainsCache', 'webceoCompetitorMetricsCache', 'webceoKeywordTagsCache', 'webceoProjectOverrides'])
     .then(() => ({ ok: true }));
 }
 
@@ -3955,7 +4137,11 @@ browser.runtime.onMessage.addListener((message) => {
     case 'webceoGetRankings':    return webceoGetRankings(message);
     case 'webceoAddKeywords':    return webceoAddKeywords(message);
     case 'webceoGetTrackedKeywords': return webceoGetTrackedKeywords(message);
+    case 'webceoGetKeywordTags': return webceoGetKeywordTags(message);
     case 'webceoGetBacklinks':   return webceoGetBacklinks(message);
+    case 'webceoGetLostBacklinks':      return webceoGetLostBacklinks(message);
+    case 'webceoGetLinkingDomains':     return webceoGetLinkingDomains(message);
+    case 'webceoGetCompetitorMetrics':  return webceoGetCompetitorMetrics(message);
     case 'webceoGetSiteAudit':   return webceoGetSiteAudit(message);
     case 'webceoAddEvent':       return webceoAddEvent(message);
     case 'gaConnectEdit':        return gaConnectEdit();

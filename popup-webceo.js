@@ -9,6 +9,10 @@ let _webceoData = null;               // last webceoGetRankings response
 let _webceoOnPageOnly = true;         // default: focus on keywords ranking for this page
 let _webceoStrikingOnly = false;      // filter to striking-distance (pos 4–20) quick wins
 let _webceoIntent = null;             // intent filter (null = All, else one of INTENTS)
+let _webceoKeywordSearch = '';        // regex string for keyword text filter
+let _webceoKeywordSearchExclude = false; // false = match (include), true = exclude
+const _webceoTagFilter = new Set();   // active tag filters (AND — a row must carry every selected tag)
+const _webceoTagsExpanded = new Set(); // keywords whose tag-detail row is currently expanded
 
 const WEBCEO_ERRORS = {
   NO_API_KEY: 'Add your Web CEO API key in Settings.',
@@ -47,6 +51,33 @@ async function ensureWebceoTracked(onReady) {
     _webceoTrackedSet = new Set((res && res.keywords || []).map(k => String(k).toLowerCase().trim()));
   } catch { _webceoTrackedSet = new Set(); }
   _webceoTrackedLoading = false;
+  if (onReady) onReady();
+}
+
+// ─── Keyword Tags (get_keywords_tags) ────────────────────────────────────────
+// Project-wide, like the tracked-keyword set above — no page dimension, so
+// loaded once per project and reused across every render/filter.
+
+let _webceoTagsMap = null;            // { "<lowercased keyword>": ["tag1", ...] }, or null (unloaded)
+let _webceoTagsLoading = false;
+let _webceoTagsHost = null;
+
+function webceoTagsFor(keyword) {
+  return (_webceoTagsMap && _webceoTagsMap[(keyword || '').toLowerCase().trim()]) || [];
+}
+async function ensureWebceoKeywordTags(onReady) {
+  if (_webceoTagsLoading) return;
+  let host = null, pageUrl = '';
+  try { const tab = await getActiveTab(); pageUrl = tab.url; host = new URL(tab.url).hostname.replace(/^www\./, '').toLowerCase(); } catch { return; }
+  if (_webceoTagsMap && _webceoTagsHost === host) return;   // already loaded for this domain
+
+  _webceoTagsLoading = true;
+  try {
+    const res = await sendMessageWithTimeout({ action: 'webceoGetKeywordTags', pageUrl });
+    _webceoTagsMap = (res && res.connected && !res.error) ? (res.tags || {}) : {};
+  } catch { _webceoTagsMap = {}; }
+  _webceoTagsHost = host;
+  _webceoTagsLoading = false;
   if (onReady) onReady();
 }
 
@@ -292,6 +323,54 @@ function rankingTermChips(text) {
   return wrap.childNodes.length ? wrap : null;
 }
 
+// AND-match: a keyword must carry every currently-selected tag to stay visible.
+function webceoKeywordHasAllTags(keyword, tagSet) {
+  if (!tagSet.size) return true;
+  const tags = webceoTagsFor(keyword);
+  if (!tags.length) return false;
+  const lower = new Set(tags.map(t => t.toLowerCase()));
+  for (const t of tagSet) if (!lower.has(t.toLowerCase())) return false;
+  return true;
+}
+
+// Multi-select tag filter chips — mirrors renderIntentChips' structure but
+// toggles membership in a Set (AND semantics) instead of a single value.
+// Always gray (no color coding), including when active — see .ranking-tag-filter-chip in popup.css.
+function renderTagChips(rowEl, items, getText, activeTags, onToggle) {
+  if (!rowEl) return;
+  rowEl.replaceChildren();
+
+  if (!_webceoTagsMap) { rowEl.classList.add('hidden'); return; }
+  const texts = items.map(getText);
+  const allTags = new Set();
+  texts.forEach(t => webceoTagsFor(t).forEach(tag => allTags.add(tag)));
+  if (!allTags.size) { rowEl.classList.add('hidden'); return; }
+
+  const counts = {};
+  allTags.forEach(tag => { counts[tag] = 0; });
+  texts.forEach(t => webceoTagsFor(t).forEach(tag => { counts[tag]++; }));
+
+  rowEl.classList.remove('hidden');
+  Array.from(allTags).sort((a, b) => a.localeCompare(b)).forEach(tag => {
+    const active = activeTags.has(tag);
+    const chip = document.createElement('button');
+    chip.className = 'gsc-intent-chip ranking-tag-filter-chip' + (active ? ' is-active' : '');
+    chip.title = active ? `Remove “${tag}” filter` : `Filter to keywords tagged “${tag}”`;
+    const name = document.createElement('span');
+    name.textContent = tag;
+    chip.appendChild(name);
+    const n = document.createElement('span');
+    n.className = 'gsc-intent-count';
+    n.textContent = counts[tag];
+    chip.appendChild(n);
+    chip.addEventListener('click', () => {
+      if (active) activeTags.delete(tag); else activeTags.add(tag);
+      onToggle();
+    });
+    rowEl.appendChild(chip);
+  });
+}
+
 let _rankSort = { column: 'volume', dir: 'desc' };
 
 function renderRankingTable() {
@@ -330,7 +409,22 @@ function renderRankingTable() {
     renderRankingTable();
     renderRankingChart();
   });
-  const visible = onPageVisible.filter(k => !_webceoIntent || intentOf(k.keyword) === _webceoIntent);
+  const intentVisible = onPageVisible.filter(k => !_webceoIntent || intentOf(k.keyword) === _webceoIntent);
+
+  // Tag chips count over the intent-filtered set, then narrow further (AND —
+  // a row must carry every selected tag).
+  renderTagChips(document.getElementById('ranking-tag-filters'), intentVisible, k => k.keyword, _webceoTagFilter, () => renderRankingTable());
+  let visible = intentVisible.filter(k => webceoKeywordHasAllTags(k.keyword, _webceoTagFilter));
+
+  if (_webceoKeywordSearch) {
+    try {
+      const re = new RegExp(_webceoKeywordSearch, 'i');
+      visible = _webceoKeywordSearchExclude
+        ? visible.filter(k => !re.test(k.keyword))
+        : visible.filter(k => re.test(k.keyword));
+    } catch { /* invalid regex — leave visible unchanged */ }
+  }
+
   visible.sort((a, b) => {
     if (_rankSort.column === 'keyword') {
       const r = (a.keyword || '').toLowerCase().localeCompare((b.keyword || '').toLowerCase());
@@ -365,8 +459,24 @@ function renderRankingTable() {
     kw.addEventListener('click', (e) => { e.stopPropagation(); browser.tabs.create({ url: `https://www.google.com/search?q=${encodeURIComponent(k.keyword)}` }); });
     term.appendChild(kw);
     if (k.starred) { const s = document.createElement('span'); s.className = 'ranking-star'; s.textContent = '★'; term.appendChild(s); }
-    const chips = rankingTermChips(k.keyword);
-    if (chips) term.appendChild(chips);
+
+    // ×N tag-count chip — click expands an inline row below listing the tags
+    const kwTags = webceoTagsFor(k.keyword);
+    const tagsOpen = _webceoTagsExpanded.has(k.keyword);
+    if (kwTags.length) {
+      const tagChip = document.createElement('button');
+      tagChip.className = 'ranking-tag-count-chip' + (tagsOpen ? ' is-active' : '');
+      tagChip.textContent = `×${kwTags.length}`;
+      tagChip.title = `${kwTags.length} tag${kwTags.length === 1 ? '' : 's'} — click to view`;
+      tagChip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (tagsOpen) _webceoTagsExpanded.delete(k.keyword); else _webceoTagsExpanded.add(k.keyword);
+        renderRankingTable();
+      });
+      term.appendChild(tagChip);
+    }
+
+    // URL drift, right after the tag chip
     const drift = driftMap.get(k.keyword);
     if (drift) {
       const dc = document.createElement('span');
@@ -375,6 +485,15 @@ function renderRankingTable() {
       dc.title = 'Google has ranked more than one of your pages for this term (possible cannibalization):\n' + drift.join('\n');
       term.appendChild(dc);
     }
+
+    // Flex spacer pushes the placement chips (Ad, Title/Desc/H1-H5) flush
+    // right, up against the metric columns.
+    const spacer = document.createElement('span');
+    spacer.className = 'ranking-term-spacer';
+    term.appendChild(spacer);
+    const chips = rankingTermChips(k.keyword);
+    if (chips) term.appendChild(chips);
+
     row.appendChild(term);
 
     engines.forEach(eng => {
@@ -405,11 +524,28 @@ function renderRankingTable() {
     row.appendChild(vol);
 
     row.addEventListener('click', () => selectRankingKeyword(k.keyword));
-    container.appendChild(row);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'ranking-row-wrap';
+    wrap.appendChild(row);
+    if (tagsOpen && kwTags.length) {
+      const detail = document.createElement('div');
+      detail.className = 'ranking-tags-detail';
+      kwTags.forEach(t => {
+        const chip = document.createElement('span');
+        chip.className = 'ranking-tag-chip';
+        chip.textContent = t;
+        detail.appendChild(chip);
+      });
+      wrap.appendChild(detail);
+    }
+    container.appendChild(wrap);
   });
 
   // Classify keywords by intent (shared Haiku cache); re-renders once when ready
   ensureIntents(((_webceoData && _webceoData.rows) || []).map(r => r.keyword), () => renderRankingTable());
+  // Load project-wide keyword tags (project-scoped, not page-scoped); re-renders once when ready
+  ensureWebceoKeywordTags(() => renderRankingTable());
 }
 
 function selectRankingKeyword(keyword) {
@@ -579,6 +715,18 @@ document.getElementById('ranking-onpage-only').addEventListener('change', (e) =>
 
 document.getElementById('ranking-striking-only').addEventListener('change', (e) => {
   _webceoStrikingOnly = e.target.checked;
+  if (_webceoData) renderRankingTable();
+});
+
+document.getElementById('ranking-query-search').addEventListener('input', e => {
+  _webceoKeywordSearch = e.target.value;
+  e.target.classList.toggle('is-invalid', !!_webceoKeywordSearch && !isValidRegex(_webceoKeywordSearch));
+  if (_webceoData) renderRankingTable();
+});
+document.getElementById('btn-ranking-query-search-mode').addEventListener('click', () => {
+  _webceoKeywordSearchExclude = !_webceoKeywordSearchExclude;
+  document.getElementById('btn-ranking-query-search-mode').textContent =
+    _webceoKeywordSearchExclude ? 'Excl.' : 'Match';
   if (_webceoData) renderRankingTable();
 });
 

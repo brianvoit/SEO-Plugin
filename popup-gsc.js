@@ -1200,15 +1200,21 @@ document.getElementById('btn-gsc-query-search-mode').addEventListener('click', (
   renderGscQueries(_gscQueries, _gscPageUrl);
 });
 
+// Shared with the Ads tab's btn-ads-branded-toggle: flips the single
+// gscHideBranded setting, keeps both tabs' toggle buttons in sync, and
+// re-renders whichever table(s) are loaded.
 document.getElementById('btn-gsc-branded-toggle').addEventListener('click', () => {
   gscHideBranded = !gscHideBranded;
   document.getElementById('btn-gsc-branded-toggle').setAttribute('aria-pressed', String(gscHideBranded));
+  const adsToggle = document.getElementById('btn-ads-branded-toggle');
+  if (adsToggle) adsToggle.setAttribute('aria-pressed', String(gscHideBranded));
   browser.storage.local.set({ gscHideBranded });
   if (_gscPageUrl) {
     renderGscQueries(_gscQueries, _gscPageUrl);
     refreshGscChartForState();                 // chart follows selection/intent/branded
     if (gscHideBranded) topUpGscQueries(25);  // backfill the table to ~25 visible
   }
+  if (typeof _adsData !== 'undefined' && _adsData && typeof renderAdsAll === 'function') renderAdsAll();
 });
 
 document.getElementById('btn-gsc-more-queries').addEventListener('click', async () => {

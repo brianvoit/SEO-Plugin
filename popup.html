@@ -479,6 +479,7 @@
         Back
       </button>
       <div class="settings-header-actions">
+        <button id="btn-schema-download" class="save-key-btn" title="Download all structured data (JSON-LD) as a .json file">Download JSON ↓</button>
         <button id="btn-schema-rich-results" class="save-key-btn" title="Open this page in Google's Rich Results Test">Test in Rich Results ↗</button>
       </div>
     </div>
@@ -494,6 +495,9 @@
         </svg>
         Back
       </button>
+      <div class="settings-header-actions">
+        <button id="btn-og-download" class="save-key-btn" title="Download all Open Graph tags as a .json file">Download JSON ↓</button>
+      </div>
     </div>
     <section class="field-section">
       <div class="field-header"><span class="field-label">OPEN GRAPH</span></div>
@@ -510,6 +514,9 @@
         </svg>
         Back
       </button>
+      <div class="settings-header-actions">
+        <button id="btn-tw-download" class="save-key-btn" title="Download all X / Twitter card tags as a .json file">Download JSON ↓</button>
+      </div>
     </div>
     <section class="field-section">
       <div class="field-header"><span class="field-label">X / TWITTER</span></div>
@@ -827,6 +834,20 @@
         <div class="field-header">
           <span class="field-label">QUERIES</span>
           <div class="field-header-actions">
+            <button id="btn-gsc-export-csv" class="addkw-icon-btn" title="Download the visible queries as CSV (includes an Intent column)">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 2v8"/>
+                <polyline points="4.5 7 8 10.5 11.5 7"/>
+                <path d="M2.5 13.5h11"/>
+              </svg>
+            </button>
+            <button id="btn-gsc-export-sheet" class="addkw-icon-btn" title="Add the visible queries to this domain's Google Sheet (includes an Intent column)">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="2" width="12" height="12" rx="1.5"/>
+                <line x1="2" y1="6.5" x2="14" y2="6.5"/>
+                <line x1="6.5" y1="6.5" x2="6.5" y2="14"/>
+              </svg>
+            </button>
             <button class="adcopy-launch-btn" id="btn-gen-addkw-gsc" title="Find new keywords to add to Google Ads, sourced from these queries">
               Add Keywords
               <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
@@ -1091,7 +1112,25 @@
       </section>
 
       <section class="field-section" id="ads-keywords-section">
-        <div class="field-header"><span class="field-label">KEYWORDS</span></div>
+        <div class="field-header">
+          <span class="field-label">KEYWORDS</span>
+          <div class="field-header-actions">
+            <button id="btn-ads-kw-export-csv" class="addkw-icon-btn" title="Download the visible keywords as CSV (includes an Intent column)">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 2v8"/>
+                <polyline points="4.5 7 8 10.5 11.5 7"/>
+                <path d="M2.5 13.5h11"/>
+              </svg>
+            </button>
+            <button id="btn-ads-kw-export-sheet" class="addkw-icon-btn" title="Add the visible keywords to this domain's Google Sheet (includes an Intent column)">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="2" width="12" height="12" rx="1.5"/>
+                <line x1="2" y1="6.5" x2="14" y2="6.5"/>
+                <line x1="6.5" y1="6.5" x2="6.5" y2="14"/>
+              </svg>
+            </button>
+          </div>
+        </div>
         <div class="gsc-query-search-bar" id="ads-kw-search-bar">
           <input type="text" id="ads-kw-search" class="gsc-query-search-input"
             placeholder="Filter keywords (regex: term|term2)" autocomplete="off" spellcheck="false" />
@@ -1106,6 +1145,20 @@
         <div class="field-header">
           <span class="field-label">SEARCH TERMS</span>
           <div class="field-header-actions">
+            <button id="btn-ads-terms-export-csv" class="addkw-icon-btn" title="Download the visible search terms as CSV (includes an Intent column)">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 2v8"/>
+                <polyline points="4.5 7 8 10.5 11.5 7"/>
+                <path d="M2.5 13.5h11"/>
+              </svg>
+            </button>
+            <button id="btn-ads-terms-export-sheet" class="addkw-icon-btn" title="Add the visible search terms to this domain's Google Sheet (includes an Intent column)">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="2" width="12" height="12" rx="1.5"/>
+                <line x1="2" y1="6.5" x2="14" y2="6.5"/>
+                <line x1="6.5" y1="6.5" x2="6.5" y2="14"/>
+              </svg>
+            </button>
             <button class="adcopy-launch-btn" id="btn-gen-addkw" title="Find new keywords to add, sourced from search terms, with Claude">
               Add Keywords
               <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">

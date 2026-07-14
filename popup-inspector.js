@@ -350,6 +350,11 @@ async function renderOpenGraph(data) {
   setOgNavSummary('btn-og', 'og-summary', ogPresent, OG_KEYS.length);
   setOgNavSummary('btn-tw', 'tw-summary', twPresent, TW_KEYS.length);
 
+  // Download button available whenever the page has any og:/twitter: tags at
+  // all (the raw objects can hold more than the displayed OG_KEYS/TW_KEYS).
+  document.getElementById('btn-og-download').classList.toggle('hidden', !Object.keys(og).length);
+  document.getElementById('btn-tw-download').classList.toggle('hidden', !Object.keys(twitter).length);
+
   // Status symbol on the nav row: worst of the field checks (only when some
   // tags are present — a section with nothing set just reads "None")
   setNavStatus('og-status', ogPresent ? worstOgLevel(OG_KEYS, og) : 'ok');
@@ -1822,4 +1827,47 @@ document.getElementById('btn-link-overlay').addEventListener('click', async () =
     const response = await browser.tabs.sendMessage(tab.id, { action: 'toggleLinkOverlay' });
     renderLinkOverlayToggle(response.linkOverlayActive);
   } catch { /* ignore */ }
+});
+
+// ─── Download JSON: Open Graph / X-Twitter / Structured Data ─────────────────
+// Each detail panel's header button downloads the FULL extracted data for that
+// section (every tag, not just the fields shown in the panel rows).
+
+async function inspectorHost() {
+  let url = '';
+  try { url = (await getActiveTab()).url; } catch { /* keep empty */ }
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return 'page'; }
+}
+
+async function downloadInspectorJson(obj, basename, btn) {
+  const json = JSON.stringify(obj, null, 2);
+  const host = await inspectorHost();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+  a.download = `${basename}-${host}-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  if (btn) {
+    const orig = btn.textContent;
+    btn.textContent = 'Downloaded ✓';
+    btn.disabled = true;
+    setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2000);
+  }
+}
+
+document.getElementById('btn-og-download').addEventListener('click', () => {
+  const og = (pageData && pageData.openGraph && pageData.openGraph.og) || {};
+  if (!Object.keys(og).length) return;
+  downloadInspectorJson(og, 'opengraph', document.getElementById('btn-og-download'));
+});
+
+document.getElementById('btn-tw-download').addEventListener('click', () => {
+  const tw = (pageData && pageData.openGraph && pageData.openGraph.twitter) || {};
+  if (!Object.keys(tw).length) return;
+  downloadInspectorJson(tw, 'twitter', document.getElementById('btn-tw-download'));
+});
+
+document.getElementById('btn-schema-download').addEventListener('click', () => {
+  if (!_schemas.length) return;
+  downloadInspectorJson(_schemas, 'structured-data', document.getElementById('btn-schema-download'));
 });

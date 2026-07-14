@@ -571,6 +571,7 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
       const noImpr   = sorted.filter(r => !r.impressions);
       if (noImpr.length > 0) { toRender = withImpr; hiddenKwCount = noImpr.length; }
     }
+    container._exportRows = toRender;   // exact rendered set, read by the header export buttons
 
     toRender.forEach(r => {
       const row = document.createElement('div');
@@ -1384,6 +1385,105 @@ document.getElementById('btn-ads-branded-toggle').addEventListener('click', () =
   if (_adsData) renderAdsAll();
   if (typeof _gscQueries !== 'undefined' && _gscQueries.length && typeof renderGscQueries === 'function') renderGscQueries(_gscQueries, _gscPageUrl);
 });
+
+// ─── Table export: CSV download + per-domain Google Sheet ────────────────────
+// Mirrors the Search tab's query export (popup-gsc.js, loaded before this
+// file): exports exactly the rows the table currently shows — cross-filter,
+// intent, regex, brand, and QS filters plus sort all apply — with an Intent
+// column neither table displays. buildAdsMetricTable stashes its rendered row
+// set on the container as _exportRows, so exports can't drift from the table.
+
+const ADS_EXPORT_HEADERS = {
+  keywords: ['Keyword', 'Match Type', 'Intent', 'QS', 'Impressions', 'Clicks', 'Cost', 'Conversions', 'Volume', 'CPC ($)', 'Competition'],
+  terms:    ['Search Term', 'Intent', 'Impressions', 'Clicks', 'Cost', 'Conversions', 'Volume', 'CPC ($)', 'Competition']
+};
+
+function adsExportValues(rows, withQs) {
+  return rows.map(r => {
+    const intent = intentOf(r.text) || '';
+    const common = [
+      Math.round(r.impressions || 0),
+      Math.round(r.clicks || 0),
+      +(r.cost || 0).toFixed(2),
+      +(r.conversions || 0).toFixed(1),
+      r.vol ?? '',
+      r.cpc ? +(r.cpc / 1e6).toFixed(2) : '',
+      r.comp || ''
+    ];
+    return withQs
+      ? [r.text, r.matchType || '', intent, r.qualityScore ?? '', ...common]
+      : [r.text || '(none)', intent, ...common];
+  });
+}
+
+function wireAdsExport(csvId, sheetId, tableId, table, withQs) {
+  const rowsNow = () => document.getElementById(tableId)._exportRows || [];
+
+  document.getElementById(csvId).addEventListener('click', async () => {
+    const btn = document.getElementById(csvId);
+    if (btn.disabled) return;
+    const rows = rowsNow();
+    if (!rows.length) return;
+
+    btn.disabled = true;
+    const origTitle = btn.title;
+    btn.title = 'Classifying intents…';
+    await gscEnsureExportIntents(rows.map(r => r.text));
+
+    const csv = [ADS_EXPORT_HEADERS[table], ...adsExportValues(rows, withQs)]
+      .map(row => row.map(gscCsvCell).join(',')).join('\r\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = `ads-${table}-${_adsHost || 'site'}-${adsSelectedRange}d-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+
+    btn.disabled = false;
+    btn.classList.add('is-success');
+    btn.title = 'Downloaded ✓';
+    setTimeout(() => { btn.classList.remove('is-success'); btn.title = origTitle; }, 3000);
+  });
+
+  // Mirrors exportAddKwBlindspotsToSheet's connect-retry + feedback flow.
+  document.getElementById(sheetId).addEventListener('click', async () => {
+    const btn = document.getElementById(sheetId);
+    if (btn.disabled) return;
+    const rows = rowsNow();
+    if (!rows.length) return;
+
+    btn.disabled = true;
+    const origTitle = btn.title;
+    btn.title = 'Adding to Google Sheet…';
+    await gscEnsureExportIntents(rows.map(r => r.text));
+    const values = adsExportValues(rows, withQs);
+    let pageUrl = '';
+    try { pageUrl = (pageData && pageData.canonical) || (await getActiveTab()).url; } catch { /* keep default */ }
+
+    async function attempt() {
+      return sendMessageWithTimeout({ action: 'sheetsExportAdsTable', table, rows: values, pageUrl, rangeDays: adsSelectedRange });
+    }
+    let res = await attempt();
+    if (res && res.notConnected) {
+      const auth = await sendMessageWithTimeout({ action: 'docsConnect' });
+      if (!auth || auth.error) { btn.disabled = false; btn.title = 'Google Sheets auth failed — try again'; setTimeout(() => { btn.title = origTitle; }, 3000); return; }
+      res = await attempt();
+    }
+    btn.disabled = false;
+    if (res && res.url) {
+      browser.tabs.create({ url: res.url });
+      btn.classList.add('is-success');
+      btn.title = 'Added ✓';
+      setTimeout(() => { btn.classList.remove('is-success'); btn.title = origTitle; }, 3000);
+    } else {
+      btn.classList.add('is-error');
+      btn.title = `Export failed: ${(res && res.error) || 'unknown error'}`;
+      setTimeout(() => { btn.classList.remove('is-error'); btn.title = origTitle; }, 3000);
+    }
+  });
+}
+
+wireAdsExport('btn-ads-kw-export-csv', 'btn-ads-kw-export-sheet', 'ads-keywords-table', 'keywords', true);
+wireAdsExport('btn-ads-terms-export-csv', 'btn-ads-terms-export-sheet', 'ads-terms-table', 'terms', false);
 
 function loadAdsPrefs() {
   return browser.storage.local.get(['adsSelectedRange', 'adsActiveMetrics', 'gscHideBranded']).then(({ adsSelectedRange: stored, adsActiveMetrics: metrics, gscHideBranded: storedHide }) => {

@@ -3969,14 +3969,16 @@ function sheetsDomainFromUrl(pageUrl) {
   try { return new URL(pageUrl).hostname.replace(/^www\./, ''); } catch { return 'unknown'; }
 }
 
-// Finds (or creates) the one spreadsheet for this domain. A cached ID is
-// verified before trust — the user may have deleted the file in Drive since
-// last export — and silently recreated on 404/trashed, matching the same
-// no-warning precedent as docsGetOrCreateFolder above.
-async function sheetsGetOrCreateSpreadsheet(accessToken, domain) {
+// Finds (or creates) the one spreadsheet for a cache key (one per domain per
+// export kind — blindspot keys are the bare domain for back-compat with IDs
+// cached before other export kinds existed). A cached ID is verified before
+// trust — the user may have deleted the file in Drive since last export — and
+// silently recreated on 404/trashed, matching the same no-warning precedent
+// as docsGetOrCreateFolder above.
+async function sheetsGetOrCreateSpreadsheet(accessToken, cacheKey, { title, tabName, headerRow }) {
   const { sheetsSpreadsheetIds } = await browser.storage.local.get('sheetsSpreadsheetIds');
   const cache = sheetsSpreadsheetIds || {};
-  const cached = cache[domain];
+  const cached = cache[cacheKey];
   if (cached && cached.id) {
     const check = await fetch(`https://www.googleapis.com/drive/v3/files/${cached.id}?fields=id,trashed`, {
       headers: { Authorization: `Bearer ${accessToken}` }
@@ -3988,13 +3990,12 @@ async function sheetsGetOrCreateSpreadsheet(accessToken, domain) {
     // 404, trashed, or network error: fall through and recreate below.
   }
 
-  const title = `SEO Inspector Blindspots — ${domain}`;
   const createRes = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       properties: { title },
-      sheets: [{ properties: { title: SHEETS_TAB_NAME } }]
+      sheets: [{ properties: { title: tabName } }]
     })
   });
   if (!createRes.ok) {
@@ -4019,16 +4020,17 @@ async function sheetsGetOrCreateSpreadsheet(accessToken, domain) {
   }
 
   // Header row, written once at creation time only.
+  const endCol = String.fromCharCode(64 + headerRow.length);   // ≤26 columns
   await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`'${SHEETS_TAB_NAME}'!A1:I1`)}?valueInputOption=USER_ENTERED`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`'${tabName}'!A1:${endCol}1`)}?valueInputOption=USER_ENTERED`,
     {
       method: 'PUT',
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ values: [SHEETS_HEADER_ROW] })
+      body: JSON.stringify({ values: [headerRow] })
     }
   ).catch(() => {});
 
-  cache[domain] = { id: spreadsheetId, updatedAt: Date.now() };
+  cache[cacheKey] = { id: spreadsheetId, updatedAt: Date.now() };
   const keys = Object.keys(cache);
   if (keys.length > SHEETS_SPREADSHEET_CACHE_CAP) {
     keys.sort((a, b) => (cache[a].updatedAt || 0) - (cache[b].updatedAt || 0));
@@ -4038,8 +4040,8 @@ async function sheetsGetOrCreateSpreadsheet(accessToken, domain) {
   return { id: spreadsheetId };
 }
 
-async function sheetsAppendBlindspotIdeas(accessToken, spreadsheetId, rows) {
-  const range = encodeURIComponent(`'${SHEETS_TAB_NAME}'!A:I`);
+async function sheetsAppendRows(accessToken, spreadsheetId, tabName, rows) {
+  const range = encodeURIComponent(`'${tabName}'!A1`);
   const res = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
     {
@@ -4066,7 +4068,11 @@ async function sheetsExportBlindspotIdeas({ ideas, pageUrl }) {
   if (!Array.isArray(ideas) || !ideas.length) return { error: 'NO_IDEAS' };
 
   const domain = sheetsDomainFromUrl(pageUrl);
-  const sheet = await sheetsGetOrCreateSpreadsheet(token.accessToken, domain);
+  const sheet = await sheetsGetOrCreateSpreadsheet(token.accessToken, domain, {
+    title: `SEO Inspector Blindspots — ${domain}`,
+    tabName: SHEETS_TAB_NAME,
+    headerRow: SHEETS_HEADER_ROW
+  });
   if (sheet.notConnected || sheet.error) return sheet;
 
   const dateAdded = new Date().toISOString().slice(0, 10);
@@ -4076,7 +4082,88 @@ async function sheetsExportBlindspotIdeas({ ideas, pageUrl }) {
     r.confidence || '', r.matchType || '', r.volume ?? '', r.competition || '', r.reason || ''
   ]);
 
-  const appendRes = await sheetsAppendBlindspotIdeas(token.accessToken, sheet.id, rows);
+  const appendRes = await sheetsAppendRows(token.accessToken, sheet.id, SHEETS_TAB_NAME, rows);
+  if (appendRes.notConnected || appendRes.error) return appendRes;
+
+  return { url: `https://docs.google.com/spreadsheets/d/${sheet.id}/edit` };
+}
+
+// ─── Google Sheets: Search-tab query export ─────────────────────────────────
+// Same one-spreadsheet-per-domain history-log model as the blindspot export
+// above, but its own file + tab ("Search Queries"). Rows arrive pre-formatted
+// from the popup (which owns the intent classifications and Ads enrichment);
+// this handler just prepends the export date/range/page context.
+
+const SHEETS_GSC_TAB_NAME = 'Search Queries';
+const SHEETS_GSC_HEADER_ROW = [
+  'Date Exported', 'Range (days)', 'Page URL',
+  'Query', 'Intent', 'Clicks', 'Impressions', 'CTR %', 'Position', 'Volume', 'CPC ($)', 'Difficulty'
+];
+
+async function sheetsExportGscQueries({ rows, pageUrl, rangeDays }) {
+  const token = await docsGetAccessToken();
+  if (token.error) return { notConnected: true, error: token.error };
+
+  if (!Array.isArray(rows) || !rows.length) return { error: 'NO_ROWS' };
+
+  const domain = sheetsDomainFromUrl(pageUrl);
+  const sheet = await sheetsGetOrCreateSpreadsheet(token.accessToken, `gsc-queries::${domain}`, {
+    title: `SEO Inspector Search Queries — ${domain}`,
+    tabName: SHEETS_GSC_TAB_NAME,
+    headerRow: SHEETS_GSC_HEADER_ROW
+  });
+  if (sheet.notConnected || sheet.error) return sheet;
+
+  const dateAdded = new Date().toISOString().slice(0, 10);
+  const values = rows.map(r => [dateAdded, rangeDays || '', pageUrl, ...r]);
+
+  const appendRes = await sheetsAppendRows(token.accessToken, sheet.id, SHEETS_GSC_TAB_NAME, values);
+  if (appendRes.notConnected || appendRes.error) return appendRes;
+
+  return { url: `https://docs.google.com/spreadsheets/d/${sheet.id}/edit` };
+}
+
+// ─── Google Sheets: Ads-tab table exports (Keywords / Search Terms) ─────────
+// Same history-log model again; one spreadsheet per domain per table.
+
+const SHEETS_ADS_TABLES = {
+  keywords: {
+    tabName: 'Ads Keywords',
+    title: d => `SEO Inspector Ads Keywords — ${d}`,
+    cacheKey: d => `ads-keywords::${d}`,
+    headerRow: ['Date Exported', 'Range (days)', 'Page URL',
+      'Keyword', 'Match Type', 'Intent', 'QS', 'Impressions', 'Clicks', 'Cost', 'Conversions', 'Volume', 'CPC ($)', 'Competition']
+  },
+  terms: {
+    tabName: 'Search Terms',
+    title: d => `SEO Inspector Ads Search Terms — ${d}`,
+    cacheKey: d => `ads-terms::${d}`,
+    headerRow: ['Date Exported', 'Range (days)', 'Page URL',
+      'Search Term', 'Intent', 'Impressions', 'Clicks', 'Cost', 'Conversions', 'Volume', 'CPC ($)', 'Competition']
+  }
+};
+
+async function sheetsExportAdsTable({ table, rows, pageUrl, rangeDays }) {
+  const cfg = SHEETS_ADS_TABLES[table];
+  if (!cfg) return { error: 'BAD_TABLE' };
+
+  const token = await docsGetAccessToken();
+  if (token.error) return { notConnected: true, error: token.error };
+
+  if (!Array.isArray(rows) || !rows.length) return { error: 'NO_ROWS' };
+
+  const domain = sheetsDomainFromUrl(pageUrl);
+  const sheet = await sheetsGetOrCreateSpreadsheet(token.accessToken, cfg.cacheKey(domain), {
+    title: cfg.title(domain),
+    tabName: cfg.tabName,
+    headerRow: cfg.headerRow
+  });
+  if (sheet.notConnected || sheet.error) return sheet;
+
+  const dateAdded = new Date().toISOString().slice(0, 10);
+  const values = rows.map(r => [dateAdded, rangeDays || '', pageUrl, ...r]);
+
+  const appendRes = await sheetsAppendRows(token.accessToken, sheet.id, cfg.tabName, values);
   if (appendRes.notConnected || appendRes.error) return appendRes;
 
   return { url: `https://docs.google.com/spreadsheets/d/${sheet.id}/edit` };
@@ -4154,6 +4241,8 @@ browser.runtime.onMessage.addListener((message) => {
     case 'docsExportNegatives':  return docsExportNegatives(message);
     case 'docsExportAddKeywords': return docsExportAddKeywords(message);
     case 'sheetsExportBlindspotIdeas': return sheetsExportBlindspotIdeas(message);
+    case 'sheetsExportGscQueries': return sheetsExportGscQueries(message);
+    case 'sheetsExportAdsTable': return sheetsExportAdsTable(message);
     default: return undefined;
   }
 });

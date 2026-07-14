@@ -1228,6 +1228,131 @@ document.getElementById('btn-gsc-more-queries').addEventListener('click', async 
   btn.textContent = label;
 });
 
+// ─── Query table export: CSV download + per-domain Google Sheet ─────────────
+// Exports the rows currently visible in the table (branded/regex/intent
+// filters and sort applied), plus an Intent column the table itself doesn't
+// show. Both exports share the same column set; the Sheet handler prepends
+// date/range/page context in background.js.
+
+// The same filter funnel as renderGscQueries, minus the DOM work.
+function gscExportVisibleQueries() {
+  const pattern = gscBrandedPattern();
+  const sorted = sortGscQueries(_gscQueries, gscQuerySort);
+  let visible = sorted.filter(q => !(gscHideBranded && isQueryBranded(q.query, pattern)));
+  if (_gscQuerySearch) {
+    try {
+      const re = new RegExp(_gscQuerySearch, 'i');
+      visible = _gscQuerySearchExclude
+        ? visible.filter(q => !re.test(q.query))
+        : visible.filter(q =>  re.test(q.query));
+    } catch { /* invalid regex — export unfiltered, matching the table */ }
+  }
+  if (_gscIntentFilter) visible = visible.filter(q => intentOf(q.query) === _gscIntentFilter);
+  return visible;
+}
+
+// Intent classification is lazy and batched (INTENT_BATCH per call), so rows
+// beyond what render already classified may be missing. Top up batch-by-batch
+// until the export set is covered; bail on no progress (no key / API error).
+async function gscEnsureExportIntents(terms) {
+  const missingOf = () => terms.filter(t => !intentOf(t));
+  for (let guard = 0; guard < 12 && missingOf().length; guard++) {
+    for (let w = 0; w < 20 && _intentLoading; w++) await new Promise(r => setTimeout(r, 250));
+    const before = missingOf().length;
+    if (!before) return;
+    await ensureIntents(missingOf());
+    if (missingOf().length >= before) return;
+  }
+}
+
+const GSC_EXPORT_HEADER = ['Query', 'Intent', 'Clicks', 'Impressions', 'CTR %', 'Position', 'Volume', 'CPC ($)', 'Difficulty'];
+
+function gscExportValues(queries) {
+  const volAvailable = _gscAdsVolumeState === 'available';
+  return queries.map(q => {
+    const v = volAvailable ? _gscQueryVolumeMap[(q.query || '').toLowerCase().trim()] : null;
+    const micros = gscCpcMicros(v);
+    return [
+      q.query,
+      intentOf(q.query) || '',
+      Math.round(q.clicks || 0),
+      Math.round(q.impressions || 0),
+      q.ctr != null ? +(q.ctr * 100).toFixed(1) : '',
+      q.position != null ? +q.position.toFixed(1) : '',
+      (v && v.avgMonthlySearches != null) ? v.avgMonthlySearches : '',
+      micros ? +(micros / 1e6).toFixed(2) : '',
+      gscDifficultyScore(v) || ''
+    ];
+  });
+}
+
+function gscCsvCell(v) {
+  const s = String(v ?? '');
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+document.getElementById('btn-gsc-export-csv').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-gsc-export-csv');
+  if (btn.disabled) return;
+  const visible = gscExportVisibleQueries();
+  if (!visible.length) return;
+
+  btn.disabled = true;
+  const origTitle = btn.title;
+  btn.title = 'Classifying intents…';
+  await gscEnsureExportIntents(visible.map(q => q.query));
+
+  const csv = [GSC_EXPORT_HEADER, ...gscExportValues(visible)]
+    .map(row => row.map(gscCsvCell).join(',')).join('\r\n');
+  let host = 'site';
+  try { host = new URL(_gscPageUrl).hostname.replace(/^www\./, ''); } catch { /* keep default */ }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = `gsc-queries-${host}-${gscSelectedRange}d-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+
+  btn.disabled = false;
+  btn.classList.add('is-success');
+  btn.title = 'Downloaded ✓';
+  setTimeout(() => { btn.classList.remove('is-success'); btn.title = origTitle; }, 3000);
+});
+
+// Mirrors exportAddKwBlindspotsToSheet's connect-retry + feedback flow.
+document.getElementById('btn-gsc-export-sheet').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-gsc-export-sheet');
+  if (btn.disabled) return;
+  const visible = gscExportVisibleQueries();
+  if (!visible.length) return;
+
+  btn.disabled = true;
+  const origTitle = btn.title;
+  btn.title = 'Adding to Google Sheet…';
+  await gscEnsureExportIntents(visible.map(q => q.query));
+  const rows = gscExportValues(visible);
+
+  async function attempt() {
+    return sendMessageWithTimeout({ action: 'sheetsExportGscQueries', rows, pageUrl: _gscPageUrl, rangeDays: gscSelectedRange });
+  }
+  let res = await attempt();
+  if (res && res.notConnected) {
+    const auth = await sendMessageWithTimeout({ action: 'docsConnect' });
+    if (!auth || auth.error) { btn.disabled = false; btn.title = 'Google Sheets auth failed — try again'; setTimeout(() => { btn.title = origTitle; }, 3000); return; }
+    res = await attempt();
+  }
+  btn.disabled = false;
+  if (res && res.url) {
+    browser.tabs.create({ url: res.url });
+    btn.classList.add('is-success');
+    btn.title = 'Added ✓';
+    setTimeout(() => { btn.classList.remove('is-success'); btn.title = origTitle; }, 3000);
+  } else {
+    btn.classList.add('is-error');
+    btn.title = `Export failed: ${(res && res.error) || 'unknown error'}`;
+    setTimeout(() => { btn.classList.remove('is-error'); btn.title = origTitle; }, 3000);
+  }
+});
+
 document.getElementById('btn-gsc-clear-query-filter').addEventListener('click', () => {
   if (_gscSelectedQuery) { selectGscQuery(_gscSelectedQuery); return; }
   if (_gscIntentFilter) {

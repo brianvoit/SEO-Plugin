@@ -1,8 +1,14 @@
 {
   "manifest_version": 3,
   "name": "SEO Inspector",
-  "version": "1.96",
+  "version": "1.97",
   "description": "Quick SEO metadata inspector — title, meta description, headings, canonical, and alt text overlay.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "browser_specific_settings": {
     "gecko": {
       "id": "seo-inspector@brianvoit",
@@ -34,11 +40,19 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_icon": "icons/icon.svg"
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    }
   },
   "sidebar_action": {
     "default_panel": "popup.html",
-    "default_icon": "icons/icon.svg",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    },
     "default_title": "SEO Inspector"
   },
   "content_scripts": [

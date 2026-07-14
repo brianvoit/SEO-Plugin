@@ -1731,6 +1731,7 @@ function render(data, expandMeta = false) {
   renderDates(data);
   renderOverlayToggle(data.altOverlayActive);
   renderLinkOverlayToggle(data.linkOverlayActive);
+  if (typeof loadPageSpeedData === 'function') loadPageSpeedData(false);
   if (typeof loadBacklinksData === 'function') loadBacklinksData(false);
   if (typeof loadSiteAuditData === 'function') loadSiteAuditData(false);
   if (typeof loadChartAnnotations === 'function') loadChartAnnotations(false);

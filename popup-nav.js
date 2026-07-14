@@ -17,6 +17,7 @@ const addkwPanel      = document.getElementById('addkw-panel');
 const adgroupPanel    = document.getElementById('adgroup-panel');
 const backlinksPanel  = document.getElementById('backlinks-panel');
 const siteauditPanel  = document.getElementById('siteaudit-panel');
+const pagespeedPanel  = document.getElementById('pagespeed-panel');
 const utmPanel        = document.getElementById('utm-panel');
 const searchTab     = document.getElementById('search-tab');
 const analyticsTab  = document.getElementById('analytics-tab');
@@ -29,6 +30,16 @@ const mainContent   = document.getElementById('content');
 const tabGroup      = document.getElementById('main-tabs');
 const updateFooter  = document.getElementById('update-footer');
 const errorBanner   = document.getElementById('error-state');
+
+// Measure the sticky main tab-bar header height into --header-h so panel
+// sub-headers (.settings-header) can pin directly beneath it. Runs on load and
+// whenever the window resizes (popup ↔ sidebar ↔ pop-out change its width).
+function syncHeaderOffset() {
+  const header = document.querySelector('header');
+  if (header) document.documentElement.style.setProperty('--header-h', header.offsetHeight + 'px');
+}
+syncHeaderOffset();
+window.addEventListener('resize', syncHeaderOffset);
 
 let activeTab = 'overview';
 
@@ -47,6 +58,7 @@ function hideDetailPanels() {
   adgroupPanel.classList.add('hidden');
   backlinksPanel.classList.add('hidden');
   siteauditPanel.classList.add('hidden');
+  pagespeedPanel.classList.add('hidden');
   utmPanel.classList.add('hidden');
 }
 
@@ -166,6 +178,12 @@ function showSiteAuditPanel() {
   if (typeof loadSiteAuditData === 'function') loadSiteAuditData(false);
 }
 
+function showPageSpeedPanel() {
+  enterDetailPanel();
+  pagespeedPanel.classList.remove('hidden');
+  if (typeof openPageSpeedPanel === 'function') openPageSpeedPanel();
+}
+
 function showUtmPanel() {
   enterDetailPanel();
   utmPanel.classList.remove('hidden');
@@ -186,10 +204,12 @@ function showSettings() {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('is-active'));
   document.getElementById('btn-settings').classList.add('is-active');
 
-  browser.storage.local.get(['claudeApiKey', 'charRanges', 'displayMode', 'followActiveTab', 'gscClientId', 'gscClientSecret']).then(({ claudeApiKey, charRanges: stored, displayMode, followActiveTab, gscClientId, gscClientSecret }) => {
+  browser.storage.local.get(['claudeApiKey', 'psiApiKey', 'charRanges', 'displayMode', 'followActiveTab', 'gscClientId', 'gscClientSecret']).then(({ claudeApiKey, psiApiKey, charRanges: stored, displayMode, followActiveTab, gscClientId, gscClientSecret }) => {
     document.getElementById('btn-follow-tab').setAttribute('aria-pressed', String(followActiveTab !== false));
     setKeyState(!!claudeApiKey);
     document.getElementById('key-saved-msg').classList.add('hidden');
+    if (typeof setPsiKeyState === 'function') setPsiKeyState(!!psiApiKey);
+    document.getElementById('psi-key-saved-msg').classList.add('hidden');
 
     const ranges = stored ?? DEFAULT_RANGES;
     document.getElementById('title-min').value    = ranges.title.min;
@@ -263,6 +283,8 @@ document.getElementById('btn-backlinks').addEventListener('click', showBacklinks
 document.getElementById('btn-backlinks-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-siteaudit').addEventListener('click', showSiteAuditPanel);
 document.getElementById('btn-siteaudit-back').addEventListener('click', hideDetailPanelToTab);
+document.getElementById('btn-pagespeed').addEventListener('click', showPageSpeedPanel);
+document.getElementById('btn-pagespeed-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-utm').addEventListener('click', showUtmPanel);
 document.getElementById('btn-utm-back').addEventListener('click', hideDetailPanelToTab);
 
@@ -286,6 +308,7 @@ document.querySelectorAll('#main-tabs [data-tab]').forEach(btn => {
       || !adgroupPanel.classList.contains('hidden')
       || !backlinksPanel.classList.contains('hidden')
       || !siteauditPanel.classList.contains('hidden')
+      || !pagespeedPanel.classList.contains('hidden')
       || !utmPanel.classList.contains('hidden');
     if (tab === activeTab && !inPanel) return;
     activeTab = tab;

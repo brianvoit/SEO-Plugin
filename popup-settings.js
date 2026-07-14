@@ -348,6 +348,58 @@ document.getElementById('btn-clear-key').addEventListener('click', () => {
   browser.storage.local.remove('claudeApiKey').then(() => setKeyState(false));
 });
 
+// ─── PageSpeed Insights API key (mirrors the Claude key above) ────────────────
+
+function setPsiKeyState(hasKey) {
+  const input = document.getElementById('psi-key-input');
+  document.getElementById('btn-toggle-psi-key-vis').classList.toggle('hidden', hasKey);
+  document.getElementById('btn-clear-psi-key').classList.toggle('hidden', !hasKey);
+  document.getElementById('btn-save-psi-key').classList.toggle('hidden', hasKey);
+  input.classList.toggle('api-key-input--saved', hasKey);
+
+  input.type = 'password';
+  input.value = '';
+  if (hasKey) {
+    input.readOnly = true;
+    input.placeholder = '••••••••••••  saved';
+    document.getElementById('psi-icon-eye-open').classList.remove('hidden');
+    document.getElementById('psi-icon-eye-closed').classList.add('hidden');
+  } else {
+    input.readOnly = false;
+    input.placeholder = 'AIza…';
+  }
+}
+
+document.getElementById('btn-toggle-psi-key-vis').addEventListener('click', () => {
+  const input     = document.getElementById('psi-key-input');
+  const eyeOpen   = document.getElementById('psi-icon-eye-open');
+  const eyeClosed = document.getElementById('psi-icon-eye-closed');
+  const isHidden  = input.type === 'password';
+  input.type = isHidden ? 'text' : 'password';
+  eyeOpen.classList.toggle('hidden', isHidden);
+  eyeClosed.classList.toggle('hidden', !isHidden);
+});
+
+document.getElementById('btn-save-psi-key').addEventListener('click', () => {
+  const key = document.getElementById('psi-key-input').value.trim();
+  if (!key) return;
+  browser.storage.local.set({ psiApiKey: key }).then(() => {
+    setPsiKeyState(true);
+    const saved = document.getElementById('psi-key-saved-msg');
+    saved.classList.remove('hidden');
+    setTimeout(() => saved.classList.add('hidden'), 2500);
+    // Refresh the Overview row now that a key exists
+    if (typeof loadPageSpeedData === 'function') loadPageSpeedData(false);
+  });
+});
+
+document.getElementById('btn-clear-psi-key').addEventListener('click', () => {
+  browser.storage.local.remove('psiApiKey').then(() => {
+    setPsiKeyState(false);
+    if (typeof loadPageSpeedData === 'function') loadPageSpeedData(false);
+  });
+});
+
 // ─── SEO character ranges ────────────────────────────────────────────────────
 
 // Auto-save ranges on change (debounced)

@@ -1849,6 +1849,119 @@ async function dnsResolve({ host }) {
   return entry;
 }
 
+// ─── PageSpeed Insights / Core Web Vitals (PSI API v5) ───────────────────────
+// Per-URL Lighthouse lab results + CrUX real-user field data. Requires a free
+// PSI API key (Settings). Cached per url::strategy for 6h since perf changes
+// with deploys, not by the minute.
+
+const PSI_TTL_MS = 6 * 60 * 60 * 1000;
+
+// CrUX field-metric key → our short name
+const PSI_FIELD_KEYS = {
+  LARGEST_CONTENTFUL_PAINT_MS: 'LCP',
+  INTERACTION_TO_NEXT_PAINT: 'INP',
+  CUMULATIVE_LAYOUT_SHIFT_SCORE: 'CLS',
+  FIRST_CONTENTFUL_PAINT_MS: 'FCP',
+  EXPERIMENTAL_TIME_TO_FIRST_BYTE: 'TTFB'
+};
+
+// Lighthouse lab audit id → our short name
+const PSI_LAB_AUDITS = {
+  'largest-contentful-paint': 'LCP',
+  'cumulative-layout-shift': 'CLS',
+  'first-contentful-paint': 'FCP',
+  'total-blocking-time': 'TBT',
+  'speed-index': 'SI',
+  'interactive': 'TTI'
+};
+
+function psiLabMetric(audit) {
+  if (!audit) return null;
+  return { value: audit.numericValue != null ? audit.numericValue : null, display: audit.displayValue || null };
+}
+
+async function psiGetPageSpeed({ url, strategy = 'mobile', cacheOnly = false, forceRefresh = false }) {
+  if (!url) return { error: 'BAD_URL' };
+  const strat = strategy === 'desktop' ? 'desktop' : 'mobile';
+
+  const { psiApiKey } = await browser.storage.local.get('psiApiKey');
+  if (!psiApiKey) return { error: 'NO_PSI_KEY' };
+
+  const key = `${strat}::${url}`;
+  const { psiCache } = await browser.storage.local.get('psiCache');
+  const cache = psiCache || {};
+  const cached = cache[key];
+  if (cached && !forceRefresh && (Date.now() - cached.fetchedAt < PSI_TTL_MS)) return { ...cached, fromCache: true };
+  // Overview loads pass cacheOnly so a page view never triggers a live (slow,
+  // quota-costing) PSI run — that happens only when the panel opens / refreshes.
+  if (cacheOnly) return { notCached: true };
+
+  const endpoint = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed'
+    + `?url=${encodeURIComponent(url)}&strategy=${strat}&category=performance&key=${encodeURIComponent(psiApiKey)}`;
+
+  let data;
+  try {
+    const res = await fetch(endpoint);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      const detail = body && body.error && body.error.message;
+      if (res.status === 400 || res.status === 403) return { error: 'BAD_KEY', detail };
+      if (res.status === 429) return { error: 'RATE_LIMITED', detail };
+      return { error: 'API_ERROR', detail };
+    }
+    data = await res.json();
+  } catch {
+    return { error: 'NETWORK' };
+  }
+
+  // Lighthouse lab
+  const lh = data.lighthouseResult || {};
+  const audits = lh.audits || {};
+  const perf = lh.categories && lh.categories.performance;
+  const performanceScore = (perf && perf.score != null) ? Math.round(perf.score * 100) : null;
+
+  const lab = {};
+  Object.keys(PSI_LAB_AUDITS).forEach(id => { lab[PSI_LAB_AUDITS[id]] = psiLabMetric(audits[id]); });
+
+  // CrUX field data (page-level, falling back to origin). category = FAST/AVERAGE/SLOW.
+  const le = data.loadingExperience || {};
+  let field = null;
+  if (le.metrics && Object.keys(le.metrics).length) {
+    const metrics = {};
+    Object.keys(PSI_FIELD_KEYS).forEach(cruxKey => {
+      const m = le.metrics[cruxKey];
+      if (m) metrics[PSI_FIELD_KEYS[cruxKey]] = { p: m.percentile != null ? m.percentile : null, category: m.category || null };
+    });
+    field = {
+      overall: le.overall_category || null,
+      origin: !!le.origin_fallback,
+      metrics
+    };
+  }
+
+  // Opportunities: audits with a savings estimate, biggest first.
+  const opportunities = Object.values(audits)
+    .filter(a => a && a.details && a.details.type === 'opportunity' && a.details.overallSavingsMs > 0)
+    .map(a => ({ title: a.title, display: a.displayValue || null, ms: Math.round(a.details.overallSavingsMs) }))
+    .sort((a, b) => b.ms - a.ms)
+    .slice(0, 6);
+
+  const entry = {
+    url, strategy: strat, finalUrl: lh.finalUrl || url,
+    performanceScore, field, lab, opportunities,
+    fetchedAt: Date.now()
+  };
+
+  cache[key] = entry;
+  const keys = Object.keys(cache);
+  if (keys.length > 30) {
+    keys.sort((a, b) => cache[a].fetchedAt - cache[b].fetchedAt);
+    keys.slice(0, keys.length - 30).forEach(k => delete cache[k]);
+  }
+  await browser.storage.local.set({ psiCache: cache });
+  return entry;
+}
+
 // ─── Favicon: live reachability check + site-scoped cache "torch" ─────────────
 
 const FAVICON_FETCH_TIMEOUT_MS = 8000;
@@ -4213,6 +4326,7 @@ browser.runtime.onMessage.addListener((message) => {
     case 'openPopout':         return openPopoutWindow();
     case 'getDomainAge':       return getDomainAge(message);
     case 'dnsResolve':         return dnsResolve(message);
+    case 'psiGetPageSpeed':    return psiGetPageSpeed(message);
     case 'checkLinks':         return checkLinkStatuses(message);
     case 'validateFavicon':    return validateFavicon(message);
     case 'clearFaviconCache':  return clearFaviconCache(message);

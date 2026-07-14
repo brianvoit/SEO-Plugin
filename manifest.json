@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SEO Inspector",
-  "version": "1.97",
+  "version": "1.98",
   "description": "Quick SEO metadata inspector — title, meta description, headings, canonical, and alt text overlay.",
   "icons": {
     "16": "icons/icon-16.png",

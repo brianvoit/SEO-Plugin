@@ -2442,6 +2442,25 @@ body.settings-open #update-footer { margin-top: auto; }
   padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 12px;
 }
 .psi-metric-row:last-child { border-bottom: none; }
+/* Clickable only when Lighthouse attributes audits to the metric */
+.psi-metric-row--click { cursor: pointer; border-radius: 4px; margin: 0 -4px; padding: 5px 4px; }
+.psi-metric-row--click:hover { background: var(--bg-section); }
+.psi-metric-row--click:hover .psi-metric-name { color: var(--accent); }
+.psi-metric-row.is-active { background: var(--bg-section); box-shadow: inset 2px 0 0 var(--accent); }
+.psi-metric-row.is-active .psi-metric-name { color: var(--accent); }
+
+/* Active metric filter bar above the breakdown */
+.psi-filter-bar {
+  display: flex; align-items: center; gap: 8px;
+  margin: 12px 0 2px; padding: 5px 8px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-radius: 5px;
+}
+.psi-filter-label { font-size: 11px; font-weight: 600; color: var(--accent); }
+.psi-filter-clear {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  font-size: 11px; font-weight: 600; color: var(--accent); text-decoration: underline;
+}
 .psi-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--text-none); }
 .psi-dot.psi-good { background: var(--hint-green); }
 .psi-dot.psi-ni   { background: var(--hint-amber); }
@@ -2455,16 +2474,68 @@ body.settings-open #update-footer { margin-top: auto; }
   margin-left: auto; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-weight: 600;
 }
 
-/* Opportunities */
-.psi-opp-row {
-  display: flex; align-items: baseline; gap: 8px;
-  padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 12px;
+/* Element callouts: the actual LCP / shifting elements, under their metric */
+.psi-callout {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 6px 8px; margin: 4px 0 6px 16px;
+  background: var(--bg-section); border-left: 2px solid var(--accent); border-radius: 0 4px 4px 0;
 }
-.psi-opp-row:last-child { border-bottom: none; }
-.psi-opp-title { color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.psi-opp-savings {
+.psi-callout-label {
+  font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+  color: var(--accent); flex-shrink: 0;
+}
+.psi-callout-node { font-size: 11px; color: var(--text); font-weight: 600; }
+
+/* Expandable audit (opportunities + diagnostics) */
+.psi-audit { border-bottom: 1px solid var(--border); }
+.psi-audit:last-child { border-bottom: none; }
+.psi-audit-head {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  padding: 6px 0; background: none; border: none; cursor: pointer;
+  font-size: 12px; color: var(--text); text-align: left;
+}
+.psi-audit-head:hover .psi-audit-title { color: var(--accent); }
+.psi-audit-caret { color: var(--text-muted); font-size: 9px; flex-shrink: 0; width: 8px; }
+.psi-audit-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.psi-audit-count {
+  font-size: 9px; font-weight: 700; padding: 0 5px; border-radius: 8px; flex-shrink: 0;
+  background: color-mix(in srgb, var(--text-muted) 16%, transparent); color: var(--text-muted);
+}
+.psi-audit-savings {
   margin-left: auto; flex-shrink: 0; color: var(--hint-amber); font-weight: 600;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px;
+}
+.psi-audit-body { padding: 2px 0 8px 15px; }
+.psi-audit-desc { font-size: 11px; color: var(--text-muted); line-height: 1.45; margin: 0 0 6px; }
+.psi-audit-desc--muted { color: var(--text-none); font-style: italic; }
+
+/* One offending resource / element inside an expanded audit */
+.psi-item {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 4px 0; border-top: 1px solid var(--border);
+}
+.psi-item-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.psi-item-label {
+  font-size: 11px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.psi-item-sel {
+  font-size: 9.5px; color: var(--text-none);
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.psi-item-facts {
+  margin-left: auto; flex-shrink: 0; font-size: 10.5px; color: var(--text-muted);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* DOM snippet — wraps rather than truncating, so the tag stays readable */
+.psi-snippet {
+  display: block; font-size: 9.5px; line-height: 1.4;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--heading-tag-color); background: var(--heading-tag-bg);
+  border-radius: 3px; padding: 2px 5px;
+  overflow-wrap: anywhere; max-height: 48px; overflow: hidden;
 }
 
 /* Footer: open-report button + timestamp */
@@ -2776,10 +2847,12 @@ body.settings-open #update-footer { margin-top: auto; }
 .gsc-query-row { padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 11.5px; }
 .gsc-query-row:last-child { border-bottom: none; }
 .gsc-query-main { display: grid; grid-template-columns: 18px 1fr 58px 54px 50px 50px; gap: 6px; align-items: center; }
-/* Vol/competition column only exists once an Ads connection is confirmed
-   for the domain (see _gscAdsVolumeState in popup-gsc.js) — the base
-   .gsc-query-main above is untouched for the disconnected case. */
-.gsc-query-main--vol { grid-template-columns: 18px 1fr 42px 46px 42px 46px 42px 38px 38px; gap: 5px; }
+/* Vol/CPC/Comp columns only exist once an Ads connection is confirmed for the
+   domain (see _gscAdsVolumeState in popup-gsc.js) — the base .gsc-query-main
+   above is untouched for the disconnected case. Widths are positional, so they
+   track the column order built in renderGscQueries:
+   btn | Query | Impr. | Clicks | Pos. | CTR | Vol | CPC | Comp. */
+.gsc-query-main--vol { grid-template-columns: 18px 1fr 46px 42px 38px 38px 42px 46px 42px; gap: 5px; }
 .gsc-query-row--header { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); border-bottom: 1px solid var(--border); }
 .gsc-query-text-wrap { display: flex; align-items: center; gap: 4px; overflow: hidden; min-width: 0; }
 .gsc-query-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; color: var(--text); cursor: pointer; }

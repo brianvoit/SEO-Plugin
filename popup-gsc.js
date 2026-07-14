@@ -57,15 +57,15 @@ const GSC_QUERY_COLUMNS = [
   { key: 'ctr',         label: 'CTR',    format: v => (v * 100).toFixed(1) + '%' }
 ];
 
-// Ads-sourced demand column — prepended ahead of the performance columns
-// above, but only when _gscAdsVolumeState === 'available' (see
-// renderGscQueries). Cell content itself is special-cased in
-// buildQueryDataRow (needs a competition dot + hover trend, not just text),
-// this entry exists so the header/sort machinery treats it uniformly.
+// Ads-sourced demand column — appended after the performance columns above,
+// but only when _gscAdsVolumeState === 'available' (see renderGscQueries).
+// Cell content itself is special-cased in buildQueryDataRow (needs a
+// competition dot + hover trend, not just text), this entry exists so the
+// header/sort machinery treats it uniformly.
 const GSC_QUERY_VOL_COLUMN = { key: 'volume', label: 'Vol' };
 
 // Est. CPC (top-of-page bid) and keyword Difficulty (competition) — like the
-// Vol column, these are Ads-sourced, prepended only when volume is available,
+// Vol column, these are Ads-sourced, appended only when volume is available,
 // and special-cased in buildQueryDataRow (a currency value / a color-coded
 // High·Med·Low chip, not plain text).
 const GSC_QUERY_CPC_COLUMN  = { key: 'cpc',        label: 'CPC' };
@@ -869,7 +869,7 @@ function renderGscQueries(queries, pageUrl) {
   // usable Ads connection — see ensureGscQueryVolume below.
   const volAvailable = _gscAdsVolumeState === 'available';
   const columns = volAvailable
-    ? [GSC_QUERY_VOL_COLUMN, GSC_QUERY_CPC_COLUMN, GSC_QUERY_DIFF_COLUMN, ...GSC_QUERY_COLUMNS]
+    ? [...GSC_QUERY_COLUMNS, GSC_QUERY_VOL_COLUMN, GSC_QUERY_CPC_COLUMN, GSC_QUERY_DIFF_COLUMN]
     : GSC_QUERY_COLUMNS;
   if (volAvailable) {
     queries.forEach(q => {

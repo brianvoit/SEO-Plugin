@@ -1880,6 +1880,147 @@ function psiLabMetric(audit) {
   return { value: audit.numericValue != null ? audit.numericValue : null, display: audit.displayValue || null };
 }
 
+// Diagnostics worth surfacing: audits that explain WHY the metrics are slow.
+// Opportunities (details.type === 'opportunity') are picked up separately, so
+// anything that turns out to be one is skipped here to avoid duplicates.
+const PSI_DIAGNOSTIC_IDS = [
+  'server-response-time', 'uses-long-cache-ttl', 'total-byte-weight', 'dom-size',
+  'mainthread-work-breakdown', 'bootup-time', 'third-party-summary', 'font-display',
+  'critical-request-chains', 'long-tasks', 'unsized-images', 'non-composited-animations',
+  'duplicated-javascript', 'legacy-javascript', 'resource-summary', 'network-rtt',
+  'network-server-latency', 'uses-passive-event-listeners', 'no-document-write'
+];
+
+// Lighthouse detail values are wildly polymorphic (strings, {text,url} links,
+// node objects, numbers) and the shapes drift between Lighthouse versions, so
+// every extractor below is deliberately defensive and returns null rather than
+// assuming a shape.
+function psiText(v) {
+  if (v == null) return null;
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number') return String(v);
+  if (typeof v === 'object') return v.text || v.url || v.name || null;
+  return null;
+}
+function psiNodeOf(item) {
+  if (!item || typeof item !== 'object') return null;
+  if (item.node && typeof item.node === 'object') return item.node;
+  return null;
+}
+function psiClip(s, n) { return s == null ? null : String(s).replace(/\s+/g, ' ').trim().slice(0, n); }
+
+// Lighthouse descriptions are markdown with links — strip to plain prose.
+function psiDesc(d) {
+  if (!d) return null;
+  return psiClip(String(d).replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/`/g, ''), 400);
+}
+
+// Collapse one detail row into { label, snippet, selector, bytes, ms, ... }.
+function psiNormItem(item) {
+  if (!item || typeof item !== 'object') return null;
+  const node = psiNodeOf(item);
+  const label = psiText(item.url)
+    || (node && (node.nodeLabel || node.snippet))
+    || psiText(item.entity) || psiText(item.groupLabel) || psiText(item.statistic)
+    || psiText(item.label) || (item.source ? psiText(item.source) : null);
+
+  const out = {};
+  if (label) out.label = psiClip(label, 240);
+  if (node && node.snippet) out.snippet = psiClip(node.snippet, 240);
+  if (node && node.selector) out.selector = psiClip(node.selector, 160);
+
+  const bytes = item.wastedBytes != null ? item.wastedBytes
+    : item.totalBytes != null ? item.totalBytes : item.transferSize;
+  if (typeof bytes === 'number' && bytes > 0) out.bytes = Math.round(bytes);
+
+  const ms = item.wastedMs != null ? item.wastedMs
+    : item.blockingTime != null ? item.blockingTime
+    : item.mainThreadTime != null ? item.mainThreadTime
+    : item.duration != null ? item.duration : item.total;
+  if (typeof ms === 'number' && ms > 0) out.ms = Math.round(ms);
+
+  if (typeof item.cacheLifetimeMs === 'number') out.cacheMs = item.cacheLifetimeMs;
+  if (typeof item.score === 'number') out.score = item.score;
+  if (item.value != null && typeof item.value !== 'object') out.value = psiClip(item.value, 60);
+
+  return (out.label || out.snippet) ? out : null;
+}
+
+// details.items, flattened — 'list' details (e.g. the LCP-element audit) nest
+// their real rows inside child tables one level down.
+function psiItemsOf(details, cap = 8) {
+  if (!details || !Array.isArray(details.items)) return [];
+  const flat = [];
+  details.items.forEach(it => {
+    if (it && Array.isArray(it.items)) flat.push(...it.items);
+    else flat.push(it);
+  });
+  return flat.map(psiNormItem).filter(Boolean).slice(0, cap);
+}
+
+function psiTrimAudit(audit, itemCap = 8) {
+  if (!audit) return null;
+  return {
+    id: audit.id,
+    title: audit.title,
+    description: psiDesc(audit.description),
+    display: audit.displayValue || null,
+    score: audit.score != null ? audit.score : null,
+    // Per-metric savings estimate (Lighthouse 10+), e.g. { LCP: 1200, FCP: 300 }
+    savings: (audit.metricSavings && typeof audit.metricSavings === 'object') ? audit.metricSavings : null,
+    items: psiItemsOf(audit.details, itemCap)
+  };
+}
+
+// Which audits are attributed to which metric — the same mapping the PSI site
+// uses for its "Show audits relevant to…" filter. Built from two sources so it
+// survives version drift: the category's auditRefs[].relevantAudits (keyed by
+// metric acronym), plus each audit's own metricSavings keys (LH 10+).
+function psiMetricAudits(perf, audits) {
+  const map = {};
+  const add = (metric, id) => {
+    if (!metric || !id) return;
+    if (!map[metric]) map[metric] = [];
+    if (!map[metric].includes(id)) map[metric].push(id);
+  };
+
+  ((perf && perf.auditRefs) || []).forEach(ref => {
+    if (ref && ref.acronym && Array.isArray(ref.relevantAudits)) {
+      ref.relevantAudits.forEach(id => add(ref.acronym, id));
+    }
+  });
+
+  Object.values(audits || {}).forEach(a => {
+    if (!a || !a.metricSavings || typeof a.metricSavings !== 'object') return;
+    Object.keys(a.metricSavings).forEach(m => {
+      if (typeof a.metricSavings[m] === 'number' && a.metricSavings[m] > 0) add(m, a.id);
+    });
+  });
+
+  return map;
+}
+
+// The first node found in an audit's details, at either nesting level — used
+// for the LCP element, whose details shape has moved around across versions.
+function psiFirstNode(audit) {
+  if (!audit || !audit.details || !Array.isArray(audit.details.items)) return null;
+  const scan = (rows) => {
+    for (const r of rows || []) {
+      const n = psiNodeOf(r);
+      if (n) return n;
+      if (r && Array.isArray(r.items)) { const inner = scan(r.items); if (inner) return inner; }
+    }
+    return null;
+  };
+  const node = scan(audit.details.items);
+  if (!node) return null;
+  return {
+    snippet: psiClip(node.snippet, 300),
+    selector: psiClip(node.selector, 200),
+    label: psiClip(node.nodeLabel, 200)
+  };
+}
+
 async function psiGetPageSpeed({ url, strategy = 'mobile', cacheOnly = false, forceRefresh = false }) {
   if (!url) return { error: 'BAD_URL' };
   const strat = strategy === 'desktop' ? 'desktop' : 'mobile';
@@ -1939,16 +2080,44 @@ async function psiGetPageSpeed({ url, strategy = 'mobile', cacheOnly = false, fo
     };
   }
 
-  // Opportunities: audits with a savings estimate, biggest first.
-  const opportunities = Object.values(audits)
-    .filter(a => a && a.details && a.details.type === 'opportunity' && a.details.overallSavingsMs > 0)
-    .map(a => ({ title: a.title, display: a.displayValue || null, ms: Math.round(a.details.overallSavingsMs) }))
-    .sort((a, b) => b.ms - a.ms)
-    .slice(0, 6);
+  // Opportunities: audits with a savings estimate, biggest first. Each keeps
+  // its own item list — the actual offending resources, which is the part that
+  // makes the score actionable.
+  const oppAudits = Object.values(audits)
+    .filter(a => a && a.details && a.details.type === 'opportunity'
+      && (a.details.overallSavingsMs > 0 || a.details.overallSavingsBytes > 0))
+    .sort((a, b) => (b.details.overallSavingsMs || 0) - (a.details.overallSavingsMs || 0))
+    .slice(0, 8);
+  const oppIds = new Set(oppAudits.map(a => a.id));
+  const opportunities = oppAudits.map(a => ({
+    ...psiTrimAudit(a),
+    ms: Math.round(a.details.overallSavingsMs || 0),
+    bytes: Math.round(a.details.overallSavingsBytes || 0)
+  }));
+
+  // Diagnostics: the "why", for audits that aren't framed as savings. Skip
+  // anything already listed as an opportunity, and anything fully passing with
+  // nothing to show.
+  const diagnostics = PSI_DIAGNOSTIC_IDS
+    .filter(id => !oppIds.has(id))
+    .map(id => audits[id])
+    .filter(a => a && (a.score == null || a.score < 1 || (a.details && a.details.items && a.details.items.length)))
+    .map(a => psiTrimAudit(a, 6))
+    .filter(a => a && (a.items.length || a.display));
+
+  // The specific element Google measured as the LCP, and the elements that
+  // actually shifted — the two most useful "what do I fix" pointers.
+  const lcpElement = psiFirstNode(audits['largest-contentful-paint-element']);
+  const clsElements = psiItemsOf((audits['layout-shift-elements'] || {}).details, 5);
+
+  // Metric → relevant audit ids, so the panel can filter the breakdown down to
+  // just what's hurting a given metric.
+  const metricAudits = psiMetricAudits(perf, audits);
 
   const entry = {
     url, strategy: strat, finalUrl: lh.finalUrl || url,
-    performanceScore, field, lab, opportunities,
+    performanceScore, field, lab,
+    opportunities, diagnostics, lcpElement, clsElements, metricAudits,
     fetchedAt: Date.now()
   };
 

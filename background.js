@@ -773,6 +773,36 @@ async function gscClearCacheForHost(host) {
   if (Object.keys(changed).length) await browser.storage.local.set(changed);
 }
 
+// GSC's `page` dimension holds the exact URL Google indexed and served. When a
+// domain has several verified variants (http/https × www/non-www) — and above
+// all under a `sc-domain:` property, which aggregates data across ALL of them —
+// the rows can carry any variant. An `equals` filter pins to one exact string,
+// so it silently returns zero rows whenever Google indexed a different variant
+// than the one being browsed (data visible in the GSC UI, missing here).
+//
+// Match every variant instead, via an anchored regex (RE2): scheme and `www.`
+// are optional and a trailing slash is tolerated, but ^...$ keeps /about from
+// matching /about-us. Query strings are part of the indexed URL, so when one is
+// present it must match exactly.
+function gscPageFilterEntry(pageUrl) {
+  let u;
+  try { u = new URL(pageUrl); } catch { return null; }
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const host = esc(u.hostname.replace(/^www\./, '').toLowerCase());
+  const path = u.pathname.replace(/\/+$/, '');            // '' for the root
+  const tail = u.search ? esc(path + u.search) : `${esc(path)}/?`;
+  return { dimension: 'page', operator: 'includingRegex', expression: `^https?://(www\\.)?${host}${tail}$` };
+}
+
+// Same, wrapped as a ready dimensionFilterGroups body fragment. A malformed URL
+// degrades to today's exact-match behaviour rather than dropping the filter
+// (which would silently widen every query to the whole property).
+function gscPageFilter(pageUrl) {
+  const filter = gscPageFilterEntry(pageUrl)
+    || { dimension: 'page', operator: 'equals', expression: pageUrl };
+  return { dimensionFilterGroups: [{ filters: [filter] }] };
+}
+
 async function gscQuery(accessToken, siteUrl, body) {
   const res = await fetch(`${GSC_API_BASE}/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`, {
     method: 'POST',
@@ -893,7 +923,7 @@ async function gscGetPageData({ pageUrl, range, forceRefresh }) {
   }
 
   const { startDate, endDate, prevStartDate, prevEndDate } = gscDateRanges(range);
-  const pageFilter = { dimensionFilterGroups: [{ filters: [{ dimension: 'page', operator: 'equals', expression: pageUrl }] }] };
+  const pageFilter = gscPageFilter(pageUrl);
 
   let timeseriesData, queriesData, prevData;
   try {
@@ -963,7 +993,7 @@ async function gscGetQueryData({ pageUrl, range, query, forceRefresh }) {
   const { startDate, endDate, prevStartDate, prevEndDate } = gscDateRanges(range);
   const filter = {
     dimensionFilterGroups: [{ filters: [
-      { dimension: 'page', operator: 'equals', expression: pageUrl },
+      gscPageFilterEntry(pageUrl) || { dimension: 'page', operator: 'equals', expression: pageUrl },
       { dimension: 'query', operator: 'equals', expression: query }
     ] }]
   };
@@ -1021,7 +1051,7 @@ async function gscGetQueriesData({ pageUrl, range, queries }) {
   if (!siteUrl) return { connected: true, error: 'NO_PROPERTY' };
 
   const { startDate, endDate, prevStartDate, prevEndDate } = gscDateRanges(range);
-  const pageFilter = { dimensionFilterGroups: [{ filters: [{ dimension: 'page', operator: 'equals', expression: pageUrl }] }] };
+  const pageFilter = gscPageFilter(pageUrl);
 
   // Fetch per-(date,query) rows for a range, keep only the set, re-aggregate by
   // date (impression-weighted position) into the same shape as the page chart.
@@ -1077,7 +1107,7 @@ async function gscGetMoreQueries({ pageUrl, range, startRow }) {
   if (!siteUrl) return { connected: true, error: 'NO_PROPERTY' };
 
   const { startDate, endDate } = gscDateRanges(range);
-  const pageFilter = { dimensionFilterGroups: [{ filters: [{ dimension: 'page', operator: 'equals', expression: pageUrl }] }] };
+  const pageFilter = gscPageFilter(pageUrl);
 
   let data;
   try {
@@ -1110,7 +1140,7 @@ async function gscGetChartData({ pageUrl, range, excludeRegex }) {
   if (!siteUrl) return { connected: true, error: 'NO_PROPERTY' };
 
   const { startDate, endDate, prevStartDate, prevEndDate } = gscDateRanges(range);
-  const filters = [{ dimension: 'page', operator: 'equals', expression: pageUrl }];
+  const filters = [gscPageFilterEntry(pageUrl) || { dimension: 'page', operator: 'equals', expression: pageUrl }];
   if (excludeRegex) filters.push({ dimension: 'query', operator: 'excludingRegex', expression: excludeRegex });
   const grp = { dimensionFilterGroups: [{ filters }] };
 

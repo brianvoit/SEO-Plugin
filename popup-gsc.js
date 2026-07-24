@@ -1161,7 +1161,13 @@ async function loadGscData(forceRefresh = false) {
   let pageUrl = tab.url;
   try {
     const data = await getPageDataFromTab(tab.id);
-    if (data?.canonical) pageUrl = data.canonical;
+    // canonical is the raw href attribute and is often relative ("/pricing").
+    // Resolve it against the tab URL — an unresolved relative value breaks the
+    // new URL(pageUrl) parses in the GSC handlers.
+    if (data?.canonical) {
+      try { pageUrl = new URL(data.canonical, tab.url).href; }
+      catch { /* unparseable canonical → keep tab.url */ }
+    }
   } catch { /* fall back to tab.url */ }
 
   const response = await sendMessageWithTimeout({ action: 'gscGetPageData', pageUrl, range: gscSelectedRange, forceRefresh });
@@ -1425,7 +1431,13 @@ async function refreshGscPropertyInfo() {
   let pageUrl = tab.url;
   try {
     const data = await getPageDataFromTab(tab.id);
-    if (data?.canonical) pageUrl = data.canonical;
+    // canonical is the raw href attribute and is often relative ("/pricing").
+    // Resolve it against the tab URL — an unresolved relative value breaks the
+    // new URL(pageUrl) parses in the GSC handlers.
+    if (data?.canonical) {
+      try { pageUrl = new URL(data.canonical, tab.url).href; }
+      catch { /* unparseable canonical → keep tab.url */ }
+    }
   } catch { /* fall back to tab.url */ }
 
   const res = await sendMessageWithTimeout({ action: 'gscResolveProperty', pageUrl });

@@ -513,3 +513,102 @@ document.getElementById('btn-oauth-client-toggle').addEventListener('click', () 
   const sec = document.getElementById('oauth-client-section');
   setOauthDrawer(!sec.classList.contains('oauth-open'));
 });
+
+// ─── Image SEO: per-domain goals for the WP Media Library generators ─────────
+// Mirrors the branded-terms/wpSites shape deliberately — a host-keyed map in
+// storage.local — so the future Client Registry can absorb it via the same
+// projection (registry as source of truth → host-keyed maps) with no rework.
+
+let imageSeoConfig = {};
+const imgSeoForm = document.getElementById('imgseo-form');
+
+function imgSeoSummary(cfg) {
+  const bits = [];
+  if (cfg.focusKeywords?.length) bits.push(cfg.focusKeywords.slice(0, 3).join(', ') + (cfg.focusKeywords.length > 3 ? '…' : ''));
+  if (cfg.useTrackedKeywords) bits.push('+ tracked');
+  if (cfg.includeBrand) bits.push('brand ok');
+  if (cfg.tone) bits.push(cfg.tone);
+  if (cfg.rules) bits.push('custom rules');
+  return bits.length ? bits.join(' · ') : 'No keywords set';
+}
+
+function renderImgSeoDomains() {
+  const list  = document.getElementById('imgseo-list');
+  const empty = document.getElementById('imgseo-empty');
+  list.replaceChildren();
+
+  const hosts = Object.keys(imageSeoConfig);
+  empty.classList.toggle('hidden', hosts.length > 0);
+
+  hosts.forEach(host => {
+    const { row, removeBtn, editBtn } = buildSettingsRow(host, imgSeoSummary(imageSeoConfig[host]), 'Remove', true, host);
+    removeBtn.addEventListener('click', () => {
+      delete imageSeoConfig[host];
+      browser.storage.local.set({ imageSeoConfig }).then(renderImgSeoDomains);
+    });
+    editBtn.addEventListener('click', () => openImgSeoEdit(host));
+    list.appendChild(row);
+  });
+}
+
+function fillImgSeoForm(host, cfg) {
+  document.getElementById('imgseo-error').classList.add('hidden');
+  document.getElementById('imgseo-host').value = host || '';
+  document.getElementById('imgseo-keywords').value = (cfg.focusKeywords || []).join(', ');
+  document.getElementById('imgseo-tone').value = cfg.tone || '';
+  document.getElementById('imgseo-rules').value = cfg.rules || '';
+  document.getElementById('imgseo-use-tracked').checked = cfg.useTrackedKeywords !== false;
+  document.getElementById('imgseo-include-brand').checked = !!cfg.includeBrand;
+  imgSeoForm.classList.remove('hidden');
+}
+
+function openImgSeoEdit(host) {
+  document.getElementById('imgseo-host').readOnly = true;   // host is the storage key
+  fillImgSeoForm(host, imageSeoConfig[host] || {});
+  document.getElementById('imgseo-keywords').focus();
+}
+
+function loadImageSeoConfig() {
+  return browser.storage.local.get('imageSeoConfig').then(({ imageSeoConfig: stored }) => {
+    imageSeoConfig = stored || {};
+    renderImgSeoDomains();
+  });
+}
+
+document.getElementById('btn-add-imgseo-domain').addEventListener('click', async () => {
+  let host = '';
+  try { host = new URL((await getActiveTab()).url).hostname.replace(/^www\./, '').toLowerCase(); }
+  catch { /* leave blank */ }
+  document.getElementById('imgseo-host').readOnly = false;
+  fillImgSeoForm((host && !imageSeoConfig[host]) ? host : '', {});
+});
+
+document.getElementById('btn-cancel-imgseo').addEventListener('click', () => {
+  imgSeoForm.classList.add('hidden');
+});
+
+document.getElementById('btn-save-imgseo').addEventListener('click', () => {
+  const host    = document.getElementById('imgseo-host').value.trim().replace(/^www\./, '').toLowerCase();
+  const errorEl = document.getElementById('imgseo-error');
+  errorEl.classList.add('hidden');
+
+  if (!host) {
+    errorEl.textContent = 'Domain is required.';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+
+  imageSeoConfig[host] = {
+    focusKeywords: document.getElementById('imgseo-keywords').value
+      .split(',').map(s => s.trim()).filter(Boolean),
+    tone: document.getElementById('imgseo-tone').value.trim(),
+    rules: document.getElementById('imgseo-rules').value.trim(),
+    useTrackedKeywords: document.getElementById('imgseo-use-tracked').checked,
+    includeBrand: document.getElementById('imgseo-include-brand').checked
+  };
+
+  browser.storage.local.set({ imageSeoConfig }).then(() => {
+    imgSeoForm.classList.add('hidden');
+    renderImgSeoDomains();
+  });
+});

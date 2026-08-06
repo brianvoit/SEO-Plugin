@@ -1,4 +1,9 @@
-browser.runtime.onInstalled.addListener(() => {
+// Registered at top level rather than only in onInstalled: this is an MV3 event
+// page, so the script re-runs whenever the background wakes, and removeAll →
+// create is self-healing if the item ever goes missing. onInstalled alone fires
+// only on install/update.
+function registerSeoMenus() {
+  if (!browser.menus) return;
   browser.menus.removeAll(() => {
     browser.menus.create({
       id: 'seo-generate-alt',
@@ -6,14 +11,20 @@ browser.runtime.onInstalled.addListener(() => {
       contexts: ['image']
     });
   });
-});
+}
+registerSeoMenus();
+browser.runtime.onInstalled.addListener(registerSeoMenus);
 
 browser.menus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'seo-generate-alt') {
+    // Target the exact frame that was right-clicked. The block editor renders
+    // its canvas in an iframe, so a tab-wide send would reach the top document
+    // — which doesn't contain the image — and silently do nothing.
+    const opts = (info.frameId != null) ? { frameId: info.frameId } : undefined;
     browser.tabs.sendMessage(tab.id, {
       action: 'generateAltText',
       srcUrl: info.srcUrl
-    });
+    }, opts);
   }
 });
 

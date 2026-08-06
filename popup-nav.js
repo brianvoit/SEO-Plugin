@@ -236,6 +236,7 @@ function showSettings() {
   refreshDocsSettingsStatus();
   refreshWebceoSettingsStatus();
   loadBrandedTerms();
+  loadImageSeoConfig();
 }
 
 function hideSettings() {

@@ -426,6 +426,53 @@
 
     <section class="field-section">
       <div class="field-header">
+        <span class="field-label">IMAGE SEO</span>
+        <div class="field-header-actions">
+          <button class="info-tip" type="button" title="Per-domain goals for the WordPress Media Library generators (Alt Text, Title, Caption, Description). Focus keywords and your Web CEO tracked keywords steer the wording.">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7.5" x2="8" y2="11"/><circle cx="8" cy="5" r="0.55" fill="currentColor" stroke="none"/>
+            </svg>
+          </button>
+          <button id="btn-add-imgseo-domain" class="save-key-btn">+ Domain</button>
+        </div>
+      </div>
+      <div id="imgseo-empty" class="field-hint hidden">No domains configured — generators fall back to page context only.</div>
+      <div id="imgseo-list" class="wp-sites-list"></div>
+
+      <div id="imgseo-form" class="wp-site-form hidden">
+        <label class="wp-field">
+          <span class="wp-field-label">Domain</span>
+          <input type="text" id="imgseo-host" class="wp-input" placeholder="example.com" autocomplete="off" spellcheck="false" />
+        </label>
+        <label class="wp-field">
+          <span class="wp-field-label">Focus Keywords (comma-separated)</span>
+          <input type="text" id="imgseo-keywords" class="wp-input" placeholder="dental implants, cosmetic dentistry" autocomplete="off" spellcheck="false" />
+        </label>
+        <label class="wp-field">
+          <span class="wp-field-label">Tone / Style (optional)</span>
+          <input type="text" id="imgseo-tone" class="wp-input" placeholder="clinical, friendly, premium…" autocomplete="off" spellcheck="false" />
+        </label>
+        <label class="wp-field">
+          <span class="wp-field-label">Rules for this domain (applied to all four fields)</span>
+          <textarea id="imgseo-rules" class="wp-input" rows="3" spellcheck="false"
+            placeholder="e.g. Always work a location into the alt text — Twin Cities, Minneapolis, St. Paul — when the photo is of a local project. Call these &quot;remodels&quot;, never &quot;renovations&quot;."></textarea>
+        </label>
+        <label class="ranking-onpage-toggle" style="margin-top:8px">
+          <input type="checkbox" id="imgseo-use-tracked" checked /> Also use Web CEO tracked keywords for this domain
+        </label>
+        <label class="ranking-onpage-toggle" style="margin-top:6px">
+          <input type="checkbox" id="imgseo-include-brand" /> Allow the brand name in Title / Caption / Description
+        </label>
+        <div id="imgseo-error" class="field-hint hint-red hidden"></div>
+        <div class="wp-form-actions">
+          <button id="btn-cancel-imgseo" class="settings-back-btn">Cancel</button>
+          <button id="btn-save-imgseo" class="save-key-btn">Save</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="field-section">
+      <div class="field-header">
         <span class="field-label">CHARACTER TARGETS</span>
       </div>
       <div class="char-targets">

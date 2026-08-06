@@ -883,7 +883,13 @@ async function tryGetImageBase64(img) {
 }
 
 async function generateAltText(srcUrl) {
-  const img = Array.from(document.querySelectorAll('img')).find(i => i.src === srcUrl);
+  // Firefox reports info.srcUrl as the source actually being displayed, which
+  // with srcset (WP's -scaled/-300x200 variants) is currentSrc, not src — so
+  // matching on .src alone silently found nothing and the menu item did nothing.
+  const imgs = Array.from(document.querySelectorAll('img'));
+  const img = imgs.find(i => i.currentSrc === srcUrl)
+    || imgs.find(i => i.src === srcUrl)
+    || imgs.find(i => getBaseFilename(i.currentSrc || i.src || '') === getBaseFilename(srcUrl || ''));
   if (!img) return;
 
   createGeneratorPanel(img);
@@ -978,6 +984,532 @@ async function generateAltText(srcUrl) {
     clearTimeout(timeoutTimer);
   }
 }
+
+// ─── WordPress Media Library: per-field generators ───────────────────────────
+// Injects a ✦ button into the Alt Text / Title / Caption / Description fields on
+// the two wp-admin screens that expose all four:
+//   A) the "Attachment details" modal (grid view + the editor's Add Media), a
+//      Backbone view created and destroyed on the fly → needs a MutationObserver
+//   B) the classic attachment edit screen (post.php?post=<id>&action=edit)
+//
+// Saving deliberately fills WP's own field and dispatches input/change rather
+// than PATCHing the REST API: in wp-admin the user is already authenticated and
+// WP persists these fields itself, so no Application Password or nonce is
+// needed and we never diverge from WP's own save path.
+
+const WPS_BTN_MARK = 'seoiWpsField';        // dataset flag → injection is idempotent
+
+// Each field, with the selectors used on both screens. Order matters only for
+// display. `max` mirrors the prompt's length ceiling.
+const WPS_FIELDS = [
+  {
+    key: 'alt', label: 'Alt text', max: 125,
+    selectors: ['#attachment-details-alt-text', '#attachment-details-two-column-alt-text', '#attachment_alt']
+  },
+  {
+    key: 'title', label: 'Title', max: 60,
+    selectors: ['#attachment-details-title', '#attachment-details-two-column-title', '#title']
+  },
+  {
+    key: 'caption', label: 'Caption', max: 160,
+    selectors: ['#attachment-details-caption', '#attachment-details-two-column-caption', '#attachment_caption']
+  },
+  {
+    key: 'description', label: 'Description', max: 320,
+    selectors: ['#attachment-details-description', '#attachment-details-two-column-description', '#attachment_content']
+  }
+];
+
+function wpsIsAdmin() {
+  return /\/wp-admin\//.test(window.location.pathname);
+}
+
+// #title is the generic post-title input, so only treat it as an attachment
+// title once an unmistakably attachment-only field is present on the screen.
+function wpsIsAttachmentScreen() {
+  return !!document.querySelector('#attachment_alt, #attachment-details-alt-text, #attachment-details-two-column-alt-text');
+}
+
+// The attachment id can't come from wp.media — content scripts run in an
+// isolated world and can't see page JS. Read it from the DOM instead.
+function wpsAttachmentId(fieldEl) {
+  const scope = fieldEl.closest('.attachment-details, .media-sidebar, .media-frame-content, form, body') || document;
+  const link = scope.querySelector('a[href*="post.php?post="], a.edit-attachment[href*="post="]')
+    || document.querySelector('a[href*="post.php?post="]');
+  if (link) {
+    const m = link.getAttribute('href').match(/[?&]post=(\d+)/);
+    if (m) return m[1];
+  }
+  const m = window.location.search.match(/[?&]post=(\d+)/);
+  return m ? m[1] : null;
+}
+
+// Best available URL for the actual image file (preferred over the thumbnail).
+function wpsImageUrl(fieldEl) {
+  const scope = fieldEl.closest('.attachment-details, .media-sidebar, .media-frame-content, form, body') || document;
+  const urlInput = document.querySelector('#attachment_url')
+    || scope.querySelector('.attachment-details-copy-link, input[readonly][value*="/uploads/"]');
+  if (urlInput && urlInput.value && /^https?:\/\//.test(urlInput.value)) return urlInput.value;
+
+  const img = scope.querySelector('.details-image, .thumbnail img, .wp_attachment_image img, img[src*="/uploads/"]')
+    || document.querySelector('.wp_attachment_image img, img[src*="/uploads/"]');
+  return img ? (img.currentSrc || img.src) : null;
+}
+
+// Same-origin fetch → downscaled JPEG for the vision call. Mirrors
+// tryGetImageBase64's sizing (800px / q0.75); returns null for anything that
+// can't be decoded (SVG, missing file) so generation degrades to context-only.
+async function wpsImageBase64(url) {
+  if (!url) return null;
+  try {
+    const res = await fetch(url, { credentials: 'same-origin' });
+    if (!res.ok) return null;
+    const bm = await createImageBitmap(await res.blob());
+    const maxDim = 800;
+    const scale = Math.min(1, maxDim / Math.max(bm.width, bm.height, 1));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bm.width * scale);
+    canvas.height = Math.round(bm.height * scale);
+    canvas.getContext('2d').drawImage(bm, 0, 0, canvas.width, canvas.height);
+    return { data: canvas.toDataURL('image/jpeg', 0.75).split(',')[1], mimeType: 'image/jpeg' };
+  } catch { return null; }
+}
+
+function wpsHost() {
+  return window.location.hostname.replace(/^www\./, '').toLowerCase();
+}
+
+// Domain goals + tracked keywords. Tracked keywords come from the background
+// Web CEO handler (project resolution is host-based, so wp-admin resolves the
+// same project as the public site). Everything here is best-effort.
+async function wpsKeywordContext() {
+  const host = wpsHost();
+  let cfg = {};
+  try {
+    const { imageSeoConfig } = await browser.storage.local.get('imageSeoConfig');
+    cfg = (imageSeoConfig || {})[host] || {};
+  } catch { /* no config */ }
+
+  let tracked = [];
+  if (cfg.useTrackedKeywords !== false) {
+    try {
+      const res = await browser.runtime.sendMessage({ action: 'webceoGetTrackedKeywords', pageUrl: window.location.href });
+      tracked = (res && res.keywords || []).map(String).filter(Boolean).slice(0, 40);
+    } catch { /* Web CEO not connected */ }
+  }
+
+  let brand = '';
+  try {
+    const stored = await browser.storage.sync?.get('brandedTerms').catch(() => null)
+      || await browser.storage.local.get('brandedTerms');
+    brand = ((stored && stored.brandedTerms) || {})[host] || '';
+  } catch { /* none */ }
+
+  return { cfg, tracked, brand };
+}
+
+// The accuracy floor is about VISUAL claims — don't invent materials, colours,
+// counts or text you can't see. It is NOT about the supplied keywords: those
+// are facts the site owner has asserted about their business (service area,
+// specialism) which are, by their nature, never visible in a photograph.
+// Conflating the two made the model refuse every location keyword, since it
+// can't see that a bathroom is in Minneapolis.
+const WPS_KEYWORD_RULE =
+  'The target keywords are owner-supplied facts about this business (such as its service area or specialism). '
+  + 'They are not things you could verify by looking at the image, and you are not expected to — treat them as given context and use them for framing. '
+  + 'The list is a menu to choose from, not a checklist: pick only the best-fitting term and ignore the rest. '
+  + 'Never use two keywords that refer to the same thing (a city and its metro area, or a term and its synonym) in the same piece of text.';
+
+const WPS_PROMPTS = {
+  alt: `You write alt text for images in a WordPress Media Library.
+- Describe what the image actually shows. Never invent VISUAL details you cannot see — materials, colours, counts, brands or text.
+- ${WPS_KEYWORD_RULE}
+- Work in ONE target keyword wherever a natural phrasing exists (e.g. "… in a Minneapolis remodel"). Use one only — never list, stack or repeat keywords.
+- Under 125 characters. No "image of" or "photo of" prefix.
+- If the image is purely decorative, respond with exactly: [decorative]
+- Return only the alt text, nothing else.`,
+
+  title: `You write WordPress Media Library attachment titles.
+- A short, human-readable label for the image — it powers Media Library search.
+- Title Case. No file extensions, dimensions, underscores or hyphens carried over from the filename.
+- ${WPS_KEYWORD_RULE}
+- Work in one target keyword where it reads naturally.
+- Under 60 characters. Return only the title, nothing else.`,
+
+  caption: `You write image captions shown beneath images on a web page.
+- One reader-facing sentence adding context a visitor would value — do not simply restate the alt text.
+- Never invent visual details you cannot see in the image.
+- ${WPS_KEYWORD_RULE}
+- Work in ONE target keyword where it reads naturally. One only.
+- Under 160 characters. No surrounding quotes. Return only the caption, nothing else.`,
+
+  description: `You write WordPress attachment descriptions (the body text of the attachment page).
+- One to three sentences giving fuller context about the image and its subject.
+- Never invent visual details you cannot see in the image.
+- ${WPS_KEYWORD_RULE}
+- Work in at most TWO target keywords, and only if each reads naturally. Fewer is better — one is usually right.
+- Under 320 characters. Return only the description, nothing else.`
+};
+
+function wpsReadField(sel) {
+  const el = document.querySelector(sel);
+  return el && el.value ? el.value.trim() : '';
+}
+
+function wpsBuildContext(imageUrl, { cfg, tracked, brand }) {
+  const filename = imageUrl ? imageUrl.split('/').pop().split('?')[0] : '';
+  const existing = WPS_FIELDS
+    .map(f => {
+      const val = f.selectors.map(wpsReadField).find(Boolean);
+      return val ? `Current ${f.label}: "${val}"` : null;
+    })
+    .filter(Boolean);
+
+  const keywords = [...(cfg.focusKeywords || []), ...tracked];
+  const siteName = document.querySelector('#wp-admin-bar-site-name > a')?.textContent?.trim() || wpsHost();
+
+  return [
+    `Site: ${siteName}`,
+    filename && `Image filename: ${filename}`,
+    ...existing,
+    keywords.length && `Target keywords for this site — the owner has confirmed these are true of their business (service area, specialism, etc.). Use them for framing; you are not expected to verify them from the image:\n${keywords.slice(0, 40).join(', ')}`,
+    cfg.tone && `Preferred tone: ${cfg.tone}`,
+    brand && (cfg.includeBrand
+      ? `Brand name (may be used): ${brand.split('|')[0]}`
+      : `Do not include the brand or site name (e.g. ${brand.split('|').slice(0, 3).join(', ')}).`),
+    // Site-owner rules come last so they read as the most specific instruction,
+    // but never override the accuracy floor set in the system prompt.
+    cfg.rules && `Rules from the site owner — follow these closely. They may assert context you cannot see in the image (location, project type); trust them. The one thing you must not do is invent visual details that contradict what is actually shown:\n${cfg.rules}`
+  ].filter(Boolean).join('\n\n');
+}
+
+async function wpsGenerate(fieldKey, imageUrl, kw) {
+  const { claudeApiKey } = await browser.storage.local.get('claudeApiKey');
+  if (!claudeApiKey) throw new Error('No Claude API key — add one in the extension Settings.');
+
+  const context = wpsBuildContext(imageUrl, kw);
+  const imageData = await wpsImageBase64(imageUrl);
+  const userContent = imageData
+    ? [
+        { type: 'image', source: { type: 'base64', media_type: imageData.mimeType, data: imageData.data } },
+        { type: 'text', text: `Generate the ${fieldKey}.\n\n${context}` }
+      ]
+    : `Generate the ${fieldKey} (image could not be loaded — use context only).\n\n${context}`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: CONTENT_MODEL_LIGHT,
+        max_tokens: 300,
+        system: WPS_PROMPTS[fieldKey],
+        messages: [{ role: 'user', content: userContent }]
+      }),
+      signal: controller.signal
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message ?? `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const text = data.content?.[0]?.text?.trim();
+    if (!text) throw new Error('Empty response from Claude');
+    return text;
+  } catch (err) {
+    throw new Error(err.name === 'AbortError' ? 'Claude request timed out' : err.message);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Write into WP's own field and let WP persist it. The modal saves on change;
+// the classic screen saves when the user hits Update.
+//
+// Uses the prototype's native value setter rather than `el.value = …`: the
+// block editor's fields are React-controlled, and React tracks the last value
+// it set on the node. A direct assignment is invisible to it, so the change is
+// ignored and reverted on the next render. Going through the native setter and
+// then dispatching `input` is what React's synthetic event system picks up.
+// Harmless for the plain (non-React) modal and classic-screen fields.
+function wpsFillField(el, value) {
+  const proto = el.tagName === 'TEXTAREA'
+    ? window.HTMLTextAreaElement.prototype
+    : window.HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+  if (setter) setter.call(el, value); else el.value = value;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+// ── Block editor (Gutenberg) image sidebar ──────────────────────────────────
+// Only the Alt Text field exists here, and its control ids are generated
+// (inspector-textarea-control-N), so find it by its label text instead.
+function wpsGutenbergAltField() {
+  const labels = document.querySelectorAll(
+    '.block-editor-block-inspector label, .components-base-control__label, .interface-interface-skeleton__sidebar label'
+  );
+  for (const label of labels) {
+    if (!/alternative\s*text/i.test(label.textContent || '')) continue;
+    const id = label.getAttribute('for');
+    const el = (id && document.getElementById(id))
+      || label.closest('.components-base-control')?.querySelector('textarea, input[type="text"]');
+    if (el) return { el, label };
+  }
+  return null;
+}
+
+// The image for the currently-selected block. The canvas may be a same-origin
+// iframe (WP 6.3+), which the top frame can read into directly.
+function wpsSelectedBlockImageUrl() {
+  const docs = [document];
+  try {
+    const frame = document.querySelector('iframe[name="editor-canvas"]');
+    if (frame && frame.contentDocument) docs.push(frame.contentDocument);
+  } catch { /* cross-origin canvas — skip */ }
+
+  for (const doc of docs) {
+    const img = doc.querySelector(
+      '.wp-block-image.is-selected img, [data-block].is-selected img, .block-editor-block-list__block.is-selected img'
+    ) || doc.querySelector('.wp-block-image.has-child-selected img');
+    if (img) return img.currentSrc || img.src;
+  }
+  return null;
+}
+
+function wpsInjectGutenbergAlt() {
+  const found = wpsGutenbergAltField();
+  if (!found) return;
+  const { el, label } = found;
+  if (el.dataset[WPS_BTN_MARK]) return;
+  el.dataset[WPS_BTN_MARK] = '1';
+
+  const field = WPS_FIELDS[0];                 // alt
+  const btn = wpsMakeButton(field, el, wpsSelectedBlockImageUrl);
+  btn.style.marginTop = '0';                   // inline in the label row, not stacked
+  btn.style.flexShrink = '0';
+  // Sit at the far right of the label row.
+  label.style.display = 'flex';
+  label.style.alignItems = 'center';
+  label.style.justifyContent = 'space-between';
+  label.style.width = '100%';
+  label.appendChild(btn);
+}
+
+// Icon-only: ✦ before it has produced anything, ↻ afterwards so a second click
+// reads clearly as "regenerate". `hasRun` persists for the life of the field.
+const WPS_GLYPH_NEW = '✦';
+const WPS_GLYPH_AGAIN = '↻';
+
+// urlResolver lets a caller override how the image URL is found (the block
+// editor resolves it from the selected block, not from around the field).
+function wpsMakeButton(field, el, urlResolver) {
+  const btn = document.createElement('button');
+  btn.type = 'button';            // never submit the surrounding WP form
+  let hasRun = false;
+
+  const restIcon = () => hasRun ? WPS_GLYPH_AGAIN : WPS_GLYPH_NEW;
+  const restTitle = () => `${hasRun ? 'Regenerate' : 'Generate'} ${field.label} with AI`;
+  const setState = (glyph, bg, title) => {
+    btn.textContent = glyph;
+    btn.style.background = bg;
+    btn.title = title;
+  };
+
+  btn.style.cssText = [
+    'display:inline-flex', 'align-items:center', 'justify-content:center',
+    'margin-top:4px', 'width:24px', 'height:24px', 'padding:0',
+    'font:600 13px/1 -apple-system,system-ui,"Segoe UI",sans-serif',
+    'color:#fff', 'background:#2563eb', 'border:none', 'border-radius:4px',
+    'cursor:pointer', 'vertical-align:middle'
+  ].join(';');
+  setState(WPS_GLYPH_NEW, '#2563eb', restTitle());
+
+  btn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (btn.disabled) return;
+    btn.disabled = true;
+    setState('…', '#6b7280', `Generating ${field.label}…`);
+    try {
+      const imageUrl = urlResolver ? urlResolver() : wpsImageUrl(el);
+      const kw = await wpsKeywordContext();
+      const text = await wpsGenerate(field.key, imageUrl, kw);
+      wpsFillField(el, text);
+      hasRun = true;
+      setState('✓', '#16a34a', restTitle());
+    } catch (err) {
+      setState('✕', '#dc2626', String(err.message || err));
+    } finally {
+      setTimeout(() => {
+        btn.disabled = false;
+        setState(restIcon(), '#2563eb', restTitle());
+      }, 1800);
+    }
+  });
+
+  // Let "Generate All" flip this button to its regenerate state too.
+  el.__seoiMarkRun = () => {
+    hasRun = true;
+    if (!btn.disabled) setState(WPS_GLYPH_AGAIN, '#2563eb', restTitle());
+  };
+  return btn;
+}
+
+// Tuck the button under the field's LABEL rather than after the field itself.
+// WP floats `.setting > .name` left and the input right, so a button inserted
+// after the input clears onto its own full-width line at the far left, which
+// squeezes the label/field column. Appending into the label keeps it inline
+// with the field name and leaves WP's layout untouched.
+function wpsPlaceButton(el, btn) {
+  // Modal / attachment details: <label class="setting"><span class="name">…</span><textarea/></label>
+  const label = el.closest('.setting')?.querySelector('.name, .label, label');
+  if (label && !label.contains(el)) {
+    label.appendChild(document.createElement('br'));
+    label.appendChild(btn);
+    return;
+  }
+  // Classic form table: <tr><th><label>…</label></th><td><textarea/></td></tr>
+  const th = el.closest('tr')?.querySelector('th');
+  if (th) {
+    th.appendChild(document.createElement('br'));
+    th.appendChild(btn);
+    return;
+  }
+  el.insertAdjacentElement('afterend', btn);   // last resort
+}
+
+// ── Generate All ────────────────────────────────────────────────────────────
+// Runs the four fields sequentially rather than in parallel: alt lands first so
+// the later fields see it as context, and four concurrent vision calls would
+// risk rate limits for no gain.
+function wpsPresentFields() {
+  return WPS_FIELDS
+    .map(f => ({ field: f, el: f.selectors.map(s => document.querySelector(s)).find(Boolean) }))
+    .filter(x => x.el);
+}
+
+function wpsMakeGenerateAllButton() {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.style.cssText = [
+    'display:inline-flex', 'align-items:center', 'gap:5px',
+    'margin:0 0 10px', 'padding:5px 11px',
+    'font:600 12px/1.4 -apple-system,system-ui,"Segoe UI",sans-serif',
+    'color:#fff', 'background:#2563eb', 'border:none', 'border-radius:4px',
+    'cursor:pointer'
+  ].join(';');
+  const rest = () => { btn.textContent = '✦ Generate All'; btn.style.background = '#2563eb'; };
+  rest();
+  btn.title = 'Generate Alt Text, Title, Caption and Description';
+
+  btn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.style.background = '#6b7280';
+
+    const targets = wpsPresentFields();
+    let done = 0, failed = 0;
+    try {
+      const kw = await wpsKeywordContext();
+      const imageUrl = targets.length ? wpsImageUrl(targets[0].el) : null;
+      for (const { field, el } of targets) {
+        btn.textContent = `✦ ${field.label}… (${done + 1}/${targets.length})`;
+        try {
+          const text = await wpsGenerate(field.key, imageUrl, kw);
+          wpsFillField(el, text);
+          el.__seoiMarkRun?.();
+          done++;
+        } catch { failed++; }
+      }
+      if (failed && !done) {
+        btn.textContent = '✕ Failed';
+        btn.style.background = '#dc2626';
+      } else {
+        btn.textContent = failed ? `✓ ${done} of ${targets.length}` : '✓ All done';
+        btn.style.background = failed ? '#b45309' : '#16a34a';
+      }
+    } catch (err) {
+      btn.textContent = '✕ Failed';
+      btn.style.background = '#dc2626';
+      btn.title = String(err.message || err);
+    } finally {
+      setTimeout(() => { btn.disabled = false; rest(); }, 2200);
+    }
+  });
+  return btn;
+}
+
+function wpsInjectGenerateAll() {
+  if (document.querySelector('[data-seoi-genall]')) return;      // idempotent
+  const altEl = WPS_FIELDS[0].selectors.map(s => document.querySelector(s)).find(Boolean);
+  if (!altEl) return;
+
+  const btn = wpsMakeGenerateAllButton();
+  btn.setAttribute('data-seoi-genall', '1');
+
+  // Sit above the Alt Text row, spanning the full width of the field area.
+  const row = altEl.closest('tr');
+  if (row && row.parentElement) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 2;
+    td.appendChild(btn);
+    tr.appendChild(td);
+    row.parentElement.insertBefore(tr, row);
+    return;
+  }
+  const setting = altEl.closest('.setting');
+  if (setting && setting.parentElement) {
+    const wrap = document.createElement('div');
+    wrap.appendChild(btn);
+    setting.parentElement.insertBefore(wrap, setting);
+    return;
+  }
+  altEl.parentElement?.insertBefore(btn, altEl);
+}
+
+function wpsInjectButtons() {
+  if (!wpsIsAdmin()) return;
+  // The block editor's image sidebar is not an attachment screen and exposes
+  // only Alt Text, so it's handled separately from the four-field screens.
+  wpsInjectGutenbergAlt();
+  if (!wpsIsAttachmentScreen()) return;
+  WPS_FIELDS.forEach(field => {
+    field.selectors.forEach(sel => {
+      document.querySelectorAll(sel).forEach(el => {
+        if (el.dataset[WPS_BTN_MARK]) return;      // already has a button
+        el.dataset[WPS_BTN_MARK] = '1';
+        wpsPlaceButton(el, wpsMakeButton(field, el));
+      });
+    });
+  });
+  wpsInjectGenerateAll();
+}
+
+// The attachment-details modal is destroyed and rebuilt constantly, so re-scan
+// on DOM changes. Debounced, and injection itself is idempotent.
+function wpsInit() {
+  if (!wpsIsAdmin()) return;
+  wpsInjectButtons();
+  let pending = null;
+  const observer = new MutationObserver(() => {
+    if (pending) return;
+    pending = setTimeout(() => { pending = null; wpsInjectButtons(); }, 200);
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+}
+
+wpsInit();
 
 // ─── Message handler ──────────────────────────────────────────────────────────
 

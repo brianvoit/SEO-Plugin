@@ -652,11 +652,21 @@ function removeLinkOverlay() {
 }
 
 // ─── Init: restore overlay if it was active before navigation ────────────────
+// Top frame only. This script runs in every frame (all_frames, so the alt-text
+// generator can reach images inside the block editor's iframe), and without
+// this guard every ad/reCAPTCHA/embed iframe would restore and draw its own
+// overlay over its own images.
 
-browser.storage.local.get(['altOverlayActive', 'linkOverlayActive']).then(({ altOverlayActive, linkOverlayActive }) => {
-  if (altOverlayActive) applyOverlay();
-  if (linkOverlayActive) applyLinkOverlay();
-});
+const IS_TOP_FRAME = (() => {
+  try { return window.top === window; } catch { return false; }   // cross-origin parent
+})();
+
+if (IS_TOP_FRAME) {
+  browser.storage.local.get(['altOverlayActive', 'linkOverlayActive']).then(({ altOverlayActive, linkOverlayActive }) => {
+    if (altOverlayActive) applyOverlay();
+    if (linkOverlayActive) applyLinkOverlay();
+  });
+}
 
 // ─── Alt text generator ──────────────────────────────────────────────────────
 

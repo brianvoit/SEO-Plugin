@@ -1815,7 +1815,9 @@ document.getElementById('meta-toggle').addEventListener('click', async () => {
 document.getElementById('btn-overlay').addEventListener('click', async () => {
   const tab = await getActiveTab();
   try {
-    const response = await browser.tabs.sendMessage(tab.id, { action: 'toggleAltOverlay' });
+    // Top frame only — see TOP_FRAME in popup-shared.js. Broadcasting would
+    // toggle each iframe independently and race to set the button's state.
+    const response = await browser.tabs.sendMessage(tab.id, { action: 'toggleAltOverlay' }, TOP_FRAME);
     renderOverlayToggle(response.altOverlayActive);
   } catch { /* ignore */ }
 });
@@ -1825,7 +1827,7 @@ document.getElementById('btn-overlay').addEventListener('click', async () => {
 document.getElementById('btn-link-overlay').addEventListener('click', async () => {
   const tab = await getActiveTab();
   try {
-    const response = await browser.tabs.sendMessage(tab.id, { action: 'toggleLinkOverlay' });
+    const response = await browser.tabs.sendMessage(tab.id, { action: 'toggleLinkOverlay' }, TOP_FRAME);
     renderLinkOverlayToggle(response.linkOverlayActive);
   } catch { /* ignore */ }
 });

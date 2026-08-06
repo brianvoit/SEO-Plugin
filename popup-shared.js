@@ -288,11 +288,19 @@ async function getActiveTab() {
 // permission), then retry once. A second failure means a genuinely
 // unreadable page — about:, view-source:, the PDF viewer, addons.mozilla.org
 // — which the caller surfaces as the "Cannot read this page" state.
+// content.js runs in every frame (all_frames, needed so the alt-text generator
+// reaches images inside the block editor's iframe). A tab-wide sendMessage is
+// therefore a RACE: every frame answers and the first reply wins, so a
+// reCAPTCHA/ad/embed iframe can beat the real page and return its own document
+// — title "reCAPTCHA", no headings, no canonical. Always pin page reads to the
+// top frame.
+const TOP_FRAME = { frameId: 0 };
+
 async function getPageDataFromTab(tabId) {
   // Fast path: the content script is already there (page loaded after the
   // extension) and answers immediately.
   try {
-    return await browser.tabs.sendMessage(tabId, { action: 'getPageData' });
+    return await browser.tabs.sendMessage(tabId, { action: 'getPageData' }, TOP_FRAME);
   } catch { /* not present yet, not injected, or mid-navigation */ }
 
   // Ask the background to inject content.js. Injection MUST run from the
@@ -309,12 +317,12 @@ async function getPageDataFromTab(tabId) {
   for (let attempt = 0; attempt < 5; attempt++) {
     await new Promise(r => setTimeout(r, 120));
     try {
-      return await browser.tabs.sendMessage(tabId, { action: 'getPageData' });
+      return await browser.tabs.sendMessage(tabId, { action: 'getPageData' }, TOP_FRAME);
     } catch { /* keep trying */ }
   }
   // Final attempt — if this throws, the caller shows "Cannot read this page"
   // (a genuinely unreadable page: about:, view-source:, PDF viewer, AMO).
-  return await browser.tabs.sendMessage(tabId, { action: 'getPageData' });
+  return await browser.tabs.sendMessage(tabId, { action: 'getPageData' }, TOP_FRAME);
 }
 
 // Show the connected Google account email to the left of a "Connected" chip.

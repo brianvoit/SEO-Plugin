@@ -1712,6 +1712,15 @@ function renderLinkOverlayToggle(active) {
   document.getElementById('btn-link-overlay').setAttribute('aria-pressed', String(active));
 }
 
+// The overlays can also be toggled from the toolbar button's right-click menu,
+// so mirror storage back into the header buttons — otherwise an open panel
+// would keep showing the pre-toggle state.
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return;
+  if (changes.altOverlayActive)  renderOverlayToggle(!!changes.altOverlayActive.newValue);
+  if (changes.linkOverlayActive) renderLinkOverlayToggle(!!changes.linkOverlayActive.newValue);
+});
+
 // ─── Render: all ────────────────────────────────────────────────────────────
 
 function render(data, expandMeta = false) {

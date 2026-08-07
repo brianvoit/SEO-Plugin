@@ -1087,7 +1087,9 @@ body.settings-open #update-footer { margin-top: auto; }
 .status-badge--error    { color: var(--hint-red);   border-color: var(--hint-red); }
 .status-badge--server   { color: var(--text-muted); border-color: var(--text-muted); }
 .status-code  { color: inherit; font-size: 11px; }
-.status-count { color: inherit; opacity: 0.8; font-size: 10px; }
+/* Reads as one token — "301:1" — so cancel the pill's inter-item gap. Kept as
+   a separate span purely so the count stays visually secondary. */
+.status-count { color: inherit; opacity: 0.8; font-size: 10px; margin-left: -3px; }
 /* When the pill is the active (redirect) tab, tint its fill with its own color */
 .status-badge--tab-active { background: color-mix(in srgb, currentColor 14%, var(--bg)); }
 
@@ -1639,7 +1641,12 @@ body.settings-open #update-footer { margin-top: auto; }
    this stays a 5-column grid (unlike the 8-9 column Keyword/Search-term
    tables below it) — numeric columns given a bit more width so the row
    doesn't read as sparse next to those wider tables. */
-.ads-row--ag { grid-template-columns: 1fr 64px 56px 72px 56px; }
+/* Impr Clicks CTR Cost CPC Conv. The numeric columns are fractional rather
+   than fixed px so they absorb the extra width in a wide sidebar/pop-out —
+   with fixed widths the name column took every spare pixel as `1fr`, leaving a
+   dead band between the ad-group name and the metrics. minmax() keeps them
+   readable when the panel is narrow. */
+.ads-row--ag { grid-template-columns: minmax(0, 1.5fr) repeat(6, minmax(46px, 1fr)); }
 .ads-row--ag .ads-cell-term { padding-left: 12px; }
 /* The column header shares .ads-row--ag but shouldn't inherit the ad-group indent */
 .ads-row--ag.ads-row--header .ads-cell-term { padding-left: 0; }

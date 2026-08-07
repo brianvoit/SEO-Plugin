@@ -49,6 +49,20 @@ function adsCost(n, currency) {
   return '$' + v.toLocaleString();
 }
 function adsPct(v) { return v == null ? '—' : `${Math.round(v * 100)}%`; }
+// CTR and CPC are derived from the numbers already on hand — no extra API call.
+// CTR keeps a decimal (6.7% vs 7%) because ad CTRs cluster in low single digits.
+function adsCtr(clicks, impressions) {
+  if (!impressions) return '—';
+  return `${((clicks / impressions) * 100).toFixed(1)}%`;
+}
+// Not adsCost: that rounds up to whole units, which would turn every CPC into
+// "$1". Cost-per-click needs real decimals.
+function adsCpc(cost, clicks, currency) {
+  if (!clicks) return '—';
+  const v = cost / clicks;
+  try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: currency || 'USD', maximumFractionDigits: 2 }).format(v); }
+  catch { return '$' + v.toFixed(2); }
+}
 // Keyword Plan top-of-page bid range, in micros (1 currency unit = 1e6
 // micros). Not adsCost — bid ranges are often sub-dollar and need real
 // decimal precision, whereas adsCost rounds up to whole units.
@@ -251,10 +265,13 @@ function computeAdsHidden() {
     if (!groupsByCamp.has(a.campaignId)) groupsByCamp.set(a.campaignId, new Set());
     groupsByCamp.get(a.campaignId).add(a.adGroupId);
   });
-  imprByCamp.forEach((impr, campId) => {
-    if (statusByCamp.get(campId) === 'PAUSED' && impr === 0) {
-      (groupsByCamp.get(campId) || new Set()).forEach(agId => _adsHiddenAdGroups.add(agId));
-    }
+  // Mirrors the tree's rule so the tables below never show keywords or search
+  // terms belonging to a campaign that isn't listed: removed always hidden,
+  // paused only when it did nothing in the window.
+  groupsByCamp.forEach((agIds, campId) => {
+    const status = statusByCamp.get(campId);
+    const dead = status === 'REMOVED' || (status === 'PAUSED' && (imprByCamp.get(campId) || 0) === 0);
+    if (dead) agIds.forEach(agId => _adsHiddenAdGroups.add(agId));
   });
 
   // Also hide ad groups that are themselves paused with no activity in-window,
@@ -339,13 +356,10 @@ function setAdsFilter(filter) {
     (_adsFilter.criterionId || _adsFilter.text || _adsFilter.campaignId) === (filter.criterionId || filter.text || filter.campaignId) &&
     _adsFilter.adGroupId === filter.adGroupId;
   _adsFilter = same ? null : filter;
-  renderAdsAll();
-  refreshAdsChart();
+  renderAdsAll();   // ends by refreshing the chart
 }
 
 // ─── Ads-pointing-here table (one row per ad group) ─────────────────────────────
-
-const ADS_AG_GRID = '1fr 56px 50px 64px 48px';
 
 function renderAdsTree() {
   const root = document.getElementById('ads-tree');
@@ -357,9 +371,9 @@ function renderAdsTree() {
   // header
   const header = document.createElement('div');
   header.className = 'ads-row ads-row--ag ads-row--header';
-  ['Campaigns', 'Impr', 'Clicks', 'Cost', 'Conv'].forEach((c, i) => {
+  ['Campaigns', 'Impr', 'Clicks', 'CTR', 'Cost', 'CPC', 'Conv'].forEach((c, i) => {
     const cell = document.createElement('span');
-    // Impr stays right-aligned; Clicks/Cost/Conv are centered
+    // Impr stays right-aligned; everything after it is centered
     cell.className = i === 0 ? 'ads-cell-term' : ('ads-cell-num' + (i >= 2 ? ' ads-cell-num--c' : ''));
     cell.textContent = c;
     header.appendChild(cell);
@@ -383,10 +397,12 @@ function renderAdsTree() {
     const totalImpr = groups.reduce((s, g) => s + g.impressions, 0);
     return { campId, camp, groups, total, totalImpr };
   })
-  // Hide dead campaigns: paused AND zero impressions in the selected window,
-  // even if their ads still target this page (they're just noise).
+  // Removed campaigns are always noise. Paused ones are only hidden when they
+  // did nothing in the window — a campaign paused today but which spent during
+  // the period is still worth seeing.
   .filter(({ campId, totalImpr }) => {
     const status = isByCampaign.get(campId)?.status;
+    if (status === 'REMOVED') return false;
     return !(status === 'PAUSED' && totalImpr === 0);
   })
   .sort((a, b) => b.total - a.total);
@@ -440,7 +456,14 @@ function renderAdsTree() {
       });
       name.appendChild(nameLink);
       row.appendChild(name);
-      [adsNum(g.impressions), adsNum(g.clicks), adsCost(g.cost, currency), adsConv(g.conversions)].forEach((v, i) => {
+      [
+        adsNum(g.impressions),
+        adsNum(g.clicks),
+        adsCtr(g.clicks, g.impressions),
+        adsCost(g.cost, currency),
+        adsCpc(g.cost, g.clicks, currency),
+        adsConv(g.conversions)
+      ].forEach((v, i) => {
         const cell = document.createElement('span');
         cell.className = 'ads-cell-num' + (i >= 1 ? ' ads-cell-num--c' : '');   // Impr right, rest centered
         cell.textContent = v;
@@ -841,6 +864,36 @@ function renderAdsChart() {
   if (typeof overlayChartAnnotations === 'function') overlayChartAnnotations(container, _adsFilled, built);
 }
 
+// Sum the per-ad-group daily rows for a set of ad group ids.
+function adsTsForAdGroups(ids) {
+  const byDate = {};
+  (_adsData.tsRows || []).filter(r => !ids || ids.has(r.adGroupId)).forEach(r => {
+    if (!byDate[r.date]) byDate[r.date] = adsEmptyDay(r.date);
+    byDate[r.date].impressions += r.impressions; byDate[r.date].clicks += r.clicks;
+    byDate[r.date].cost += r.cost; byDate[r.date].conversions += r.conversions;
+  });
+  return adsFillClient(byDate);
+}
+
+// The ad groups the Keywords table is currently showing. Read back off the
+// rendered set rather than re-deriving the filter chain, so the chart can't
+// drift from the table. Returns null when nothing is narrowed (draw everything).
+//
+// tsRows is per ad-group per day — there are no per-keyword daily rows — so a
+// keyword-level filter (intent / QS / regex) can only scope the chart down to
+// the ad groups that still contain matching keywords, not to the keywords
+// themselves. Exact for campaign and ad-group filters; an ad-group-level
+// approximation for the chip filters.
+function adsChartScopeIds() {
+  if (!_adsData) return null;
+  const table = document.getElementById('ads-keywords-table');
+  const rows = table && table._exportRows;
+  if (!rows || !rows.length) return null;
+  const all = new Set((_adsData.keywords || []).map(k => k.adGroupId));
+  const shown = new Set(rows.map(r => r.adGroupId));
+  return shown.size >= all.size ? null : shown;   // nothing narrowed → full chart
+}
+
 // Recompute the displayed series + scorecards for the current filter, then draw.
 async function refreshAdsChart() {
   if (!_adsData) return;
@@ -848,15 +901,19 @@ async function refreshAdsChart() {
   let ts, totals, prev;
 
   if (!f) {
-    ts = _adsData.timeseries || []; totals = _adsData.totals; prev = _adsData.previousTotals;
+    // No cross-filter, but the table chips may still have narrowed things.
+    const scope = adsChartScopeIds();
+    if (scope) {
+      ts = adsTsForAdGroups(scope); totals = adsSumTs(ts); prev = null;
+    } else {
+      ts = _adsData.timeseries || []; totals = _adsData.totals; prev = _adsData.previousTotals;
+    }
   } else if (f.type === 'adGroup') {
-    const byDate = {};
-    (_adsData.tsRows || []).filter(r => r.adGroupId === f.adGroupId).forEach(r => {
-      if (!byDate[r.date]) byDate[r.date] = adsEmptyDay(r.date);
-      byDate[r.date].impressions += r.impressions; byDate[r.date].clicks += r.clicks;
-      byDate[r.date].cost += r.cost; byDate[r.date].conversions += r.conversions;
-    });
-    ts = adsFillClient(byDate); totals = adsSumTs(ts); prev = null;
+    ts = adsTsForAdGroups(new Set([f.adGroupId])); totals = adsSumTs(ts); prev = null;
+  } else if (f.type === 'campaign') {
+    // Previously fell through to the search-term branch with an undefined
+    // text, which silently drew the UNFILTERED chart for a campaign click.
+    ts = adsTsForAdGroups(f.groupIds); totals = adsSumTs(ts); prev = null;
   } else {
     const scope = f.type === 'keyword'
       ? { type: 'keyword', criterionId: f.criterionId, adGroupId: f.adGroupId }
@@ -1015,6 +1072,10 @@ function renderAdsAll() {
   buildAdsMetricTable(tt, terms, { intentFilter: _adsTermIntent });
   // Classify search terms by intent (shared Haiku cache); re-render once when ready
   ensureIntents(terms.map(t => t.text), () => renderAdsAll());
+
+  // Chart follows the tables. Deliberately last: adsChartScopeIds() reads the
+  // rendered keyword set, so it has to run after buildAdsMetricTable above.
+  refreshAdsChart();
 }
 
 // Metric scorecards toggle their series in/out of the chart

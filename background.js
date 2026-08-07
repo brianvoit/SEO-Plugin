@@ -2,6 +2,23 @@
 // page, so the script re-runs whenever the background wakes, and removeAll →
 // create is self-healing if the item ever goes missing. onInstalled alone fires
 // only on install/update.
+// Right-clicking the toolbar button exposes the three global toggles, so they
+// can be flipped without opening the panel. All three are plain storage.local
+// flags, which is what lets the menu, the popup and the content script stay in
+// agreement (each observes storage rather than owning the state).
+const SEO_TOGGLE_MENUS = [
+  { id: 'seo-toggle-alt',    title: 'Alt Text Overlay',    key: 'altOverlayActive',  fallback: false },
+  { id: 'seo-toggle-links',  title: 'Link Health Overlay', key: 'linkOverlayActive', fallback: false },
+  { id: 'seo-toggle-follow', title: 'Follow Active Tab',   key: 'followActiveTab',   fallback: true }
+];
+
+// followActiveTab defaults ON when unset, the overlays default OFF — so an
+// absent value must fall back per-item rather than to a single default.
+function seoToggleChecked(item, stored) {
+  const value = stored[item.key];
+  return value === undefined ? item.fallback : !!value;
+}
+
 function registerSeoMenus() {
   if (!browser.menus) return;
   browser.menus.removeAll(() => {
@@ -10,12 +27,35 @@ function registerSeoMenus() {
       title: 'Generate Alt Text',
       contexts: ['image']
     });
+    SEO_TOGGLE_MENUS.forEach(item => {
+      browser.menus.create({
+        id: item.id,
+        title: item.title,
+        type: 'checkbox',
+        checked: item.fallback,
+        contexts: ['action']
+      });
+    });
   });
 }
 registerSeoMenus();
 browser.runtime.onInstalled.addListener(registerSeoMenus);
 
-browser.menus.onClicked.addListener((info, tab) => {
+// Sync the checkmarks to real state just before the menu paints. Without this
+// they'd show whatever was last set here, which drifts as soon as a toggle is
+// flipped from the panel instead.
+if (browser.menus && browser.menus.onShown) {
+  browser.menus.onShown.addListener(async (info) => {
+    if (!info.contexts || !info.contexts.includes('action')) return;
+    const stored = await browser.storage.local.get(SEO_TOGGLE_MENUS.map(m => m.key));
+    SEO_TOGGLE_MENUS.forEach(item => {
+      browser.menus.update(item.id, { checked: seoToggleChecked(item, stored) });
+    });
+    browser.menus.refresh();
+  });
+}
+
+browser.menus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === 'seo-generate-alt') {
     // Target the exact frame that was right-clicked. The block editor renders
     // its canvas in an iframe, so a tab-wide send would reach the top document
@@ -25,6 +65,27 @@ browser.menus.onClicked.addListener((info, tab) => {
       action: 'generateAltText',
       srcUrl: info.srcUrl
     }, opts);
+    return;
+  }
+
+  const item = SEO_TOGGLE_MENUS.find(m => m.id === info.menuItemId);
+  if (!item) return;
+
+  if (item.key === 'followActiveTab') {
+    const { followActiveTab } = await browser.storage.local.get('followActiveTab');
+    await browser.storage.local.set({ followActiveTab: followActiveTab === false });
+    return;
+  }
+
+  // The overlays are owned by the content script — it flips storage AND
+  // applies/removes the on-page chips. Top frame only, matching every other
+  // page read (see TOP_FRAME in popup-shared.js).
+  const action = item.key === 'altOverlayActive' ? 'toggleAltOverlay' : 'toggleLinkOverlay';
+  try {
+    await browser.tabs.sendMessage(tab.id, { action }, { frameId: 0 });
+  } catch {
+    // No content script here (about:, PDF viewer, AMO). Firefox has already
+    // flipped the checkbox visually; onShown re-syncs it on next open.
   }
 });
 
@@ -182,6 +243,37 @@ function badgeLevelFor(status, redirectCount) {
   return (base === 'ok' && redirectCount > 0) ? 'redirect' : base;
 }
 
+// The badge shows the FIRST status on the path, not the last. The point of the
+// badge is to flag that a redirect happened at all — a page that 301s to a 200
+// should read as "301", because a plain "200" hides the hop entirely. When
+// nothing redirected, the first hop IS the last, so it shows the final code.
+function firstStatusOf(entry) {
+  if (entry && entry.chain && entry.chain.length && entry.chain[0].status != null) {
+    return entry.chain[0].status;
+  }
+  return entry ? entry.finalStatus : null;
+}
+
+function countChainRedirects(chain) {
+  return (chain || []).filter(h => (h.status >= 300 && h.status < 400) || h.kind === 'client').length;
+}
+
+// "{first status}:{redirect count}" — e.g. 301:1, 307:3. A page that didn't
+// redirect shows the bare code (200), since ":0" is noise on the common case.
+function badgeTextFor(status, redirectCount) {
+  return redirectCount > 0 ? `${status}:${redirectCount}` : String(status);
+}
+
+// Paint the badge from a finished entry. Safe to call repeatedly — the client
+// redirect stitch re-runs it once the previous chain is prepended.
+function paintBadgeFromEntry(tabId, entry) {
+  if (!entry || entry.finalStatus == null) return;
+  const first = firstStatusOf(entry);
+  if (first == null) return;
+  const redirectCount = countChainRedirects(entry.chain);
+  setActionBadge(tabId, badgeTextFor(first, redirectCount), badgeLevelFor(first, redirectCount));
+}
+
 function setActionBadge(tabId, text, level) {
   browser.action.setBadgeText({ text, tabId });
   if (!level) return;
@@ -239,8 +331,7 @@ browser.webRequest.onCompleted.addListener(details => {
   entry.done = true;
   entry.totalMs = entry.startedAt != null ? Math.max(0, Math.round(details.timeStamp - entry.startedAt)) : null;
   saveRedirect(details.tabId, entry);
-  const redirectCount = entry.chain.filter(h => h.status >= 300 && h.status < 400).length;
-  setActionBadge(details.tabId, String(details.statusCode), badgeLevelFor(details.statusCode, redirectCount));
+  paintBadgeFromEntry(details.tabId, entry);
   browser.runtime.sendMessage({ action: 'redirectUpdated', tabId: details.tabId }).catch(() => {});
 }, REDIRECT_FILTER);
 
@@ -323,6 +414,9 @@ browser.webNavigation.onCommitted.addListener(details => {
     const prev = entry.prevChain.map(h => ({ ...h }));
     prev[prev.length - 1].kind = 'client';   // junction hop: page issued a JS/meta redirect
     entry.chain = prev.concat(entry.chain).slice(-REDIRECT_MAX_HOPS);
+    // Stitching prepends hops, so the first status just changed — repaint (a
+    // no-op while the new navigation is still in flight).
+    paintBadgeFromEntry(details.tabId, entry);
     browser.runtime.sendMessage({ action: 'redirectUpdated', tabId: details.tabId }).catch(() => {});
   }
   entry.prevChain = null;

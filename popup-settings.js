@@ -79,6 +79,14 @@ document.getElementById('btn-follow-tab').addEventListener('click', () => {
   browser.storage.local.set({ followActiveTab: next });
 });
 
+// Also toggleable from the toolbar button's right-click menu — mirror that
+// back so an open panel doesn't show a stale state.
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes.followActiveTab) return;
+  const btn = document.getElementById('btn-follow-tab');
+  if (btn) btn.setAttribute('aria-pressed', String(changes.followActiveTab.newValue !== false));
+});
+
 // ─── WordPress sites ──────────────────────────────────────────────────────────
 
 let wpSites = [];

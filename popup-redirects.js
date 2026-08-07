@@ -68,19 +68,28 @@ function paintRedirectBadge() {
   }
 
   const redirectCount = countRedirects(info.chain || []);
+  // Show the FIRST status on the path, not the last. The badge exists to flag
+  // that a redirect happened — a 301→200 shown as "200" hides the hop, which is
+  // the thing worth knowing. With no redirects the first hop IS the last, so
+  // this is identical to the final code.
+  const chain = info.chain || [];
+  const firstStatus = (chain.length && chain[0].status != null) ? chain[0].status : info.finalStatus;
+
   let level, code;
   if (info.finalStatus == null && info.error) {
     level = 'server';
     code  = 'ERR';
   } else {
-    code = String(info.finalStatus);
-    const base = redirectStatusClass(info.finalStatus);
+    code = String(firstStatus);
+    const base = redirectStatusClass(firstStatus);
     level = (base === 'ok' && redirectCount > 0) ? 'redirect' : base;
   }
 
+  // "{first status}:{redirect count}" — e.g. 301:1, 307:3. A page that didn't
+  // redirect shows the bare code (200), since ":0" is noise on the common case.
   codeEl.textContent = code;
   if (redirectCount > 0) {
-    countEl.textContent = `↳${redirectCount}`;
+    countEl.textContent = `:${redirectCount}`;
     countEl.classList.remove('hidden');
   } else {
     countEl.classList.add('hidden');
@@ -89,8 +98,9 @@ function paintRedirectBadge() {
   if (typeof activeTab !== 'undefined' && activeTab === 'redirect') {
     badge.classList.add('status-badge--tab-active');
   }
+  // The pill shows the first code, so spell out where it ended up.
   badge.title = redirectCount > 0
-    ? `Arrived via ${redirectCount} redirect${redirectCount !== 1 ? 's' : ''} — click for the trace`
+    ? `${firstStatus} → ${info.finalStatus} · ${redirectCount} redirect${redirectCount !== 1 ? 's' : ''} — click for the trace`
     : `Status ${code} — click for the redirect trace`;
 }
 

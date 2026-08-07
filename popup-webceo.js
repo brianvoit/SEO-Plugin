@@ -37,7 +37,29 @@ function webceoIsTracked(term) {
   return !!(_webceoTrackedSet && _webceoTrackedSet.has((term || '').toLowerCase().trim()));
 }
 function markWebceoTracked(term) {
-  if (_webceoTrackedSet) _webceoTrackedSet.add((term || '').toLowerCase().trim());
+  // Create the set if the initial load hasn't landed yet. Guarding on its
+  // existence silently dropped the mark when a term was tracked before
+  // ensureWebceoTracked() resolved, so the chip reverted to "+ Track" on the
+  // next render.
+  if (!_webceoTrackedSet) _webceoTrackedSet = new Set();
+  _webceoTrackedSet.add((term || '').toLowerCase().trim());
+}
+
+// A term can appear in several tables at once (Search queries, Ads keywords,
+// Ads search terms, Backlinks). Tracking it in one place has to flip every
+// other instance too — each table renders its chip from webceoIsTracked(), so
+// they just need a re-render. Every call is typeof-guarded because these live
+// in sibling popup files that may not be loaded/populated.
+function refreshTrackedChips() {
+  if (typeof renderGscQueries === 'function' && typeof _gscQueries !== 'undefined' && _gscQueries && _gscQueries.length) {
+    try { renderGscQueries(_gscQueries, typeof _gscPageUrl !== 'undefined' ? _gscPageUrl : null); } catch { /* Search tab idle */ }
+  }
+  if (typeof renderAdsAll === 'function' && typeof _adsData !== 'undefined' && _adsData) {
+    try { renderAdsAll(); } catch { /* Ads tab idle */ }
+  }
+  if (typeof renderBacklinksPanel === 'function') {
+    try { renderBacklinksPanel(); } catch { /* panel not open */ }
+  }
 }
 async function ensureWebceoTracked(onReady) {
   // Already loaded or in flight → do nothing (the caller's render already has the
@@ -914,19 +936,27 @@ async function trackQueryInWebceo(keyword, chip, intent) {
     const tags = intent ? [intent] : [];
     res = await sendMessageWithTimeout({ action: 'webceoAddKeywords', pageUrl: tab.url, keywords: [keyword], tags });
   } catch { res = { error: 'NETWORK' }; }
-  if (!chip) return;
   if (res && res.ok) {
-    chip.textContent = 'Tracked';
-    chip.disabled = true;
-    chip.classList.add('gsc-track-chip--done');
+    // Mark FIRST: refreshTrackedChips() rebuilds these rows, and each rebuilt
+    // chip reads webceoIsTracked() — so the set has to be updated before the
+    // re-render, not after.
     markWebceoTracked(keyword);
-  } else {
-    chip.textContent = '+ Track';
-    chip.disabled = false;
-    chip.title = (!res || !res.connected) ? 'Add a Web CEO API key in Settings' : webceoErrorMessage(res.error, res.detail);
-    chip.classList.add('gsc-track-chip--err');
-    setTimeout(() => chip.classList.remove('gsc-track-chip--err'), 2500);
+    if (chip) {
+      chip.textContent = 'Tracked';
+      chip.disabled = true;
+      chip.title = 'Tracked in your Web CEO project';
+      chip.classList.add('gsc-track-chip--done');
+    }
+    refreshTrackedChips();
+    return;
   }
+  // Failed — restore the chip so it can be retried.
+  if (!chip) return;
+  chip.textContent = '+ Track';
+  chip.disabled = false;
+  chip.title = (!res || !res.connected) ? 'Add a Web CEO API key in Settings' : webceoErrorMessage(res.error, res.detail);
+  chip.classList.add('gsc-track-chip--err');
+  setTimeout(() => chip.classList.remove('gsc-track-chip--err'), 2500);
 }
 
 function loadWebceoPrefs() {

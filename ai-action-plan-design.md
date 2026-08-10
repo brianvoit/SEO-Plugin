@@ -1,6 +1,6 @@
 # AI Action Plan — Synthesis Feature Design
 
-A design write-up for extending the Claude integration in **SEO Inspector** (v1.35) to
+A design write-up for extending the Claude integration in **Marketing Inspector** (v1.35) to
 synthesize on-page data and demand-side data into actionable, evidence-backed
 recommendations.
 

@@ -326,7 +326,7 @@ function buildRedirectExportText() {
   const now = new Date();
   const stamp = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
   const lines = [];
-  lines.push('SEO Inspector — Redirect Trace');
+  lines.push('Redirect Inspector — Redirect Trace');
   lines.push(`Date: ${stamp}`);
   if (chain.length) {
     lines.push(`Start URL: ${chain[0].url}`);
@@ -363,7 +363,7 @@ async function exportRedirectTrace() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `SEO-Inspector-Redirect-Trace-${fileStamp}-${host}.txt`;
+  a.download = `Redirect-Trace-${fileStamp}-${host}.txt`;
   document.body.appendChild(a);
   a.click();
   a.remove();

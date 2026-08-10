@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="icons/icon-128.png" width="96" alt="SEO Inspector icon" />
+  <img src="icons/icon-128.png" width="96" alt="Marketing Inspector icon" />
 </p>
 
-<h1 align="center">SEO Inspector</h1>
+<h1 align="center">Marketing Inspector</h1>
 
 <p align="center">
   A Firefox extension that pulls on-page SEO, Search Console, Analytics, Google Ads,<br />

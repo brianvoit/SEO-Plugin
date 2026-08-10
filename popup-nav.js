@@ -323,3 +323,29 @@ document.querySelectorAll('#main-tabs [data-tab]').forEach(btn => {
     if (tab === 'dns' && typeof loadDnsData === 'function') loadDnsData();
   });
 });
+
+// ─── Keyboard shortcuts inside the panel: Option/Alt + F / I / L ─────────────
+// The page has its own copy of these (content.js) for when the page holds
+// focus; this covers the case where focus is in the sidebar/popup instead.
+// Clicking the existing buttons reuses their handlers, so the toggles and their
+// aria-pressed state can't drift from the click path.
+//
+// Matches on e.code (physical key): on macOS holding Option rewrites e.key to
+// the alternate glyph, so Option+F arrives as "ƒ". Ignored while a text field
+// has focus so those glyphs can still be typed.
+const PANEL_SHORTCUTS = { KeyF: 'btn-follow-tab', KeyI: 'btn-overlay', KeyL: 'btn-link-overlay' };
+
+document.addEventListener('keydown', (e) => {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.repeat) return;
+  const id = PANEL_SHORTCUTS[e.code];
+  if (!id) return;
+
+  const focused = document.activeElement;
+  if (focused && (focused.isContentEditable
+    || focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA' || focused.tagName === 'SELECT')) return;
+
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  e.preventDefault();
+  btn.click();
+});

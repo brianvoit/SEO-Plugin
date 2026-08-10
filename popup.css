@@ -1646,7 +1646,6 @@ body.settings-open #update-footer { margin-top: auto; }
    with fixed widths the name column took every spare pixel as `1fr`, leaving a
    dead band between the ad-group name and the metrics. minmax() keeps them
    readable when the panel is narrow. */
-.ads-row--ag { grid-template-columns: minmax(0, 1.5fr) repeat(6, minmax(46px, 1fr)); }
 .ads-row--ag .ads-cell-term { padding-left: 12px; }
 /* The column header shares .ads-row--ag but shouldn't inherit the ad-group indent */
 .ads-row--ag.ads-row--header .ads-cell-term { padding-left: 0; }
@@ -1671,6 +1670,16 @@ body.settings-open #update-footer { margin-top: auto; }
   font-size: 11.5px;
 }
 .ads-row--kw { grid-template-columns: 1fr 24px 40px 36px 46px 34px 38px 40px 36px; }  /* + QS after term */
+/* IMPORTANT: the grid overrides for .ads-row--kw / --ag must sit AFTER the base
+   .ads-row rule. They're all single-class selectors, so specificity ties and
+   source order decides — .ads-row--ag used to be declared above and was
+   silently losing, leaving ad-group rows on the base 8-track grid: the name
+   column took every spare pixel as `1fr`, the metrics were squeezed into ~40px
+   each, and an 8th track sat empty on the right for a row with 7 cells.
+   Campaigns: name Impr Clicks CTR Cost CPC Conv — the metrics are fractional so
+   they share the leftover width evenly instead of clustering, with a floor so
+   they stay readable in a narrow sidebar, and the name keeps a usable minimum. */
+.ads-row--ag { grid-template-columns: minmax(140px, 2fr) repeat(6, minmax(48px, 1fr)); }
 .ads-row:last-child { border-bottom: none; }
 .ads-row--header {
   font-size: 9px;
@@ -2774,9 +2783,11 @@ body.settings-open #update-footer { margin-top: auto; }
 
 /* Annotation stars overlaid on the Search / Analytics / Ads charts */
 .chart-annot-layer { position: absolute; inset: 0; pointer-events: none; }
-/* Sit on the x-axis (bottom), alongside the date labels; gray, no help cursor */
+/* Own row beneath the date labels (buildCombinedChart reserves
+   CHART_ANNOT_ROW_H at the bottom for it) — they used to share the date strip
+   and overlapped. Gray, no help cursor. */
 .chart-annot-star {
-  position: absolute; bottom: 0; transform: translateX(-50%);
+  position: absolute; bottom: 1px; transform: translateX(-50%);
   font-size: 10px; line-height: 1; color: var(--text-muted);
   cursor: default; pointer-events: auto; text-shadow: 0 0 2px var(--bg), 0 0 2px var(--bg);
 }

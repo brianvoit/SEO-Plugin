@@ -1521,6 +1521,77 @@ function wpsInit() {
 
 wpsInit();
 
+// ─── Overlay toggles (shared by the message handler and the shortcuts) ───────
+// Each flips the persisted flag and applies/removes the on-page chips, then
+// resolves with the new state.
+
+function toggleAltOverlayState() {
+  return browser.storage.local.get('altOverlayActive').then(({ altOverlayActive }) => {
+    const next = !altOverlayActive;
+    return browser.storage.local.set({ altOverlayActive: next }).then(() => {
+      if (next) applyOverlay(); else removeOverlay();
+      return next;
+    });
+  });
+}
+
+function toggleLinkOverlayState() {
+  return browser.storage.local.get('linkOverlayActive').then(({ linkOverlayActive }) => {
+    const next = !linkOverlayActive;
+    return browser.storage.local.set({ linkOverlayActive: next }).then(() => {
+      if (next) applyLinkOverlay(); else removeLinkOverlay();
+      return next;
+    });
+  });
+}
+
+function toggleFollowActiveTabState() {
+  return browser.storage.local.get('followActiveTab').then(({ followActiveTab }) => {
+    // Unset means ON, so the first toggle turns it off.
+    const next = followActiveTab === false;
+    return browser.storage.local.set({ followActiveTab: next }).then(() => next);
+  });
+}
+
+// ─── Keyboard shortcuts: Option/Alt + F / I / L ──────────────────────────────
+// Implemented as a page keydown listener rather than a manifest `commands`
+// entry on purpose. A browser-level command would swallow the keystroke even
+// while typing, so Option+F could never produce "ƒ" again. Here the handler
+// simply stands down whenever a text field has focus, leaving the character to
+// be typed normally.
+//
+// Matching is on e.code (the physical key), because on macOS holding Option
+// rewrites e.key to the alternate glyph — Option+F arrives as "ƒ", not "f".
+
+function seoEditableHasFocus(doc) {
+  const el = doc.activeElement;
+  if (!el) return false;
+  if (el.isContentEditable) return true;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+}
+
+// Alt alone — Alt+Shift / Ctrl+Alt / Cmd+Alt belong to other things.
+function seoShortcutFor(e) {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.repeat) return null;
+  if (e.code === 'KeyF') return 'follow';
+  if (e.code === 'KeyI') return 'alt';
+  if (e.code === 'KeyL') return 'link';
+  return null;
+}
+
+if (IS_TOP_FRAME) {
+  window.addEventListener('keydown', (e) => {
+    const action = seoShortcutFor(e);
+    if (!action) return;
+    if (seoEditableHasFocus(document)) return;   // let the page have the keystroke
+    e.preventDefault();
+    if (action === 'follow') toggleFollowActiveTabState();
+    else if (action === 'alt') toggleAltOverlayState();
+    else toggleLinkOverlayState();
+  }, true);   // capture, so a page that swallows keydown can't block it
+}
+
 // ─── Message handler ──────────────────────────────────────────────────────────
 
 browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -1541,26 +1612,12 @@ browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.action === 'toggleAltOverlay') {
-    browser.storage.local.get('altOverlayActive').then(({ altOverlayActive }) => {
-      const next = !altOverlayActive;
-      browser.storage.local.set({ altOverlayActive: next }).then(() => {
-        if (next) applyOverlay();
-        else removeOverlay();
-        sendResponse({ altOverlayActive: next });
-      });
-    });
+    toggleAltOverlayState().then(next => sendResponse({ altOverlayActive: next }));
     return true;
   }
 
   if (message.action === 'toggleLinkOverlay') {
-    browser.storage.local.get('linkOverlayActive').then(({ linkOverlayActive }) => {
-      const next = !linkOverlayActive;
-      browser.storage.local.set({ linkOverlayActive: next }).then(() => {
-        if (next) applyLinkOverlay();
-        else removeLinkOverlay();
-        sendResponse({ linkOverlayActive: next });
-      });
-    });
+    toggleLinkOverlayState().then(next => sendResponse({ linkOverlayActive: next }));
     return true;
   }
 

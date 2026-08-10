@@ -534,7 +534,7 @@ function exportToxicDisavow() {
   const stamp = new Date().toISOString().slice(0, 10);
   const lines = [
     `# Disavow file — toxic backlinks for ${d.domain || d.host || 'site'}`,
-    `# Generated ${stamp} by SEO Inspector`,
+    `# Generated ${stamp} by Marketing Inspector`,
     '# Upload at https://search.google.com/search-console/disavow-links',
     '',
     ...domains.map(dom => `domain:${dom}`)

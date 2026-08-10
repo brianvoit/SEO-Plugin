@@ -145,8 +145,17 @@ function niceCeil(v) {
   return nice * mag;
 }
 
-function buildCombinedChart(filled, activeMetrics, { width = 320, height = 130, metrics = GSC_METRICS } = {}) {
-  const padT = 10, padB = 16;
+// The bottom padding holds TWO stacked rows, not one: the date labels sit just
+// under the axis, and the annotation stars get their own row beneath them.
+// They previously shared a single 16px strip — the stars are HTML anchored to
+// the container's bottom edge while the dates are SVG text drawn at the very
+// bottom, so on any day carrying an annotation they landed on top of each
+// other. height grew by ANNOT_ROW_H so the plot area itself is unchanged.
+const CHART_DATE_ROW_H = 14;    // axis → date baseline
+const CHART_ANNOT_ROW_H = 14;   // reserved beneath the dates for the star row
+
+function buildCombinedChart(filled, activeMetrics, { width = 320, height = 142, metrics = GSC_METRICS } = {}) {
+  const padT = 10, padB = CHART_DATE_ROW_H + CHART_ANNOT_ROW_H;
   const n = filled.length;
 
   // Active metrics in the config's declared order
@@ -226,7 +235,9 @@ function buildCombinedChart(filled, activeMetrics, { width = 320, height = 130, 
     const x = xFor(i);
     svg += `<line class="gsc-chart-gridline gsc-chart-gridline--v" x1="${x.toFixed(1)}" y1="${padT}" x2="${x.toFixed(1)}" y2="${(padT+innerH).toFixed(1)}" />`;
     const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
-    svg += `<text class="gsc-chart-axis-label" x="${x.toFixed(1)}" y="${height-3}" text-anchor="${anchor}">${escapeHtml(formatDateShort(filled[i].date, showYear))}</text>`;
+    // Baseline sits just under the axis, clear of the star row below it.
+    const dateY = height - CHART_ANNOT_ROW_H - 5;
+    svg += `<text class="gsc-chart-axis-label" x="${x.toFixed(1)}" y="${dateY}" text-anchor="${anchor}">${escapeHtml(formatDateShort(filled[i].date, showYear))}</text>`;
   });
 
   // ── Y-axis tick labels, per metric, on its assigned side ────────────────────

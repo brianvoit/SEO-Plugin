@@ -4159,18 +4159,53 @@ async function docsGetAccessToken() {
   return googleGetAccessToken('docsAuth');
 }
 
+const DOCS_FOLDER_NAME = 'Marketing Plans';
+// Folder names this app has used before. An existing install already has a
+// folder id cached, so changing the name above alone would only affect fresh
+// installs — the rename has to be applied to the real folder.
+const DOCS_FOLDER_LEGACY_NAMES = ['SEO Plans'];
+
+// One-time relabel of the folder this app created under its old name. It keeps
+// the same folder and the same id, so every export already in there stays
+// exactly where it is. Best-effort: a failure here must never block an export.
+async function docsRenameLegacyFolder(accessToken, folderId) {
+  const auth = { Authorization: `Bearer ${accessToken}` };
+  try {
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}?fields=id,name,trashed`, { headers: auth });
+    if (res.ok) {
+      const meta = await res.json();
+      // Only touch a folder still carrying one of our old names — if the user
+      // renamed it themselves, that's their choice and we leave it alone.
+      if (!meta.trashed && DOCS_FOLDER_LEGACY_NAMES.includes(meta.name)) {
+        await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}`, {
+          method: 'PATCH',
+          headers: { ...auth, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: DOCS_FOLDER_NAME })
+        });
+      }
+    }
+    // Mark handled on any definitive answer (renamed, already fine, or gone) so
+    // this costs exactly one extra request per install rather than one per export.
+    await browser.storage.local.set({ docsFolderNamed: DOCS_FOLDER_NAME });
+  } catch { /* offline — retried on the next export */ }
+}
+
 async function docsGetOrCreateFolder(accessToken) {
-  const { docsFolderID } = await browser.storage.local.get('docsFolderID');
-  if (docsFolderID) return docsFolderID;
+  const { docsFolderID, docsFolderNamed } = await browser.storage.local.get(['docsFolderID', 'docsFolderNamed']);
+  if (docsFolderID) {
+    if (docsFolderNamed !== DOCS_FOLDER_NAME) await docsRenameLegacyFolder(accessToken, docsFolderID);
+    return docsFolderID;
+  }
 
   const res = await fetch('https://www.googleapis.com/drive/v3/files', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: 'SEO Plans', mimeType: 'application/vnd.google-apps.folder' })
+    body: JSON.stringify({ name: DOCS_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' })
   });
   if (!res.ok) return null;
   const { id } = await res.json();
-  await browser.storage.local.set({ docsFolderID: id });
+  // Freshly created with the current name — no migration needed later.
+  await browser.storage.local.set({ docsFolderID: id, docsFolderNamed: DOCS_FOLDER_NAME });
   return id;
 }
 
@@ -4260,7 +4295,7 @@ async function docsUploadHtmlDoc(accessToken, docTitle, html) {
   const metadata = { name: docTitle, mimeType: 'application/vnd.google-apps.document' };
   if (folderId) metadata.parents = [folderId];
 
-  const boundary = '----seoInspectorBoundary' + Date.now();
+  const boundary = '----marketingInspectorBoundary' + Date.now();
   const body =
     `--${boundary}\r\n` +
     'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
@@ -4426,8 +4461,8 @@ async function sheetsGetOrCreateSpreadsheet(accessToken, cacheKey, { title, tabN
   const { spreadsheetId } = await createRes.json();
 
   // Sheets-API-created files land at Drive root — re-parent into the shared
-  // "SEO Plans" folder alongside the Doc exports. Best-effort: still usable
-  // at Drive root if this fails.
+  // exports folder alongside the Doc exports. Best-effort: still usable at
+  // Drive root if this fails.
   const folderId = await docsGetOrCreateFolder(accessToken);
   if (folderId) {
     await fetch(`https://www.googleapis.com/drive/v3/files/${spreadsheetId}?addParents=${folderId}&removeParents=root`, {
@@ -4486,7 +4521,7 @@ async function sheetsExportBlindspotIdeas({ ideas, pageUrl }) {
 
   const domain = sheetsDomainFromUrl(pageUrl);
   const sheet = await sheetsGetOrCreateSpreadsheet(token.accessToken, domain, {
-    title: `SEO Inspector Blindspots — ${domain}`,
+    title: `Ads Inspector Blindspot Ideas — ${domain}`,
     tabName: SHEETS_TAB_NAME,
     headerRow: SHEETS_HEADER_ROW
   });
@@ -4525,7 +4560,7 @@ async function sheetsExportGscQueries({ rows, pageUrl, rangeDays }) {
 
   const domain = sheetsDomainFromUrl(pageUrl);
   const sheet = await sheetsGetOrCreateSpreadsheet(token.accessToken, `gsc-queries::${domain}`, {
-    title: `SEO Inspector Search Queries — ${domain}`,
+    title: `Search Inspector Queries — ${domain}`,
     tabName: SHEETS_GSC_TAB_NAME,
     headerRow: SHEETS_GSC_HEADER_ROW
   });
@@ -4546,14 +4581,14 @@ async function sheetsExportGscQueries({ rows, pageUrl, rangeDays }) {
 const SHEETS_ADS_TABLES = {
   keywords: {
     tabName: 'Ads Keywords',
-    title: d => `SEO Inspector Ads Keywords — ${d}`,
+    title: d => `Ads Inspector Keywords — ${d}`,
     cacheKey: d => `ads-keywords::${d}`,
     headerRow: ['Date Exported', 'Range (days)', 'Page URL',
       'Keyword', 'Match Type', 'Intent', 'QS', 'Impressions', 'Clicks', 'Cost', 'Conversions', 'Volume', 'CPC ($)', 'Competition']
   },
   terms: {
     tabName: 'Search Terms',
-    title: d => `SEO Inspector Ads Search Terms — ${d}`,
+    title: d => `Ads Inspector Search Terms — ${d}`,
     cacheKey: d => `ads-terms::${d}`,
     headerRow: ['Date Exported', 'Range (days)', 'Page URL',
       'Search Term', 'Intent', 'Impressions', 'Clicks', 'Cost', 'Conversions', 'Volume', 'CPC ($)', 'Competition']

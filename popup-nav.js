@@ -33,14 +33,20 @@ const updateFooter  = document.getElementById('update-footer');
 const errorBanner   = document.getElementById('error-state');
 
 // Measure the sticky main tab-bar header height into --header-h so panel
-// sub-headers (.settings-header) can pin directly beneath it. Runs on load and
-// whenever the window resizes (popup ↔ sidebar ↔ pop-out change its width).
+// sub-headers (.settings-header) can pin directly beneath it. Runs on load,
+// again once web fonts finish loading (the initial measurement can land a
+// few px short if it races font load — the header then renders taller than
+// what was captured, leaving a gap once .settings-header actually engages
+// its sticky position), whenever the window resizes (popup ↔ sidebar ↔ pop
+// out change its width), and on entering any detail panel (cheap, and
+// guards against any other late header-height change).
 function syncHeaderOffset() {
   const header = document.querySelector('header');
   if (header) document.documentElement.style.setProperty('--header-h', header.offsetHeight + 'px');
 }
 syncHeaderOffset();
 window.addEventListener('resize', syncHeaderOffset);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(syncHeaderOffset);
 
 let activeTab = 'overview';
 
@@ -100,6 +106,7 @@ function enterDetailPanel() {
   updateFooter.classList.add('hidden');
   errorBanner.classList.add('hidden');
   hideDetailPanels();
+  syncHeaderOffset();   // re-measure defensively — see syncHeaderOffset's comment
 }
 
 function showSchemaPanel() {
@@ -348,7 +355,7 @@ document.querySelectorAll('#main-tabs [data-tab]').forEach(btn => {
 // Matches on e.code (physical key): on macOS holding Option rewrites e.key to
 // the alternate glyph, so Option+F arrives as "ƒ". Ignored while a text field
 // has focus so those glyphs can still be typed.
-const PANEL_SHORTCUTS = { KeyF: 'btn-follow-tab', KeyI: 'btn-overlay', KeyL: 'btn-link-overlay' };
+const PANEL_SHORTCUTS = { KeyF: 'btn-follow-tab', KeyI: 'btn-overlay', KeyL: 'btn-link-overlay', KeyR: 'btn-refresh' };
 
 document.addEventListener('keydown', (e) => {
   if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.repeat) return;

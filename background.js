@@ -2546,6 +2546,25 @@ function adsGetAccessToken() {
   return googleGetAccessToken('adsAuth');
 }
 
+// Google Ads API error bodies put the actually-useful, field-specific
+// message in error.details[] (a GoogleAdsFailure payload) — the top-level
+// error.message is just the generic gRPC status text (e.g. "Request
+// contains an invalid argument."), which doesn't say WHAT was invalid.
+// Prefer the detailed per-error message when present, e.g. "REQUIRED:
+// Missing required field." instead of the useless generic wrapper.
+function adsErrorDetail(body) {
+  const err = (Array.isArray(body) ? body[0] : body)?.error;
+  if (!err) return null;
+  for (const d of (err.details || [])) {
+    const first = (d.errors || [])[0];
+    if (first) {
+      const code = first.errorCode ? Object.values(first.errorCode)[0] : null;
+      return [code, first.message].filter(Boolean).join(': ') || err.message;
+    }
+  }
+  return err.message;
+}
+
 // One GAQL request via searchStream (returns concatenated result rows)
 async function adsSearch(accessToken, customerId, query) {
   const { adsDeveloperToken, adsManagerId } = await browser.storage.local.get(['adsDeveloperToken', 'adsManagerId']);
@@ -2569,7 +2588,7 @@ async function adsSearch(accessToken, customerId, query) {
   if (res.status === 429) return { error: 'RATE_LIMITED' };
   if (!res.ok) {
     const body = await res.json().catch(() => null);
-    const msg = (Array.isArray(body) ? body[0] : body)?.error?.message;
+    const msg = adsErrorDetail(body);
     return { error: 'API_ERROR', detail: msg || `HTTP ${res.status}` };
   }
   const data = await res.json();
@@ -2606,7 +2625,7 @@ async function adsMutate(accessToken, customerId, resource, operations) {
   if (res.status === 429) return { error: 'RATE_LIMITED' };
   if (!res.ok) {
     const body = await res.json().catch(() => null);
-    const msg = (Array.isArray(body) ? body[0] : body)?.error?.message;
+    const msg = adsErrorDetail(body);
     return { error: 'API_ERROR', detail: msg || `HTTP ${res.status}` };
   }
   const data = await res.json();

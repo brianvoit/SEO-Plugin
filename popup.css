@@ -756,26 +756,11 @@ textarea.adcopy-field { line-height: 1.4; }
   border-radius: 4px;
 }
 
-/* Flags the client that owns the current page's domain — same ring+dot look
-   as an active per-domain binding (.gsc-property-option--active). */
+/* Flags the client that owns the current page's domain — the outline/tint
+   alone is enough, no extra dot indicator. */
 .wp-site-row--active {
   border-color: var(--hint-green);
   background: color-mix(in srgb, var(--hint-green) 10%, var(--bg-section));
-}
-.wp-site-active-dot {
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  border: 2px solid var(--hint-green);
-  flex-shrink: 0;
-  position: relative;
-}
-.wp-site-active-dot::after {
-  content: "";
-  position: absolute;
-  inset: 2px;
-  border-radius: 50%;
-  background: var(--hint-green);
 }
 
 .wp-site-info {

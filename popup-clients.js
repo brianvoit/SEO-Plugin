@@ -58,13 +58,10 @@ function renderClientsList() {
     const { row, removeBtn, editBtn } = buildSettingsRow(client.name || 'Unnamed client', line2, 'Delete', true, domains[0] || null);
 
     // Flag the client that owns the domain of the page currently being
-    // inspected — same green ring+dot used for an active per-domain binding.
+    // inspected — the row outline alone is enough, no extra dot needed.
     if (_currentClientHost && domains.includes(_currentClientHost)) {
       row.classList.add('wp-site-row--active');
-      const dot = document.createElement('span');
-      dot.className = 'wp-site-active-dot';
-      dot.title = 'This is the client for the page you\'re inspecting';
-      row.querySelector('.wp-site-left').insertBefore(dot, row.querySelector('.wp-site-info'));
+      row.title = 'This is the client for the page you\'re inspecting';
     }
 
     row.addEventListener('click', (e) => {
@@ -320,11 +317,6 @@ async function patchImageSeo(patch) {
 }
 
 function renderContentGenSection(container, client) {
-  const header = document.createElement('div');
-  header.className = 'field-label';
-  header.textContent = 'CONTENT GENERATION (applies to Title, Meta, OG/Twitter, and image AI generation)';
-  container.appendChild(header);
-
   const cfg = client.imageSeo || {};
 
   const kwLabel = document.createElement('label');
@@ -376,6 +368,10 @@ function renderContentGenSection(container, client) {
 
   const trackedLabel = document.createElement('label');
   trackedLabel.className = 'ranking-onpage-toggle';
+  // .ranking-onpage-toggle is inline-flex, which lets these two checkboxes
+  // flow onto the same line with no horizontal gap — force each onto its
+  // own row here (scoped to this usage, not the shared class).
+  trackedLabel.style.display = 'flex';
   trackedLabel.style.marginTop = '8px';
   const trackedInput = document.createElement('input');
   trackedInput.type = 'checkbox';
@@ -386,7 +382,8 @@ function renderContentGenSection(container, client) {
 
   const brandLabel = document.createElement('label');
   brandLabel.className = 'ranking-onpage-toggle';
-  brandLabel.style.marginTop = '6px';
+  brandLabel.style.display = 'flex';
+  brandLabel.style.marginTop = '10px';
   const brandInput = document.createElement('input');
   brandInput.type = 'checkbox';
   brandInput.checked = !!cfg.includeBrand;
@@ -417,6 +414,15 @@ async function renderDriveFolderRow(container, client) {
       name.className = 'client-drive-name';
       name.textContent = client.driveFolderName || client.driveFolderId;
       row.appendChild(name);
+
+      const openBtn = document.createElement('button');
+      openBtn.type = 'button';
+      openBtn.className = 'icon-btn';
+      openBtn.title = 'Open this folder in Google Drive';
+      openBtn.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2.5h4.5V7"/><path d="M13.5 2.5L8 8"/><path d="M11.5 9v3.5a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1H7"/></svg>'));
+      openBtn.addEventListener('click', () => browser.tabs.create({ url: `https://drive.google.com/drive/folders/${client.driveFolderId}` }));
+      row.appendChild(openBtn);
+
       row.appendChild(propertyTrashButton('Unlink this Drive folder', async () => {
         await ensureClientPersisted();
         await saveClientField({ driveFolderId: null, driveFolderName: null });

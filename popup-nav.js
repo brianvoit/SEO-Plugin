@@ -219,11 +219,15 @@ function hideDetailPanelToTab() {
 function showSettings() {
   enterDetailPanel();
   settingsPanel.classList.remove('hidden');
-  // The update checker lives only on the settings page now, pinned to the
-  // bottom — and only on Firefox, which is self-distributed as an .xpi. The
-  // Chrome Web Store and Edge Add-ons update the extension themselves and
-  // prohibit extensions shipping their own update mechanism.
-  updateFooter.classList.toggle('hidden', IS_CHROMIUM);
+  // This footer is shared by two unrelated things: the OAuth Client drawer
+  // toggle (every browser needs this) and the update checker (Firefox only —
+  // see below). So the footer itself always shows on the settings page; only
+  // the update-check button/status pair inside it is conditionally hidden.
+  updateFooter.classList.remove('hidden');
+  // The Chrome Web Store and Edge Add-ons update extensions themselves and
+  // prohibit extensions shipping their own update mechanism, unlike Firefox's
+  // self-distributed .xpi, which has to check GitHub releases on its own.
+  document.getElementById('update-check-group').classList.toggle('hidden', IS_CHROMIUM);
   document.body.classList.add('settings-open');
   // Settings reads as the active "tab": light up the wrench, dim the tabs
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('is-active'));

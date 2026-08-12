@@ -2,7 +2,7 @@
   "minimum_chrome_version": "116",
   "permissions": ["contextMenus", "sidePanel"],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "sw.js"
   },
   "side_panel": {
     "default_path": "popup.html?view=sidepanel"

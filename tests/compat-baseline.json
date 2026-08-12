@@ -1,11 +1,6 @@
 {
   "//": "Known Chrome/Edge incompatibilities that exist today. tests/compat.test.mjs fails on any violation NOT listed here, and also fails on any entry here that no longer matches — so this file cannot drift from reality. Milestone 2 deletes entries as it ports each area. Keys are '<file>::<ruleId>'.",
   "violations": {
-    "background.js::onMessage-promise-return": {
-      "status": "port-in-m2",
-      "m2Step": 1,
-      "reason": "The ~110-case router at background.js:5082 returns Promises. Chrome ignores them, so every handler resolves to undefined. Must call sendResponse and return true. Gates the entire port."
-    },
     "background.js::sidebarAction": {
       "status": "port-in-m2",
       "m2Step": 5,

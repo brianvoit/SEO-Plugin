@@ -5079,7 +5079,12 @@ async function driveVerifyFolder({ folderId }) {
 
 // ─── Google Search Console: message handlers ────────────────────────────────
 
-browser.runtime.onMessage.addListener((message) => {
+// Distinguishes "no case matched" from "a handler resolved to undefined", so
+// unknown actions can fall through to other listeners instead of being
+// answered with undefined.
+const NOT_HANDLED = Symbol('not-handled');
+
+function routeMessage(message) {
   switch (message?.action) {
     case 'gscGetStatus':       return gscGetStatus();
     case 'gscConnect':         return gscConnect();
@@ -5165,6 +5170,24 @@ browser.runtime.onMessage.addListener((message) => {
     case 'driveListFolders':     return driveListFolders(message);
     case 'driveListSharedDrives': return driveListSharedDrives(message);
     case 'driveVerifyFolder':    return driveVerifyFolder(message);
-    default: return undefined;
+    default: return NOT_HANDLED;
   }
+}
+
+// Firefox resolves a Promise returned straight from an onMessage listener;
+// Chrome ignores it entirely and requires sendResponse + `return true`. The
+// sendResponse form works on both, so it's the only one used here — returning
+// the promise directly would make every handler resolve to undefined on
+// Chrome, i.e. break the entire extension.
+browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  const result = routeMessage(message);
+  if (result === NOT_HANDLED) return false;   // let other listeners see it
+
+  Promise.resolve(result).then(
+    sendResponse,
+    // A handler that throws would otherwise leave the caller hanging until
+    // sendMessageWithTimeout's 30s timeout fires with a misleading message.
+    err => sendResponse({ error: 'HANDLER_FAILED', detail: String((err && err.message) || err) })
+  );
+  return true;   // keep the channel open for the async reply
 });

@@ -16,6 +16,7 @@
     "lint:firefox": "web-ext lint --source-dir=dist/firefox --no-config-discovery"
   },
   "devDependencies": {
-    "web-ext": "10.6.0"
+    "web-ext": "10.6.0",
+    "webextension-polyfill": "0.12.0"
   }
 }

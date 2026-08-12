@@ -19,16 +19,20 @@ function seoToggleChecked(item, stored) {
   return value === undefined ? item.fallback : !!value;
 }
 
+// Firefox's richer `menus` namespace where available (it alone has onShown /
+// refresh), otherwise the `contextMenus` namespace both browsers implement.
+const menus = browser.menus || browser.contextMenus;
+
 function registerSeoMenus() {
-  if (!browser.menus) return;
-  browser.menus.removeAll(() => {
-    browser.menus.create({
+  if (!menus) return;
+  menus.removeAll(() => {
+    menus.create({
       id: 'seo-generate-alt',
       title: 'Generate Alt Text',
       contexts: ['image']
     });
     SEO_TOGGLE_MENUS.forEach(item => {
-      browser.menus.create({
+      menus.create({
         id: item.id,
         title: item.title,
         type: 'checkbox',
@@ -41,21 +45,38 @@ function registerSeoMenus() {
 registerSeoMenus();
 browser.runtime.onInstalled.addListener(registerSeoMenus);
 
-// Sync the checkmarks to real state just before the menu paints. Without this
-// they'd show whatever was last set here, which drifts as soon as a toggle is
-// flipped from the panel instead.
-if (browser.menus && browser.menus.onShown) {
-  browser.menus.onShown.addListener(async (info) => {
-    if (!info.contexts || !info.contexts.includes('action')) return;
-    const stored = await browser.storage.local.get(SEO_TOGGLE_MENUS.map(m => m.key));
-    SEO_TOGGLE_MENUS.forEach(item => {
-      browser.menus.update(item.id, { checked: seoToggleChecked(item, stored) });
-    });
-    browser.menus.refresh();
-  });
+// Push current storage state onto the checkmarks. Safe to call at any time —
+// menus.update on a missing id just rejects, which is why it's swallowed.
+async function syncToggleCheckmarks() {
+  if (!menus) return;
+  const stored = await browser.storage.local.get(SEO_TOGGLE_MENUS.map(m => m.key));
+  await Promise.all(SEO_TOGGLE_MENUS.map(item =>
+    Promise.resolve(menus.update(item.id, { checked: seoToggleChecked(item, stored) })).catch(() => {})
+  ));
 }
 
-browser.menus.onClicked.addListener(async (info, tab) => {
+if (menus && menus.onShown) {
+  // Firefox: sync lazily, just before the menu paints. Cheapest and always
+  // correct, since it reads storage at the moment of display.
+  menus.onShown.addListener(async (info) => {
+    if (!info.contexts || !info.contexts.includes('action')) return;
+    await syncToggleCheckmarks();
+    menus.refresh();
+  });
+} else if (menus) {
+  // Chrome has neither onShown nor refresh, so the lazy approach is impossible
+  // — the checkmarks have to be pushed eagerly instead. All three toggles are
+  // storage.local flags written by four different places (this menu, the
+  // content script, the panel's header button, and the Alt+I/L/F shortcuts),
+  // so observing storage catches every one of them.
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (SEO_TOGGLE_MENUS.some(m => m.key in changes)) syncToggleCheckmarks();
+  });
+  syncToggleCheckmarks();   // and once on wake, since the worker restarts often
+}
+
+menus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === 'seo-generate-alt') {
     // Target the exact frame that was right-clicked. The block editor renders
     // its canvas in an iframe, so a tab-wide send would reach the top document
@@ -84,8 +105,11 @@ browser.menus.onClicked.addListener(async (info, tab) => {
   try {
     await browser.tabs.sendMessage(tab.id, { action }, { frameId: 0 });
   } catch {
-    // No content script here (about:, PDF viewer, AMO). Firefox has already
-    // flipped the checkbox visually; onShown re-syncs it on next open.
+    // No content script here (about:, PDF viewer, AMO), so storage was never
+    // flipped — but the browser has already ticked the checkbox optimistically.
+    // Firefox self-corrects via onShown on next open; Chrome has no such hook,
+    // so put the checkmark back explicitly or it stays wrong indefinitely.
+    syncToggleCheckmarks();
   }
 });
 
@@ -351,6 +375,15 @@ browser.webRequest.onErrorOccurred.addListener(details => {
 // Security headers + TLS details for the document response. Captured here
 // (not via an external API) — getSecurityInfo only works inside a blocking
 // onHeadersReceived listener for the live request.
+//
+// Both halves of that are Firefox-only: Chrome MV3 removed blocking
+// webRequest for non-policy extensions, and has no getSecurityInfo at all.
+// They stand or fall together, so one capability check drives both — on
+// Chrome the listener registers observationally (security headers, cookies
+// and X-Robots-Tag still work) and the DNS tab's TLS panel shows #tls-note,
+// which popup-dns.js already renders whenever `tls` is absent.
+const CAN_READ_TLS = typeof browser.webRequest.getSecurityInfo === 'function';
+const HEADERS_SPEC = CAN_READ_TLS ? ['blocking', 'responseHeaders'] : ['responseHeaders'];
 const SECURITY_HEADER_NAMES = [
   'strict-transport-security',
   'content-security-policy',
@@ -385,7 +418,7 @@ browser.webRequest.onHeadersReceived.addListener(async details => {
   // Stashed for the hop that onBeforeRedirect/onCompleted is about to push
   entry._pending = { cookies, xRobots };
 
-  if (details.url.startsWith('https:')) {
+  if (CAN_READ_TLS && details.url.startsWith('https:')) {
     try {
       const sec = await browser.webRequest.getSecurityInfo(details.requestId, {});
       const cert = sec.certificates && sec.certificates[0];
@@ -401,7 +434,7 @@ browser.webRequest.onHeadersReceived.addListener(async details => {
     } catch { /* security info unavailable for this request */ }
   }
   saveRedirect(details.tabId, entry);
-}, REDIRECT_FILTER, ['blocking', 'responseHeaders']);
+}, REDIRECT_FILTER, HEADERS_SPEC);
 
 // JS/meta redirects start a brand-new request, which webRequest sees as an
 // unrelated navigation. onCommitted's transitionQualifiers identifies them, so
@@ -485,10 +518,15 @@ function traceOnce(startUrl) {
       return ms;
     };
 
-    // Only our own background fetch (extension origin, no tab) starts the chain
+    // Only our own background fetch (extension origin, no tab) starts the chain.
+    // Firefox reports the initiating page as `originUrl`, Chrome as `initiator`
+    // (and with a chrome-extension:// scheme), so accept either — matching only
+    // the Firefox pair left every Chrome trace unmatched and timing out.
     const onReq = d => {
       if (trace.requestId != null) return;
-      if (d.url === startUrl && d.tabId === -1 && (d.originUrl || '').startsWith('moz-extension://')) {
+      const from = d.originUrl || d.initiator || '';
+      const isSelf = from.startsWith('moz-extension://') || from.startsWith('chrome-extension://');
+      if (d.url === startUrl && d.tabId === -1 && isSelf) {
         trace.requestId = d.requestId;
         trace.lastTs = d.timeStamp;
       }

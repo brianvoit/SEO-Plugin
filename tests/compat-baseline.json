@@ -7,34 +7,28 @@
       "reason": "background.js:114 calls sidebarAction.toggle(). Chrome has sidePanel.open() with no toggle, and loses gesture context across the preceding await."
     },
     "background.js::menus-namespace": {
-      "status": "port-in-m2",
-      "m2Step": 7,
-      "reason": "browser.menus is Firefox-only; Chrome exposes chrome.contextMenus. The chrome build already requests the contextMenus permission."
+      "status": "intentional",
+      "reason": "Ported. The single remaining reference is the feature-detect `browser.menus || browser.contextMenus`; every call site now goes through that alias, so Chrome uses contextMenus."
     },
     "background.js::menus-onShown-refresh": {
-      "status": "port-in-m2",
-      "m2Step": 7,
-      "reason": "menus.onShown + menus.refresh keep the toolbar checkboxes in sync just before paint. Neither exists in Chrome; replace with eager contextMenus.update driven by storage.onChanged."
+      "status": "intentional",
+      "reason": "Ported. onShown/refresh are now inside a capability branch used only on Firefox, where they're the cheapest correct option. Chrome takes the else-branch: eager syncToggleCheckmarks() driven by storage.onChanged, plus a resync when a toggle's sendMessage fails."
     },
     "background.js::getSecurityInfo": {
-      "status": "port-in-m2",
-      "m2Step": 4,
-      "reason": "Firefox-only TLS inspection at background.js:390. Chrome has no equivalent, so the DNS tab's TLS panel must fall back to #tls-note, which popup-dns.js:103 already handles."
+      "status": "intentional",
+      "reason": "Ported. Guarded by CAN_READ_TLS (a typeof check on the function itself), so it only runs on Firefox. Chrome leaves entry.tls unset and popup-dns.js falls back to #tls-note. The call has to stay in the source — this is the Firefox branch."
     },
     "background.js::webRequest-blocking": {
-      "status": "port-in-m2",
-      "m2Step": 4,
-      "reason": "background.js:404 registers onHeadersReceived with ['blocking','responseHeaders'] purely so getSecurityInfo works. Chrome MV3 forbids blocking; dropping it keeps the responseHeaders capture intact."
+      "status": "intentional",
+      "reason": "Ported. The ['blocking','responseHeaders'] literal is now the Firefox arm of HEADERS_SPEC, selected by the same CAN_READ_TLS check — 'blocking' existed solely to make getSecurityInfo work. Chrome registers with ['responseHeaders'] only."
     },
     "background.js::originUrl": {
-      "status": "port-in-m2",
-      "m2Step": 4,
-      "reason": "background.js:491 matches its own trace fetch via details.originUrl. Chrome calls this details.initiator; unported, every Chrome trace times out after 12s."
+      "status": "intentional",
+      "reason": "Ported. Now reads `d.originUrl || d.initiator`, accepting Firefox's property or Chrome's. The Firefox name necessarily remains in the source."
     },
     "background.js::moz-extension-scheme": {
-      "status": "port-in-m2",
-      "m2Step": 4,
-      "reason": "Same line as originUrl — the scheme check must accept chrome-extension:// on Chromium."
+      "status": "intentional",
+      "reason": "Ported. The self-request check accepts moz-extension:// or chrome-extension://. The Firefox scheme necessarily remains in the source."
     },
     "popup.js::getViews-sidebar": {
       "status": "port-in-m2",

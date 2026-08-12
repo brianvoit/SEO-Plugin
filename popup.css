@@ -3273,5 +3273,194 @@ body.settings-open #update-footer { margin-top: auto; }
 }
 .ap-suggestion-chip:hover { background: var(--heading-tag-bg); border-color: var(--accent); color: var(--accent); }
 
+/* ── Client Registry ─────────────────────────────────────────────────────── */
+
+.client-domain-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.client-domain-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--bg-section);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.client-domain-chip-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.client-domain-chip-remove:hover { background: var(--copy-hover); color: var(--hint-red); }
+
+.client-domain-add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.client-domain-add-row .wp-input { flex: 1; }
+
+.client-drive-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.client-drive-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.client-binding-domain {
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.client-binding-domain:first-of-type { border-top: none; padding-top: 4px; }
+
+.client-binding-domain-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.client-binding-row { margin-bottom: 8px; }
+.client-binding-row:last-child { margin-bottom: 0; }
+
+.client-binding-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 3px;
+}
+
+/* ── Drive folder browser modal ──────────────────────────────────────────── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 16px 16px;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.modal-box {
+  width: 100%;
+  max-width: 440px;
+  max-height: calc(100% - 24px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+
+.drive-browser-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.drive-browser-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.drive-browser-roots {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+}
+
+.drive-browser-root {
+  flex: 1;
+  padding: 7px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  background: var(--bg);
+  color: var(--text-muted);
+  border: none;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.drive-browser-root:last-child { border-right: none; }
+.drive-browser-root:hover { color: var(--text); }
+.drive-browser-root.is-active { background: var(--accent); color: #fff; }
+
+.drive-browser-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 12px;
+  font-size: 11.5px;
+}
+
+.drive-browser-crumb {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 1px 2px;
+}
+.drive-browser-crumb:hover { text-decoration: underline; }
+.drive-browser-crumb:last-child { color: var(--text); cursor: default; }
+.drive-browser-crumb:last-child:hover { text-decoration: none; }
+
+.drive-browser-crumb-sep {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.drive-browser-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 120px;
+  max-height: 260px;
+  padding: 0 12px;
+}
+
+#drive-folder-browser .field-hint { padding: 0 12px; }
+#drive-folder-browser .wp-form-actions { padding: 10px 12px; margin-top: 0; border-top: 1px solid var(--border); }
+
 /* Utility */
 .hidden { display: none !important; }

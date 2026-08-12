@@ -19,6 +19,7 @@ const backlinksPanel  = document.getElementById('backlinks-panel');
 const siteauditPanel  = document.getElementById('siteaudit-panel');
 const pagespeedPanel  = document.getElementById('pagespeed-panel');
 const utmPanel        = document.getElementById('utm-panel');
+const clientPanel     = document.getElementById('client-panel');
 const searchTab     = document.getElementById('search-tab');
 const analyticsTab  = document.getElementById('analytics-tab');
 const adsTab        = document.getElementById('ads-tab');
@@ -60,6 +61,7 @@ function hideDetailPanels() {
   siteauditPanel.classList.add('hidden');
   pagespeedPanel.classList.add('hidden');
   utmPanel.classList.add('hidden');
+  clientPanel.classList.add('hidden');
 }
 
 function showActiveTab() {
@@ -190,6 +192,19 @@ function showUtmPanel() {
   if (typeof openUtmPanel === 'function') openUtmPanel();
 }
 
+// Opens directly from the CLIENTS list in Settings, so — unlike every panel
+// above — its Back button returns to Settings, not the active data tab (see
+// hideClientPanelToSettings below).
+function showClientPanel(id) {
+  enterDetailPanel();
+  clientPanel.classList.remove('hidden');
+  if (typeof openClientPanel === 'function') openClientPanel(id);
+}
+
+function hideClientPanelToSettings() {
+  showSettings();
+}
+
 function hideDetailPanelToTab() {
   showActiveTab();
 }
@@ -235,8 +250,7 @@ function showSettings() {
   refreshAdsSettingsStatus();
   refreshDocsSettingsStatus();
   refreshWebceoSettingsStatus();
-  loadBrandedTerms();
-  loadImageSeoConfig();
+  if (typeof loadClients === 'function') loadClients();
 }
 
 function hideSettings() {
@@ -288,6 +302,8 @@ document.getElementById('btn-pagespeed').addEventListener('click', showPageSpeed
 document.getElementById('btn-pagespeed-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-utm').addEventListener('click', showUtmPanel);
 document.getElementById('btn-utm-back').addEventListener('click', hideDetailPanelToTab);
+document.getElementById('btn-client-back').addEventListener('click', hideClientPanelToSettings);
+document.getElementById('btn-client-delete').addEventListener('click', () => { if (typeof deleteCurrentClient === 'function') deleteCurrentClient(); });
 
 // ─── Main tabs (Overview / Search / Analytics / DNS / Redirect) ──────────────
 // The status pill is also a tab trigger (data-tab="redirect"), so the handler
@@ -310,7 +326,8 @@ document.querySelectorAll('#main-tabs [data-tab]').forEach(btn => {
       || !backlinksPanel.classList.contains('hidden')
       || !siteauditPanel.classList.contains('hidden')
       || !pagespeedPanel.classList.contains('hidden')
-      || !utmPanel.classList.contains('hidden');
+      || !utmPanel.classList.contains('hidden')
+      || !clientPanel.classList.contains('hidden');
     if (tab === activeTab && !inPanel) return;
     activeTab = tab;
     // Settings reloads page data on exit; other panels just return to the tab

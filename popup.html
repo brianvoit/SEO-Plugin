@@ -426,53 +426,6 @@
 
     <section class="field-section">
       <div class="field-header">
-        <span class="field-label">IMAGE SEO</span>
-        <div class="field-header-actions">
-          <button class="info-tip" type="button" title="Per-domain goals for the WordPress Media Library generators (Alt Text, Title, Caption, Description). Focus keywords and your Web CEO tracked keywords steer the wording.">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7.5" x2="8" y2="11"/><circle cx="8" cy="5" r="0.55" fill="currentColor" stroke="none"/>
-            </svg>
-          </button>
-          <button id="btn-add-imgseo-domain" class="save-key-btn">+ Domain</button>
-        </div>
-      </div>
-      <div id="imgseo-empty" class="field-hint hidden">No domains configured — generators fall back to page context only.</div>
-      <div id="imgseo-list" class="wp-sites-list"></div>
-
-      <div id="imgseo-form" class="wp-site-form hidden">
-        <label class="wp-field">
-          <span class="wp-field-label">Domain</span>
-          <input type="text" id="imgseo-host" class="wp-input" placeholder="example.com" autocomplete="off" spellcheck="false" />
-        </label>
-        <label class="wp-field">
-          <span class="wp-field-label">Focus Keywords (comma-separated)</span>
-          <input type="text" id="imgseo-keywords" class="wp-input" placeholder="dental implants, cosmetic dentistry" autocomplete="off" spellcheck="false" />
-        </label>
-        <label class="wp-field">
-          <span class="wp-field-label">Tone / Style (optional)</span>
-          <input type="text" id="imgseo-tone" class="wp-input" placeholder="clinical, friendly, premium…" autocomplete="off" spellcheck="false" />
-        </label>
-        <label class="wp-field">
-          <span class="wp-field-label">Rules for this domain (applied to all four fields)</span>
-          <textarea id="imgseo-rules" class="wp-input" rows="3" spellcheck="false"
-            placeholder="e.g. Always work a location into the alt text — Twin Cities, Minneapolis, St. Paul — when the photo is of a local project. Call these &quot;remodels&quot;, never &quot;renovations&quot;."></textarea>
-        </label>
-        <label class="ranking-onpage-toggle" style="margin-top:8px">
-          <input type="checkbox" id="imgseo-use-tracked" checked /> Also use Web CEO tracked keywords for this domain
-        </label>
-        <label class="ranking-onpage-toggle" style="margin-top:6px">
-          <input type="checkbox" id="imgseo-include-brand" /> Allow the brand name in Title / Caption / Description
-        </label>
-        <div id="imgseo-error" class="field-hint hint-red hidden"></div>
-        <div class="wp-form-actions">
-          <button id="btn-cancel-imgseo" class="settings-back-btn">Cancel</button>
-          <button id="btn-save-imgseo" class="save-key-btn">Save</button>
-        </div>
-      </div>
-    </section>
-
-    <section class="field-section">
-      <div class="field-header">
         <span class="field-label">CHARACTER TARGETS</span>
       </div>
       <div class="char-targets">
@@ -505,27 +458,11 @@
 
     <section class="field-section">
       <div class="field-header">
-        <span class="field-label">BRANDED TERMS</span>
-        <button id="btn-add-brand-domain" class="save-key-btn">+ Terms</button>
+        <span class="field-label">CLIENTS</span>
+        <button id="btn-add-client" class="save-key-btn">+ Client</button>
       </div>
-      <div id="brand-domains-empty" class="field-hint hidden">No branded terms configured yet.</div>
-      <div id="brand-domains-list" class="wp-sites-list"></div>
-
-      <div id="brand-domain-form" class="wp-site-form hidden">
-        <label class="wp-field">
-          <span class="wp-field-label">Domain</span>
-          <input type="text" id="brand-domain-host" class="wp-input" placeholder="example.com" autocomplete="off" spellcheck="false" />
-        </label>
-        <label class="wp-field">
-          <span class="wp-field-label">Branded Terms (regex, case-insensitive)</span>
-          <input type="text" id="brand-domain-pattern" class="wp-input" placeholder="brand|brandname|bn|other" autocomplete="off" spellcheck="false" />
-        </label>
-        <div id="brand-domain-error" class="field-hint hint-red hidden"></div>
-        <div class="wp-form-actions">
-          <button id="btn-cancel-brand-domain" class="settings-back-btn">Cancel</button>
-          <button id="btn-save-brand-domain" class="save-key-btn">Save</button>
-        </div>
-      </div>
+      <div id="clients-empty" class="field-hint hidden">No clients configured yet.</div>
+      <div id="clients-list" class="wp-sites-list"></div>
     </section>
 
     <!-- OAuth Client — shared across Search Console, Analytics, Ads, and Drive.
@@ -563,6 +500,50 @@
       <div id="gsc-connect-error" class="field-hint hint-red hidden"></div>
     </section>
 
+  </div>
+
+  <!-- Client detail panel — replaces the old inline Branded Terms editor with
+       a full Client record (domains, per-domain tool bindings, branded
+       terms, keywords, Drive folder). Back returns to Settings, not the
+       active tab. -->
+  <div id="client-panel" class="hidden">
+    <div class="settings-header">
+      <button id="btn-client-back" class="settings-back-btn">
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="10 3 4 8 10 13"/>
+        </svg>
+        Back
+      </button>
+      <button id="btn-client-delete" class="redirect-retrace-btn hidden" title="Delete this client">Delete</button>
+    </div>
+    <div id="client-content"></div>
+  </div>
+
+  <!-- Drive folder browser modal, opened from a Client's "Browse…" button -->
+  <div id="drive-folder-browser" class="modal-overlay hidden">
+    <div class="modal-box drive-browser-box">
+      <div class="drive-browser-header">
+        <span class="drive-browser-title">Choose a Drive folder</span>
+        <button id="btn-drive-browser-close" class="icon-btn" title="Cancel">
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 3l10 10M13 3L3 13"/>
+          </svg>
+        </button>
+      </div>
+      <div class="drive-browser-roots" id="drive-browser-roots">
+        <button class="drive-browser-root is-active" data-root="mydrive">My Drive</button>
+        <button class="drive-browser-root" data-root="shared">Shared with me</button>
+        <button class="drive-browser-root" data-root="teamdrives">Shared Drives</button>
+      </div>
+      <div class="drive-browser-breadcrumb" id="drive-browser-breadcrumb"></div>
+      <div class="drive-browser-list" id="drive-browser-list"></div>
+      <div id="drive-browser-empty" class="field-hint hint-muted hidden">No folders here.</div>
+      <div id="drive-browser-error" class="field-hint hint-red hidden"></div>
+      <div class="wp-form-actions">
+        <button id="btn-drive-browser-cancel" class="settings-back-btn">Cancel</button>
+        <button id="btn-drive-browser-select" class="save-key-btn" disabled>Select this folder</button>
+      </div>
+    </div>
   </div>
 
   <!-- Schema detail panel -->
@@ -1802,6 +1783,7 @@
   <script src="popup-ads.js"></script>
   <script src="popup-addkw.js"></script>
   <script src="popup-webceo.js"></script>
+  <script src="popup-clients.js"></script>
   <script src="popup-backlinks.js"></script>
   <script src="popup-siteaudit.js"></script>
   <script src="popup-pagespeed.js"></script>

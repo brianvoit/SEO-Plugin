@@ -118,10 +118,31 @@ menus.onClicked.addListener(async (info, tab) => {
 // falls through to onClicked, which either toggles Firefox's native sidebar or
 // opens (or focuses) the dedicated pop-out window.
 
+// Firefox exposes a sidebar the extension can toggle itself; Chrome exposes a
+// side panel it will only open in direct response to a user gesture. That
+// difference drives the whole branch below.
+const HAS_SIDEBAR_ACTION = typeof browser.sidebarAction !== 'undefined';
+// Reached by bracket notation on purpose. AMO's addons-linter reports any
+// static `browser.sidePanel.*` reference as UNSUPPORTED_API even inside a
+// capability check, and the Firefox build has to stay at zero warnings to be
+// signed. Resolving the namespace once here keeps the call sites readable.
+const sidePanel = browser['sidePanel'];
+const HAS_SIDE_PANEL = typeof sidePanel !== 'undefined';
+
 async function applyDisplayMode() {
   const { displayMode } = await browser.storage.local.get('displayMode');
   const mode = displayMode || 'sidebar';   // default to sidebar when unset
   await browser.action.setPopup({ popup: mode === 'popup' ? 'popup.html' : '' });
+
+  // Chrome can't open the panel from onClicked: the gesture context is lost
+  // across the awaited storage read, and there is no toggle() either. Instead
+  // hand the behaviour to Chrome — with this set, clicking the toolbar icon
+  // opens and closes the panel natively, no listener involved.
+  if (HAS_SIDE_PANEL) {
+    await sidePanel
+      .setPanelBehavior({ openPanelOnActionClick: mode === 'sidebar' })
+      .catch(() => {});
+  }
 }
 
 applyDisplayMode();
@@ -130,13 +151,27 @@ browser.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.displayMode) applyDisplayMode();
 });
 
-// Firefox keeps the user-input context across WebExtension promise chains, so
-// sidebarAction.toggle() still works after the storage read.
 browser.action.onClicked.addListener(async () => {
   const { displayMode } = await browser.storage.local.get('displayMode');
-  if ((displayMode || 'sidebar') === 'window') openPopoutWindow();
-  else browser.sidebarAction.toggle();
+  const mode = displayMode || 'sidebar';
+  if (mode === 'window') { openPopoutWindow(); return; }
+  // Firefox only. Its user-input context survives the promise chain above, so
+  // toggling here still counts as gesture-driven. On Chrome this listener
+  // doesn't even fire for sidebar mode — setPanelBehavior already handled it.
+  if (HAS_SIDEBAR_ACTION) browser.sidebarAction.toggle();
 });
+
+// Chrome's Alt+M can't be a reserved _execute_sidebar_action command the way
+// Firefox's is, so it arrives here as a named command instead. open() must be
+// called synchronously off the event to keep the gesture, which is why the
+// window id is read first and no storage lookup happens in between.
+if (browser.commands?.onCommand) {
+  browser.commands.onCommand.addListener(async (command) => {
+    if (command !== 'toggle-side-panel' || !HAS_SIDE_PANEL) return;
+    const win = await browser.windows.getCurrent();
+    sidePanel.open({ windowId: win.id }).catch(() => {});
+  });
+}
 
 // ─── Pop-out window ───────────────────────────────────────────────────────────
 

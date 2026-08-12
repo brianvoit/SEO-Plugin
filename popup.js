@@ -4,8 +4,23 @@
 
 // ─── View detection: sidebar / pop-out window ────────────────────────────────
 
-const IS_SIDEBAR = browser.extension.getViews({ type: 'sidebar' }).includes(window);
-const IS_WINDOW  = new URLSearchParams(location.search).get('view') === 'window';
+// Chrome's getViews accepts only tab/popup/notification — asking it for
+// 'sidebar' returns [], so on Chrome the side panel is identified by the
+// ?view=sidepanel marker the manifest's side_panel.default_path carries
+// (the same query-string trick the pop-out already uses). Firefox keeps the
+// getViews check because its sidebar URL has no query string to key off.
+const VIEW_PARAM = new URLSearchParams(location.search).get('view');
+
+function isFirefoxSidebar() {
+  // Throws on Chrome for an unrecognised view type, so treat any failure as
+  // "not a Firefox sidebar" rather than letting it break panel startup.
+  try {
+    return browser.extension.getViews({ type: 'sidebar' }).includes(window);
+  } catch { return false; }
+}
+
+const IS_SIDEBAR = VIEW_PARAM === 'sidepanel' || isFirefoxSidebar();
+const IS_WINDOW  = VIEW_PARAM === 'window';
 
 if (IS_SIDEBAR) document.body.classList.add('embed-sidebar');
 // The pop-out window reuses the sidebar's fluid sizing, plus its own marker

@@ -2,9 +2,8 @@
   "//": "Known Chrome/Edge incompatibilities that exist today. tests/compat.test.mjs fails on any violation NOT listed here, and also fails on any entry here that no longer matches — so this file cannot drift from reality. Milestone 2 deletes entries as it ports each area. Keys are '<file>::<ruleId>'.",
   "violations": {
     "background.js::sidebarAction": {
-      "status": "port-in-m2",
-      "m2Step": 5,
-      "reason": "background.js:114 calls sidebarAction.toggle(). Chrome has sidePanel.open() with no toggle, and loses gesture context across the preceding await."
+      "status": "intentional",
+      "reason": "Ported. sidebarAction.toggle() is now behind HAS_SIDEBAR_ACTION and is the Firefox path only. Chrome never reaches it: applyDisplayMode calls sidePanel.setPanelBehavior({openPanelOnActionClick}) so the browser opens the panel itself on toolbar click, which is the only way to keep the user gesture Chrome requires."
     },
     "background.js::menus-namespace": {
       "status": "intentional",
@@ -31,9 +30,8 @@
       "reason": "Ported. The self-request check accepts moz-extension:// or chrome-extension://. The Firefox scheme necessarily remains in the source."
     },
     "popup.js::getViews-sidebar": {
-      "status": "port-in-m2",
-      "m2Step": 5,
-      "reason": "popup.js:7 detects sidebar mode via extension.getViews({type:'sidebar'}), which is Firefox-only and returns [] on Chrome — silently disabling the follow-active-tab block. Replace with the ?view=sidepanel marker the chrome manifest already sets."
+      "status": "intentional",
+      "reason": "Ported. Now the Firefox half of IS_SIDEBAR, wrapped in try/catch since Chrome throws on the unknown view type. Chrome identifies the panel via the ?view=sidepanel marker carried by side_panel.default_path — the same query-string approach the pop-out window already used."
     },
     "popup-redirects.js::onMessage-promise-return": {
       "status": "intentional",

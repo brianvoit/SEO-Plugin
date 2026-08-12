@@ -1,0 +1,19 @@
+{
+  "minimum_chrome_version": "116",
+  "permissions": ["contextMenus", "sidePanel"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "popup.html?view=sidepanel"
+  },
+  "commands": {
+    "toggle-side-panel": {
+      "suggested_key": {
+        "default": "Alt+M",
+        "mac": "Alt+M"
+      },
+      "description": "Toggle the Marketing Inspector side panel"
+    }
+  }
+}

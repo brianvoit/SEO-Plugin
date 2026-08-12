@@ -68,16 +68,51 @@ API they belong to.
 
 ## Development
 
-```bash
-# Load unsigned, for local testing:
-#   about:debugging → This Firefox → Load Temporary Add-on → pick manifest.json
+The extension source lives at the repo root (plain `*.js`, `popup.html`, `popup.css` —
+no bundler, no modules). A small build step assembles a loadable directory per browser,
+because Firefox and Chrome need different manifests.
 
-node --check background.js      # syntax-check any changed JS
-web-ext lint --source-dir=.     # must stay 0 errors / 0 warnings / 0 notices
+```bash
+npm ci             # one time
+npm run build      # → dist/firefox/ and dist/chrome/
+npm test           # builds, then runs the full verification suite
 ```
 
-Releases are cut by tagging `v*` — a GitHub Action signs the extension with AMO and
-attaches the `.xpi` to the release.
+Load the built directory, not the repo root:
+
+- **Firefox** — `about:debugging` → This Firefox → Load Temporary Add-on → `dist/firefox/manifest.json`
+- **Chrome / Edge** — `chrome://extensions` → Developer mode → Load unpacked → `dist/chrome/`
+
+### Manifests
+
+`manifest.base.json` holds every shared key; `manifest.firefox.json` and
+`manifest.chrome.json` add only what differs (sidebar vs side panel, event page vs
+service worker). The build deep-merges base + target — so shared values like the
+version and host permissions have exactly one home.
+
+**`manifest.base.json` is the single source of truth for the version.** Bump it before
+tagging: the release workflow asserts the tag matches rather than silently rewriting it.
+
+### What `npm test` checks
+
+All static — no browser is launched.
+
+| Check | Catches |
+|---|---|
+| `syntax` | A parse error in any of the ~24 source files |
+| `manifest` | Firefox-only keys leaking into the Chrome build, and vice versa |
+| `version` | `manifest.base.json` drifting from the git tag |
+| `assets` | A `<script src>` in `popup.html` with no file behind it |
+| `globals` | Two popup scripts declaring the same top-level name — a `SyntaxError` at load, since all 22 share one scope |
+| `compat` | New Chrome-incompatible API use (baselined in `tests/compat-baseline.json`) |
+| `lint:firefox` | `web-ext lint` on `dist/firefox` — still 0 errors / 0 warnings / 0 notices |
+
+### Releases
+
+Tag `v*`. The workflow runs the suite, then signs `dist/firefox` via AMO and packages
+`dist/chrome` as a zip, attaching both to the GitHub Release. Chrome Web Store
+publishing runs automatically once its secrets are configured; Edge consumes the same
+zip and is submitted manually.
 
 ## License
 

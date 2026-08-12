@@ -7,61 +7,103 @@ on:
   workflow_dispatch:
 
 jobs:
-  sign:
+  release:
     runs-on: ubuntu-latest
     permissions:
       contents: write   # needed to create releases
 
+    env:
+      # Surfaced as env so the publish step can check whether CWS is configured
+      # yet — secrets aren't readable from a step-level `if` directly.
+      CWS_EXTENSION_ID: ${{ secrets.CWS_EXTENSION_ID }}
+
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0   # version.test.mjs needs tags
 
       - uses: actions/setup-node@v6
         with:
           node-version: '20'
+          cache: npm
 
-      - name: Install web-ext
-        run: npm install -g web-ext
+      - run: npm ci
 
-      - name: Sync manifest version from tag
-        if: startsWith(github.ref, 'refs/tags/')
+      # Gate the release on the full suite. `pretest` builds dist/firefox and
+      # dist/chrome, so everything below operates on verified output.
+      #
+      # Note: the version is NO LONGER patched into the manifest from the tag.
+      # version.test.mjs asserts manifest.base.json already matches the tag, so
+      # a forgotten version bump fails loudly here instead of being silently
+      # overwritten at sign time (which let the committed manifest drift from
+      # what actually shipped).
+      - name: Build and test
+        run: npm test
+
+      - name: Read version
+        id: v
+        run: echo "version=$(jq -r '.version' manifest.base.json)" >> "$GITHUB_OUTPUT"
+
+      # ── Firefox: sign via AMO ────────────────────────────────────────────
+      - name: Sign Firefox build
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          jq --arg v "$VERSION" '.version = $v' manifest.json > manifest.tmp.json
-          mv manifest.tmp.json manifest.json
-          echo "Set manifest version to $VERSION"
-
-      - name: Sign extension
-        run: |
-          web-ext sign \
+          npx web-ext sign \
+            --source-dir=dist/firefox \
+            --artifacts-dir=artifacts/firefox \
             --api-key="${{ secrets.AMO_JWT_ISSUER }}" \
             --api-secret="${{ secrets.AMO_JWT_SECRET }}" \
             --channel=unlisted \
-            --approval-timeout=1800000 \
-            --ignore-files=".github/**" ".gitignore" ".git/**"
+            --approval-timeout=1800000
 
-      # AMO names the signed file after the add-on's internal id (e.g.
-      # 4f3e…-1.31.xpi). Rename it to something recognizable on the release page.
+      # AMO names the signed file after the add-on's internal id. Rename it to
+      # something recognisable, and scope the glob to the Firefox artifacts dir
+      # so it can never pick up the Chrome zip.
       - name: Rename signed XPI
         id: xpi
         run: |
-          VERSION=$(jq -r '.version' manifest.json)
-          SRC=$(ls web-ext-artifacts/*.xpi | head -n1)
-          DEST="web-ext-artifacts/marketing-inspector-v${VERSION}.xpi"
+          SRC=$(ls artifacts/firefox/*.xpi | head -n1)
+          DEST="artifacts/marketing-inspector-v${{ steps.v.outputs.version }}-firefox.xpi"
           mv "$SRC" "$DEST"
-          echo "name=marketing-inspector-v${VERSION}.xpi" >> "$GITHUB_OUTPUT"
           echo "path=$DEST" >> "$GITHUB_OUTPUT"
-          echo "Renamed $(basename "$SRC") -> $(basename "$DEST")"
 
-      - name: Upload XPI as artifact
+      # ── Chrome/Edge: zip the build ───────────────────────────────────────
+      # Edge Add-ons consumes this same zip; its Partner Center API is separate
+      # and submission stays manual for now.
+      - name: Package Chrome build
+        id: zip
+        run: |
+          DEST="$PWD/artifacts/marketing-inspector-v${{ steps.v.outputs.version }}-chrome.zip"
+          (cd dist/chrome && zip -qr "$DEST" .)
+          echo "path=$DEST" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to Chrome Web Store
+        # Skips until the CWS listing exists and its secrets are configured —
+        # the store requires a manual first submission to create the listing.
+        if: ${{ env.CWS_EXTENSION_ID != '' && startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          npx --yes chrome-webstore-upload-cli@4.0.1 upload \
+            --source "${{ steps.zip.outputs.path }}" \
+            --extension-id "${{ secrets.CWS_EXTENSION_ID }}" \
+            --client-id "${{ secrets.CWS_CLIENT_ID }}" \
+            --client-secret "${{ secrets.CWS_CLIENT_SECRET }}" \
+            --refresh-token "${{ secrets.CWS_REFRESH_TOKEN }}" \
+            --auto-publish
+
+      # ── Artifacts + release ──────────────────────────────────────────────
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: marketing-inspector-signed
-          path: ${{ steps.xpi.outputs.path }}
+          name: marketing-inspector-builds
+          path: |
+            ${{ steps.xpi.outputs.path }}
+            ${{ steps.zip.outputs.path }}
           retention-days: 90
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
-          files: ${{ steps.xpi.outputs.path }}
+          files: |
+            ${{ steps.xpi.outputs.path }}
+            ${{ steps.zip.outputs.path }}
           generate_release_notes: true

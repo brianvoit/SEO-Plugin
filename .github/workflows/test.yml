@@ -1,0 +1,29 @@
+name: Test
+
+# There was no PR/CI check before this — the only automation was the release
+# workflow, so a broken build was only discovered by tagging it.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # version.test.mjs asks git whether HEAD is tagged; a shallow clone
+          # without tags would make it skip silently.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      # `pretest` builds both browser targets, so this covers build + verify.
+      - run: npm test

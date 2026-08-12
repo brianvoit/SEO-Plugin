@@ -1,0 +1,54 @@
+{
+  "//": "Known Chrome/Edge incompatibilities that exist today. tests/compat.test.mjs fails on any violation NOT listed here, and also fails on any entry here that no longer matches — so this file cannot drift from reality. Milestone 2 deletes entries as it ports each area. Keys are '<file>::<ruleId>'.",
+  "violations": {
+    "background.js::onMessage-promise-return": {
+      "status": "port-in-m2",
+      "m2Step": 1,
+      "reason": "The ~110-case router at background.js:5082 returns Promises. Chrome ignores them, so every handler resolves to undefined. Must call sendResponse and return true. Gates the entire port."
+    },
+    "background.js::sidebarAction": {
+      "status": "port-in-m2",
+      "m2Step": 5,
+      "reason": "background.js:114 calls sidebarAction.toggle(). Chrome has sidePanel.open() with no toggle, and loses gesture context across the preceding await."
+    },
+    "background.js::menus-namespace": {
+      "status": "port-in-m2",
+      "m2Step": 7,
+      "reason": "browser.menus is Firefox-only; Chrome exposes chrome.contextMenus. The chrome build already requests the contextMenus permission."
+    },
+    "background.js::menus-onShown-refresh": {
+      "status": "port-in-m2",
+      "m2Step": 7,
+      "reason": "menus.onShown + menus.refresh keep the toolbar checkboxes in sync just before paint. Neither exists in Chrome; replace with eager contextMenus.update driven by storage.onChanged."
+    },
+    "background.js::getSecurityInfo": {
+      "status": "port-in-m2",
+      "m2Step": 4,
+      "reason": "Firefox-only TLS inspection at background.js:390. Chrome has no equivalent, so the DNS tab's TLS panel must fall back to #tls-note, which popup-dns.js:103 already handles."
+    },
+    "background.js::webRequest-blocking": {
+      "status": "port-in-m2",
+      "m2Step": 4,
+      "reason": "background.js:404 registers onHeadersReceived with ['blocking','responseHeaders'] purely so getSecurityInfo works. Chrome MV3 forbids blocking; dropping it keeps the responseHeaders capture intact."
+    },
+    "background.js::originUrl": {
+      "status": "port-in-m2",
+      "m2Step": 4,
+      "reason": "background.js:491 matches its own trace fetch via details.originUrl. Chrome calls this details.initiator; unported, every Chrome trace times out after 12s."
+    },
+    "background.js::moz-extension-scheme": {
+      "status": "port-in-m2",
+      "m2Step": 4,
+      "reason": "Same line as originUrl — the scheme check must accept chrome-extension:// on Chromium."
+    },
+    "popup.js::getViews-sidebar": {
+      "status": "port-in-m2",
+      "m2Step": 5,
+      "reason": "popup.js:7 detects sidebar mode via extension.getViews({type:'sidebar'}), which is Firefox-only and returns [] on Chrome — silently disabling the follow-active-tab block. Replace with the ?view=sidepanel marker the chrome manifest already sets."
+    },
+    "popup-redirects.js::onMessage-promise-return": {
+      "status": "intentional",
+      "reason": "False positive. popup-redirects.js:377 is a fire-and-forget listener for the redirectUpdated broadcast — it never needs to reply, so having no sendResponse is correct on both browsers."
+    }
+  }
+}

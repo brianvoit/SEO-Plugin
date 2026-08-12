@@ -9,17 +9,15 @@
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
   },
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "seo-inspector@brianvoit",
-      "strict_min_version": "142.0",
-      "data_collection_permissions": {
-        "required": ["websiteActivity"],
-        "optional": []
-      }
-    }
-  },
-  "permissions": ["storage", "activeTab", "scripting", "tabs", "menus", "identity", "webRequest", "webRequestBlocking", "webNavigation"],
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs",
+    "identity",
+    "webRequest",
+    "webNavigation"
+  ],
   "host_permissions": [
     "*://*/*",
     "https://api.github.com/*",
@@ -35,33 +33,12 @@
     "https://drive.googleapis.com/*",
     "https://accounts.google.com/*"
   ],
-  "background": {
-    "scripts": ["background.js"]
-  },
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png",
       "48": "icons/icon-48.png"
-    }
-  },
-  "sidebar_action": {
-    "default_panel": "popup.html",
-    "default_icon": {
-      "16": "icons/icon-16.png",
-      "32": "icons/icon-32.png",
-      "48": "icons/icon-48.png"
-    },
-    "default_title": "Marketing Inspector"
-  },
-  "commands": {
-    "_execute_sidebar_action": {
-      "suggested_key": {
-        "default": "Alt+M",
-        "mac": "Alt+M"
-      },
-      "description": "Toggle the Marketing Inspector sidebar"
     }
   },
   "content_scripts": [

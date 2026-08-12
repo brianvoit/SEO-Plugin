@@ -10,6 +10,11 @@
 __pycache__/
 *.pyc
 
+# Build output — per-browser extension directories, produced by scripts/build.mjs
+dist/
+artifacts/
+node_modules/
+
 # web-ext build output
 web-ext-artifacts/
 .amo-upload-uuid

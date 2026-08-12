@@ -1,0 +1,21 @@
+{
+  "name": "marketing-inspector-tooling",
+  "private": true,
+  "description": "Build and test tooling for the Marketing Inspector browser extension. The extension source itself is the root-level *.js, popup.html and popup.css — this package only produces and verifies the per-browser builds in dist/.",
+  "license": "SEE LICENSE IN LICENSE",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:firefox": "node scripts/build.mjs --browser=firefox",
+    "build:chrome": "node scripts/build.mjs --browser=chrome",
+    "pretest": "npm run build",
+    "test": "node --test \"tests/*.test.mjs\"",
+    "lint:firefox": "web-ext lint --source-dir=dist/firefox --no-config-discovery"
+  },
+  "devDependencies": {
+    "web-ext": "10.6.0"
+  }
+}

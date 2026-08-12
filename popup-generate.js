@@ -3,6 +3,32 @@
 const GEN_FIELD_LABELS = { title: 'title tag', meta: 'meta description' };
 const genSuggestions = { title: '', meta: '' };
 
+// Client-level content-generation settings (Settings → Clients → Focus
+// Keywords / Image SEO) apply the same way to every "Generate with Claude"
+// text field — Title, Meta, OG, Twitter — as they already do to the WP Media
+// Library image generators (content.js's wpsKeywordContext/wpsBuildContext),
+// so tone, rules, keyword targeting, and brand-name policy stay consistent
+// everywhere rather than being an image-only concept.
+async function loadClientContentContext(host, pageUrl) {
+  const { imageSeoConfig } = await browser.storage.local.get('imageSeoConfig');
+  const cfg = ((imageSeoConfig || {})[host]) || {};
+
+  let tracked = [];
+  if (cfg.useTrackedKeywords !== false) {
+    try {
+      const res = await sendMessageWithTimeout({ action: 'webceoGetTrackedKeywords', pageUrl });
+      tracked = ((res && res.keywords) || []).map(String).filter(Boolean).slice(0, 40);
+    } catch { /* Web CEO not connected — best-effort */ }
+  }
+
+  return {
+    keywords: [...(cfg.focusKeywords || []), ...tracked],
+    tone: (cfg.tone || '').trim(),
+    rules: (cfg.rules || '').trim(),
+    includeBrand: !!cfg.includeBrand
+  };
+}
+
 async function generateField(field) {
   const btn     = document.getElementById(`btn-generate-${field}`);
   const result  = document.getElementById(`${field}-gen-result`);
@@ -44,20 +70,27 @@ async function generateField(field) {
     const topKeywords = (typeof _gscQueries !== 'undefined' ? _gscQueries : [])
       .slice(0, 5).map(q => q.query).filter(Boolean);
 
+    // Client-level content settings — same ones the WP image generators use
+    // (Settings → Clients → Focus Keywords / Image SEO).
+    const clientCtx = await loadClientContentContext(host, pageUrl);
+
     const context = [
       `Page URL: ${pageUrl}`,
       `Current title tag: "${pageData.title.text}"`,
       pageData.metaDescription && `Current meta description: "${pageData.metaDescription.text}"`,
       topKeywords.length        && `Top search queries landing on this page: ${topKeywords.join(', ')}`,
+      clientCtx.keywords.length && `Client-specified target keywords: ${clientCtx.keywords.join(', ')}`,
       insights?.intent          && `Detected search intent: ${insights.intent}`,
       insights?.sentiment       && `Detected page sentiment: ${insights.sentiment}`,
       pageData.headings.length  && `Headings:\n${pageData.headings.map(h => `${h.tag.toUpperCase()}: ${h.text}`).join('\n')}`,
       pageData.bodyTextExcerpt  && `Page content excerpt: "${pageData.bodyTextExcerpt}"`
     ].filter(Boolean).join('\n\n');
 
-    const brandLine = brandTerms.length
-      ? `Do not include the site name, brand name, or company name (e.g. ${brandTerms.join(', ')}).`
-      : 'Do not include the site name or brand name.';
+    const brandLine = clientCtx.includeBrand
+      ? (brandTerms.length ? `The brand/site name (${brandTerms.join(', ')}) may be used if it fits naturally.` : '')
+      : (brandTerms.length
+        ? `Do not include the site name, brand name, or company name (e.g. ${brandTerms.join(', ')}).`
+        : 'Do not include the site name or brand name.');
 
     const intentLine = insights?.intent && OG_INTENT_GUIDANCE[insights.intent]
       ? `\n- Search intent is ${insights.intent}: ${OG_INTENT_GUIDANCE[insights.intent]}`
@@ -68,12 +101,20 @@ async function generateField(field) {
     const keywordLine = topKeywords.length
       ? `\n- Weave in 1–2 of the top search keywords where they fit naturally — do not keyword-stuff.`
       : '';
+    const focusKeywordLine = clientCtx.keywords.length
+      ? `\n- Prioritize the client-specified target keywords where they fit naturally (${clientCtx.keywords.join(', ')}) — don't force all of them in, natural phrasing wins over coverage.`
+      : '';
+    const toneLine = clientCtx.tone ? `\n- Preferred tone: ${clientCtx.tone}` : '';
+    // Site-owner rules come last so they read as the most specific instruction.
+    const rulesLine = clientCtx.rules
+      ? `\n- Rules from the site owner — follow these closely: ${clientCtx.rules}`
+      : '';
 
     const system = `You are an SEO copywriter. Write a single replacement ${fieldLabel} for the page described below.
-- ${brandLine}
+- ${brandLine || 'Only mention the brand/site name if it genuinely fits.'}
 - Be specific and relevant to the page's actual topic. Do not invent facts not supported by the page content.
 - Target length: ${ranges.min}-${ranges.max} characters, ideally close to ${ranges.target} characters.
-- Return only the ${fieldLabel} text, nothing else — no quotes, no labels, no explanation.${intentLine}${sentimentLine}${keywordLine}`;
+- Return only the ${fieldLabel} text, nothing else — no quotes, no labels, no explanation.${intentLine}${sentimentLine}${keywordLine}${focusKeywordLine}${toneLine}${rulesLine}`;
 
     const data = await claudeFetch({
       method: 'POST',
@@ -182,19 +223,21 @@ function buildInsightChips(insights) {
   return wrap;
 }
 
-function buildOGSystemPrompt(key, cfg, insights, brandTerms) {
-  const brandLine = brandTerms.length
-    ? `Do not include the brand name or site name (e.g. ${brandTerms.join(', ')}).`
-    : 'Do not pad with the site name.';
+function buildOGSystemPrompt(key, cfg, insights, brandTerms, clientCtx) {
+  const brandLine = clientCtx.includeBrand
+    ? (brandTerms.length ? `The brand/site name (${brandTerms.join(', ')}) may be used if it fits naturally.` : null)
+    : (brandTerms.length
+      ? `Do not include the brand name or site name (e.g. ${brandTerms.join(', ')}).`
+      : 'Do not pad with the site name.');
 
   const lines = [
     `You are a social media copywriter. Write a single ${key} tag value for the page described below.`,
     `- Platform: ${cfg.platform}`,
     `- Maximum ${cfg.maxChars} characters — stay under this limit.`,
-    `- ${brandLine}`,
+    brandLine && `- ${brandLine}`,
     `- Do not invent facts not found in the page content.`,
     `- Return only the text, no quotes, no labels, no explanation.`,
-  ];
+  ].filter(Boolean);
 
   if (insights?.intent && OG_INTENT_GUIDANCE[insights.intent]) {
     lines.push(`- Search intent is ${insights.intent}: ${OG_INTENT_GUIDANCE[insights.intent]}`);
@@ -208,6 +251,13 @@ function buildOGSystemPrompt(key, cfg, insights, brandTerms) {
   } else {
     lines.push('- Write an engaging description that makes people want to click. Naturally include 1–2 top search keywords where they fit — do not keyword-stuff.');
   }
+
+  if (clientCtx.keywords.length) {
+    lines.push(`- Prioritize the client-specified target keywords where they fit naturally (${clientCtx.keywords.join(', ')}) — don't force all of them in, natural phrasing wins over coverage.`);
+  }
+  if (clientCtx.tone) lines.push(`- Preferred tone: ${clientCtx.tone}`);
+  // Site-owner rules come last so they read as the most specific instruction.
+  if (clientCtx.rules) lines.push(`- Rules from the site owner — follow these closely: ${clientCtx.rules}`);
 
   return lines.join('\n');
 }
@@ -251,6 +301,9 @@ async function generateOGField(key, bodyEl, btn) {
     const topKeywords = (typeof _gscQueries !== 'undefined' ? _gscQueries : [])
       .slice(0, 5).map(q => q.query).filter(Boolean);
 
+    // Client-level content settings — same ones the WP image generators use
+    const clientCtx = await loadClientContentContext(host, pageUrl);
+
     const og = pageData.openGraph?.og || {};
     const tw = pageData.openGraph?.twitter || {};
 
@@ -259,6 +312,7 @@ async function generateOGField(key, bodyEl, btn) {
       `Title tag: "${pageData.title?.text}"`,
       pageData.metaDescription?.text && `Meta description: "${pageData.metaDescription.text}"`,
       topKeywords.length            && `Top search queries landing on this page: ${topKeywords.join(', ')}`,
+      clientCtx.keywords.length     && `Client-specified target keywords: ${clientCtx.keywords.join(', ')}`,
       insights?.intent              && `Detected search intent: ${insights.intent}`,
       insights?.sentiment           && `Detected page sentiment: ${insights.sentiment}`,
       og['og:title']                && `Current og:title: "${og['og:title']}"`,
@@ -269,7 +323,7 @@ async function generateOGField(key, bodyEl, btn) {
       pageData.bodyTextExcerpt      && `Page content excerpt: "${pageData.bodyTextExcerpt}"`
     ].filter(Boolean).join('\n\n');
 
-    const system = buildOGSystemPrompt(key, cfg, insights, brandTerms);
+    const system = buildOGSystemPrompt(key, cfg, insights, brandTerms, clientCtx);
 
     const resp = await claudeFetch({
       method: 'POST',

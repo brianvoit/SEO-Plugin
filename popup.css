@@ -756,6 +756,28 @@ textarea.adcopy-field { line-height: 1.4; }
   border-radius: 4px;
 }
 
+/* Flags the client that owns the current page's domain — same ring+dot look
+   as an active per-domain binding (.gsc-property-option--active). */
+.wp-site-row--active {
+  border-color: var(--hint-green);
+  background: color-mix(in srgb, var(--hint-green) 10%, var(--bg-section));
+}
+.wp-site-active-dot {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid var(--hint-green);
+  flex-shrink: 0;
+  position: relative;
+}
+.wp-site-active-dot::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  background: var(--hint-green);
+}
+
 .wp-site-info {
   display: flex;
   flex-direction: column;
@@ -3469,6 +3491,55 @@ body.settings-open #update-footer { margin-top: auto; }
   max-height: 260px;
   padding: 0 12px;
 }
+
+.drive-browser-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  margin-bottom: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.12s;
+}
+.drive-browser-item:hover { border-color: var(--text-muted); }
+.drive-browser-item-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drive-browser-item-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.drive-browser-item-here {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+.drive-browser-item-here:hover { border-color: var(--accent); color: var(--accent); }
+.drive-browser-item-drill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+.drive-browser-item-drill:hover { border-color: var(--accent); color: var(--accent); }
 
 #drive-folder-browser .field-hint { padding: 0 12px; }
 #drive-folder-browser .wp-form-actions { padding: 10px 12px; margin-top: 0; border-top: 1px solid var(--border); }

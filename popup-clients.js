@@ -13,6 +13,7 @@
 
 let _clients = [];
 let _editingClient = null;
+let _currentClientHost = null;   // the active tab's host, for highlighting its client in the list
 
 function clientRegistryDraft() {
   return { id: null, name: '', domains: [], brandedTerms: '', driveFolderId: null, driveFolderName: null };
@@ -24,11 +25,15 @@ function patchClientInList(client) {
   renderClientsList();
 }
 
-function loadClients() {
-  return sendMessageWithTimeout({ action: 'clientRegistryList' }).then(res => {
-    _clients = (res && res.clients) || [];
-    renderClientsList();
-  });
+async function loadClients() {
+  try {
+    const tab = await getActiveTab();
+    _currentClientHost = new URL(tab.url).hostname.toLowerCase().replace(/^www\./, '');
+  } catch { _currentClientHost = null; }
+
+  const res = await sendMessageWithTimeout({ action: 'clientRegistryList' });
+  _clients = (res && res.clients) || [];
+  renderClientsList();
 }
 
 function renderClientsList() {
@@ -51,6 +56,17 @@ function renderClientsList() {
     const domains = (client.domains || []).map(d => d.domain);
     const line2 = domains.length ? domains.join(', ') : 'No domains yet';
     const { row, removeBtn, editBtn } = buildSettingsRow(client.name || 'Unnamed client', line2, 'Delete', true, domains[0] || null);
+
+    // Flag the client that owns the domain of the page currently being
+    // inspected — same green ring+dot used for an active per-domain binding.
+    if (_currentClientHost && domains.includes(_currentClientHost)) {
+      row.classList.add('wp-site-row--active');
+      const dot = document.createElement('span');
+      dot.className = 'wp-site-active-dot';
+      dot.title = 'This is the client for the page you\'re inspecting';
+      row.querySelector('.wp-site-left').insertBefore(dot, row.querySelector('.wp-site-info'));
+    }
+
     row.addEventListener('click', (e) => {
       if (e.target.closest('.wp-site-remove') || e.target.closest('.wp-site-edit')) return;
       showClientPanel(client.id);
@@ -154,14 +170,14 @@ function renderClientPanelContent() {
   renderBrandedTermsField(brandedSection, client);
   root.appendChild(brandedSection);
 
-
-  // Image SEO (WP Media Library generators) — client-level, like branded
-  // terms above. Any future domain/brand-specific setting belongs here too,
-  // rather than a new top-level Settings section.
-  const imageSeoSection = document.createElement('section');
-  imageSeoSection.className = 'field-section';
-  renderImageSeoSection(imageSeoSection, client);
-  root.appendChild(imageSeoSection);
+  // Content generation settings — client-level, like branded terms above.
+  // Applies uniformly to every AI-generated text field (Title, Meta, OG,
+  // Twitter, and the WP Media Library image generators) — none of it is
+  // scoped to one generator over another.
+  const contentGenSection = document.createElement('section');
+  contentGenSection.className = 'field-section';
+  renderContentGenSection(contentGenSection, client);
+  root.appendChild(contentGenSection);
 
   // Drive folder
   const driveSection = document.createElement('section');
@@ -287,31 +303,35 @@ function renderBrandedTermsField(container, client) {
   });
 }
 
-// Per-domain goals for the WP Media Library generators (Alt Text/Title/
-// Caption/Description), client-level like branded terms above. Each field
-// saves independently on blur/change, merged against the LIVE _editingClient
-// (not the `client` snapshot this function closed over) so editing one field
+// Client-level content-generation settings — applies uniformly to every
+// "Generate with Claude" text field (Title tag, Meta description, OG,
+// Twitter, and the WP Media Library image generators). None of it is
+// image-specific: the same record (client.imageSeo, kept as the storage key
+// name for now — renaming it would touch the client-registry schema for no
+// functional benefit) is read by both popup-generate.js and content.js.
+// Each field saves independently on blur/change, merged against the LIVE
+// _editingClient (not a snapshot closed over earlier) so editing one field
 // right after another never clobbers the previous save.
-function renderImageSeoSection(container, client) {
+async function patchImageSeo(patch) {
+  const next = { ...(_editingClient.imageSeo || {}), ...patch };
+  const id = await ensureClientPersisted();
+  const res = await sendMessageWithTimeout({ action: 'clientRegistrySetImageSeo', id, imageSeo: next });
+  if (res && res.client) { _editingClient = res.client; patchClientInList(_editingClient); }
+}
+
+function renderContentGenSection(container, client) {
   const header = document.createElement('div');
   header.className = 'field-label';
-  header.textContent = 'IMAGE SEO (WordPress Media Library generators)';
+  header.textContent = 'CONTENT GENERATION (applies to Title, Meta, OG/Twitter, and image AI generation)';
   container.appendChild(header);
 
   const cfg = client.imageSeo || {};
-
-  const saveImageSeo = async (patch) => {
-    const next = { ...(_editingClient.imageSeo || {}), ...patch };
-    const id = await ensureClientPersisted();
-    const res = await sendMessageWithTimeout({ action: 'clientRegistrySetImageSeo', id, imageSeo: next });
-    if (res && res.client) { _editingClient = res.client; patchClientInList(_editingClient); }
-  };
 
   const kwLabel = document.createElement('label');
   kwLabel.className = 'wp-field';
   const kwLabelText = document.createElement('span');
   kwLabelText.className = 'wp-field-label';
-  kwLabelText.textContent = 'Focus Keywords (comma-separated)';
+  kwLabelText.textContent = 'Additional Focus Keywords';
   const kwInput = document.createElement('input');
   kwInput.type = 'text';
   kwInput.className = 'wp-input';
@@ -319,7 +339,7 @@ function renderImageSeoSection(container, client) {
   kwInput.value = (cfg.focusKeywords || []).join(', ');
   kwInput.autocomplete = 'off';
   kwInput.spellcheck = false;
-  kwInput.addEventListener('blur', () => saveImageSeo({ focusKeywords: kwInput.value.split(',').map(s => s.trim()).filter(Boolean) }));
+  kwInput.addEventListener('blur', () => patchImageSeo({ focusKeywords: kwInput.value.split(',').map(s => s.trim()).filter(Boolean) }));
   kwLabel.append(kwLabelText, kwInput);
   container.appendChild(kwLabel);
 
@@ -335,7 +355,7 @@ function renderImageSeoSection(container, client) {
   toneInput.value = cfg.tone || '';
   toneInput.autocomplete = 'off';
   toneInput.spellcheck = false;
-  toneInput.addEventListener('blur', () => saveImageSeo({ tone: toneInput.value.trim() }));
+  toneInput.addEventListener('blur', () => patchImageSeo({ tone: toneInput.value.trim() }));
   toneLabel.append(toneLabelText, toneInput);
   container.appendChild(toneLabel);
 
@@ -343,14 +363,14 @@ function renderImageSeoSection(container, client) {
   rulesLabel.className = 'wp-field';
   const rulesLabelText = document.createElement('span');
   rulesLabelText.className = 'wp-field-label';
-  rulesLabelText.textContent = 'Rules (applied to Alt Text, Title, Caption, and Description)';
+  rulesLabelText.textContent = 'Rules (applied to all AI-generated text)';
   const rulesInput = document.createElement('textarea');
   rulesInput.className = 'wp-input';
   rulesInput.rows = 3;
   rulesInput.spellcheck = false;
-  rulesInput.placeholder = 'e.g. Mention the city/neighborhood when the photo is location-specific. Prefer "consultation" over "meeting". Keep a formal, professional tone.';
+  rulesInput.placeholder = 'e.g. Mention the city/neighborhood when the content is location-specific. Prefer "consultation" over "meeting". Keep a formal, professional tone.';
   rulesInput.value = cfg.rules || '';
-  rulesInput.addEventListener('blur', () => saveImageSeo({ rules: rulesInput.value.trim() }));
+  rulesInput.addEventListener('blur', () => patchImageSeo({ rules: rulesInput.value.trim() }));
   rulesLabel.append(rulesLabelText, rulesInput);
   container.appendChild(rulesLabel);
 
@@ -360,7 +380,7 @@ function renderImageSeoSection(container, client) {
   const trackedInput = document.createElement('input');
   trackedInput.type = 'checkbox';
   trackedInput.checked = cfg.useTrackedKeywords !== false;
-  trackedInput.addEventListener('change', () => saveImageSeo({ useTrackedKeywords: trackedInput.checked }));
+  trackedInput.addEventListener('change', () => patchImageSeo({ useTrackedKeywords: trackedInput.checked }));
   trackedLabel.append(trackedInput, document.createTextNode(' Also use Web CEO tracked keywords'));
   container.appendChild(trackedLabel);
 
@@ -370,8 +390,8 @@ function renderImageSeoSection(container, client) {
   const brandInput = document.createElement('input');
   brandInput.type = 'checkbox';
   brandInput.checked = !!cfg.includeBrand;
-  brandInput.addEventListener('change', () => saveImageSeo({ includeBrand: brandInput.checked }));
-  brandLabel.append(brandInput, document.createTextNode(' Allow the brand name in Title / Caption / Description'));
+  brandInput.addEventListener('change', () => patchImageSeo({ includeBrand: brandInput.checked }));
+  brandLabel.append(brandInput, document.createTextNode(' Allow the brand name in AI-generated text'));
   container.appendChild(brandLabel);
 }
 
@@ -629,21 +649,47 @@ function handleDriveBrowserError(res, errorEl) {
   return false;
 }
 
+// Navigating "into" an item is shared by the row click, the drill-in
+// chevron, and (implicitly) "Here" — which just skips straight to picking
+// the folder you'd land on instead of drilling in first.
+function driveBrowserEnter(id, name, isDrive) {
+  if (isDrive) { _driveBrowserDriveId = id; _driveBrowserPath = [{ id, name }]; }
+  else { _driveBrowserPath.push({ id, name }); }
+  driveBrowserLoad();
+}
+
 function driveBrowserRow(id, name, isDrive) {
-  const opt = document.createElement('button');
-  opt.className = 'gsc-property-option';
-  const radio = document.createElement('span');
-  radio.className = 'gsc-property-radio';
+  const row = document.createElement('div');
+  row.className = 'drive-browser-item';
+  row.title = `Open "${name}"`;
+  row.addEventListener('click', () => driveBrowserEnter(id, name, isDrive));
+
   const text = document.createElement('span');
-  text.className = 'gsc-property-option-text';
+  text.className = 'drive-browser-item-name';
   text.textContent = name;
-  opt.append(radio, text);
-  opt.addEventListener('click', () => {
-    if (isDrive) { _driveBrowserDriveId = id; _driveBrowserPath = [{ id, name }]; }
-    else { _driveBrowserPath.push({ id, name }); }
-    driveBrowserLoad();
-  });
-  return opt;
+  row.appendChild(text);
+
+  const actions = document.createElement('div');
+  actions.className = 'drive-browser-item-actions';
+
+  const hereBtn = document.createElement('button');
+  hereBtn.type = 'button';
+  hereBtn.className = 'drive-browser-item-here';
+  hereBtn.title = `Save exports directly in "${name}"`;
+  hereBtn.textContent = 'Here';
+  hereBtn.addEventListener('click', (e) => { e.stopPropagation(); onDriveFolderPicked({ id, name }); });
+  actions.appendChild(hereBtn);
+
+  const drillBtn = document.createElement('button');
+  drillBtn.type = 'button';
+  drillBtn.className = 'drive-browser-item-drill';
+  drillBtn.title = `Open "${name}"`;
+  drillBtn.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 3 11 8 6 13"/></svg>'));
+  drillBtn.addEventListener('click', (e) => { e.stopPropagation(); driveBrowserEnter(id, name, isDrive); });
+  actions.appendChild(drillBtn);
+
+  row.appendChild(actions);
+  return row;
 }
 
 function renderDriveBreadcrumb() {
@@ -680,24 +726,40 @@ async function driveBrowserLoad() {
   renderDriveBreadcrumb();
   document.getElementById('btn-drive-browser-select').disabled = _driveBrowserPath.length === 0;
 
+  // Drive's files.list can return far fewer than `pageSize` items in a
+  // single response even when more exist (a nextPageToken shows up anyway) —
+  // so a folder with dozens of children needs several round trips to list
+  // in full, not just one. Capped at 20 pages so a pathological folder can't
+  // hang the picker open.
+  const DRIVE_BROWSER_MAX_PAGES = 20;
+
   if (_driveBrowserRoot === 'teamdrives' && !_driveBrowserDriveId) {
-    const res = await sendMessageWithTimeout({ action: 'driveListSharedDrives' });
-    if (handleDriveBrowserError(res, errorEl)) return;
-    const drives = res.drives || [];
+    let drives = [], pageToken, pages = 0;
+    do {
+      const res = await sendMessageWithTimeout({ action: 'driveListSharedDrives', pageToken });
+      if (handleDriveBrowserError(res, errorEl)) return;
+      drives = drives.concat(res.drives || []);
+      pageToken = res.nextPageToken || null;
+    } while (pageToken && ++pages < DRIVE_BROWSER_MAX_PAGES);
     if (!drives.length) emptyEl.classList.remove('hidden');
     drives.forEach(d => listEl.appendChild(driveBrowserRow(d.id, d.name, true)));
     return;
   }
 
   const parentId = _driveBrowserPath.length ? _driveBrowserPath[_driveBrowserPath.length - 1].id : (_driveBrowserDriveId || 'root');
-  const res = await sendMessageWithTimeout({
-    action: 'driveListFolders',
-    parentId,
-    driveId: _driveBrowserDriveId || undefined,
-    sharedWithMe: (_driveBrowserRoot === 'shared' && !_driveBrowserPath.length) || undefined
-  });
-  if (handleDriveBrowserError(res, errorEl)) return;
-  const folders = res.folders || [];
+  let folders = [], pageToken, pages = 0;
+  do {
+    const res = await sendMessageWithTimeout({
+      action: 'driveListFolders',
+      parentId,
+      driveId: _driveBrowserDriveId || undefined,
+      sharedWithMe: (_driveBrowserRoot === 'shared' && !_driveBrowserPath.length) || undefined,
+      pageToken
+    });
+    if (handleDriveBrowserError(res, errorEl)) return;
+    folders = folders.concat(res.folders || []);
+    pageToken = res.nextPageToken || null;
+  } while (pageToken && ++pages < DRIVE_BROWSER_MAX_PAGES);
   if (!folders.length) emptyEl.classList.remove('hidden');
   folders.forEach(f => listEl.appendChild(driveBrowserRow(f.id, f.name, false)));
 }

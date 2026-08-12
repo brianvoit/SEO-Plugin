@@ -830,6 +830,16 @@ textarea.adcopy-field { line-height: 1.4; }
 .wp-input:focus { border-color: var(--accent); }
 .wp-input::placeholder { color: var(--text-none); font-family: inherit; }
 
+/* Multi-line fields (e.g. Image SEO rules) — the fixed 30px height above is
+   sized for single-line inputs and clips a textarea's own line-height. */
+textarea.wp-input {
+  height: auto;
+  min-height: 60px;
+  padding: 7px 9px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
 .wp-form-actions {
   display: flex;
   align-items: center;
@@ -2392,6 +2402,7 @@ body.settings-open #update-footer { margin-top: auto; }
 
 /* Trash (clear) API key button shares the red affordance */
 #btn-clear-key:hover { color: var(--hint-red); border-color: var(--hint-red); }
+#btn-client-delete:hover { color: var(--hint-red); border-color: var(--hint-red); }
 
 /* GA property picker: sticky search box */
 .ga-property-search {

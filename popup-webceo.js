@@ -815,7 +815,6 @@ async function loadWebceoProjectPicker(container) {
 async function refreshWebceoSettingsStatus() {
   const status = await sendMessageWithTimeout({ action: 'webceoGetStatus' });
   const badge = document.getElementById('webceo-status-badge');
-  const box = document.getElementById('webceo-project-box');
 
   document.getElementById('webceo-base-url').value = status.baseUrl || '';
   if (status.connected) {
@@ -824,14 +823,11 @@ async function refreshWebceoSettingsStatus() {
     setWebceoKeyState(true);
     // Once the key is stored, collapse the inputs out of the way (like Google Ads)
     setWebceoConfigCollapsed(true);
-    box.classList.remove('hidden');
-    refreshWebceoProjectInfo();
   } else {
     badge.textContent = 'Connect';
     badge.className = 'gsc-status-badge gsc-status-badge--disconnected';
     setWebceoKeyState(false);
     setWebceoConfigCollapsed(false);
-    box.classList.add('hidden');
   }
   return status;
 }
@@ -843,38 +839,6 @@ function setWebceoConfigCollapsed(collapsed) {
 }
 
 document.getElementById('btn-webceo-edit-config').addEventListener('click', () => setWebceoConfigCollapsed(false));
-
-async function refreshWebceoProjectInfo() {
-  const matchEl = document.getElementById('webceo-project-match');
-  const allEl = document.getElementById('webceo-project-all');
-  matchEl.className = 'gsc-property-match hidden';
-  allEl.replaceChildren();
-
-  const tab = await getActiveTab();
-  const res = await sendMessageWithTimeout({ action: 'webceoResolveProject', pageUrl: tab.url });
-  if (!res || !res.connected) return;
-  if (res.error) {
-    matchEl.textContent = webceoErrorMessage(res.error, res.detail);
-    matchEl.className = 'gsc-property-match gsc-property-match--none';
-    return;
-  }
-  _webceoHost = res.host;
-  if (!res.projects.length) {
-    matchEl.textContent = 'No projects on this Web CEO account';
-    matchEl.className = 'gsc-property-match gsc-property-match--none';
-    return;
-  }
-  const sel = res.project && res.projects.find(p => p.project === res.project);
-  if (sel) {
-    renderSelectedRow(allEl, sel.name,
-      async () => {
-        await sendMessageWithTimeout({ action: 'webceoSetProject', host: _webceoHost, project: null });
-        renderWebceoProjectOptions(allEl, res.projects, null, () => refreshWebceoProjectInfo());
-      }, sel.domain);
-    return;
-  }
-  renderWebceoProjectOptions(allEl, res.projects, res.project, () => refreshWebceoProjectInfo());
-}
 
 // API-key field: masked once stored, editable + reveal eye when empty
 function setWebceoKeyState(hasKey) {

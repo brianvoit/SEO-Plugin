@@ -243,9 +243,7 @@ function showSettings() {
   if (typeof refreshPageAccessSection === 'function') refreshPageAccessSection();
   if (typeof setOauthDrawer === 'function') setOauthDrawer(false);   // always start collapsed
   loadWpSites();
-  refreshGscSettingsStatus().then(status => {
-    if (status && status.connected) refreshGscPropertyInfo();
-  });
+  refreshGscSettingsStatus();
   refreshGaSettingsStatus();
   refreshAdsSettingsStatus();
   refreshDocsSettingsStatus();

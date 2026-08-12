@@ -1,9 +1,10 @@
 // ─── Client Registry UI ───────────────────────────────────────────────────────
 // Replaces the old per-host Branded Terms list/form in Settings with a
 // CLIENTS list + a full-screen Client panel (name, domains, branded terms,
-// keywords, Drive folder, and per-domain GSC/GA4/Ads/Web CEO bindings).
+// Image SEO config, Drive folder, and per-domain GSC/GA4/Ads/Web CEO
+// bindings).
 //
-// A brand-new client has no id until its first real edit (name/keywords/Drive
+// A brand-new client has no id until its first real edit (name/Drive
 // folder) — ensureClientPersisted() creates it then; abandoning a blank panel
 // via Back never leaves an empty client behind. Domains and branded terms use
 // their own dedicated background actions (clientRegistryAddDomain/
@@ -14,7 +15,7 @@ let _clients = [];
 let _editingClient = null;
 
 function clientRegistryDraft() {
-  return { id: null, name: '', domains: [], brandedTerms: '', keywords: [], driveFolderId: null, driveFolderName: null };
+  return { id: null, name: '', domains: [], brandedTerms: '', driveFolderId: null, driveFolderName: null };
 }
 
 function patchClientInList(client) {
@@ -41,7 +42,12 @@ function renderClientsList() {
   }
   empty.classList.add('hidden');
 
-  _clients.forEach(client => {
+  // Sorted here (not at each mutation site) so add/rename/delete can never
+  // leave the list out of order.
+  const sorted = _clients.slice().sort((a, b) =>
+    (a.name || 'Unnamed client').localeCompare(b.name || 'Unnamed client', undefined, { sensitivity: 'base' }));
+
+  sorted.forEach(client => {
     const domains = (client.domains || []).map(d => d.domain);
     const line2 = domains.length ? domains.join(', ') : 'No domains yet';
     const { row, removeBtn, editBtn } = buildSettingsRow(client.name || 'Unnamed client', line2, 'Delete', true, domains[0] || null);
@@ -52,6 +58,7 @@ function renderClientsList() {
     editBtn.addEventListener('click', () => showClientPanel(client.id));
     removeBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
+      if (!confirm(`Delete "${client.name || 'Unnamed client'}"? This removes its branded terms, keywords, Image SEO settings, and per-domain bindings.`)) return;
       await sendMessageWithTimeout({ action: 'clientRegistryDelete', id: client.id });
       _clients = _clients.filter(c => c.id !== client.id);
       renderClientsList();
@@ -77,16 +84,17 @@ async function openClientPanel(id) {
 
 async function deleteCurrentClient() {
   if (!_editingClient || !_editingClient.id) { hideClientPanelToSettings(); return; }
+  if (!confirm(`Delete "${_editingClient.name || 'Unnamed client'}"? This removes its branded terms, keywords, Image SEO settings, and per-domain bindings.`)) return;
   await sendMessageWithTimeout({ action: 'clientRegistryDelete', id: _editingClient.id });
   _clients = _clients.filter(c => c.id !== _editingClient.id);
   renderClientsList();
   hideClientPanelToSettings();
 }
 
-// Handles only fields with no override/cache implications (name, keywords,
-// Drive folder) — creates the client on its first call if it doesn't exist yet.
+// Handles only fields with no override/cache implications (name, Drive
+// folder) — creates the client on its first call if it doesn't exist yet.
 async function saveClientField(patch) {
-  const client = { id: _editingClient.id, name: _editingClient.name, keywords: _editingClient.keywords, ...patch };
+  const client = { id: _editingClient.id, name: _editingClient.name, ...patch };
   const res = await sendMessageWithTimeout({ action: 'clientRegistrySave', client });
   if (res && res.ok) {
     _editingClient = res.client;
@@ -146,28 +154,6 @@ function renderClientPanelContent() {
   renderBrandedTermsField(brandedSection, client);
   root.appendChild(brandedSection);
 
-  // Keywords
-  const keywordsSection = document.createElement('section');
-  keywordsSection.className = 'field-section';
-  const kwLabel = document.createElement('label');
-  kwLabel.className = 'wp-field';
-  const kwLabelText = document.createElement('span');
-  kwLabelText.className = 'wp-field-label';
-  kwLabelText.textContent = 'Keywords (comma-separated)';
-  const kwInput = document.createElement('input');
-  kwInput.type = 'text';
-  kwInput.className = 'wp-input';
-  kwInput.placeholder = 'keyword one, keyword two';
-  kwInput.value = (client.keywords || []).join(', ');
-  kwInput.autocomplete = 'off';
-  kwInput.spellcheck = false;
-  kwInput.addEventListener('blur', () => {
-    const keywords = kwInput.value.split(',').map(s => s.trim()).filter(Boolean);
-    saveClientField({ keywords }).then(renderClientPanelContent);
-  });
-  kwLabel.append(kwLabelText, kwInput);
-  keywordsSection.appendChild(kwLabel);
-  root.appendChild(keywordsSection);
 
   // Image SEO (WP Media Library generators) — client-level, like branded
   // terms above. Any future domain/brand-specific setting belongs here too,
@@ -362,7 +348,7 @@ function renderImageSeoSection(container, client) {
   rulesInput.className = 'wp-input';
   rulesInput.rows = 3;
   rulesInput.spellcheck = false;
-  rulesInput.placeholder = 'e.g. Always work a location into the alt text — Twin Cities, Minneapolis, St. Paul — when the photo is of a local project. Call these "remodels", never "renovations".';
+  rulesInput.placeholder = 'e.g. Mention the city/neighborhood when the photo is location-specific. Prefer "consultation" over "meeting". Keep a formal, professional tone.';
   rulesInput.value = cfg.rules || '';
   rulesInput.addEventListener('blur', () => saveImageSeo({ rules: rulesInput.value.trim() }));
   rulesLabel.append(rulesLabelText, rulesInput);

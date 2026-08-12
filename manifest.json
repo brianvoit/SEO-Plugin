@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Marketing Inspector",
-  "version": "1.104",
+  "version": "1.105",
   "description": "On-page SEO, Search Console, Analytics, Google Ads, rank tracking, backlinks and Core Web Vitals for the page you're on.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -54,6 +54,15 @@
       "48": "icons/icon-48.png"
     },
     "default_title": "Marketing Inspector"
+  },
+  "commands": {
+    "_execute_sidebar_action": {
+      "suggested_key": {
+        "default": "Alt+M",
+        "mac": "Alt+M"
+      },
+      "description": "Toggle the Marketing Inspector sidebar"
+    }
   },
   "content_scripts": [
     {

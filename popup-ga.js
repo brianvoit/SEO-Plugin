@@ -527,7 +527,6 @@ async function refreshGaSettingsStatus() {
     setupForm.classList.add('hidden');
     connectedInfo.classList.remove('hidden');
     setAccountEmail('ga-account-email', status.email);
-    refreshGaPropertyInfo();
   } else {
     badge.textContent = 'Connect';
     badge.className = 'gsc-status-badge gsc-status-badge--disconnected';
@@ -536,54 +535,6 @@ async function refreshGaSettingsStatus() {
     setAccountEmail('ga-account-email', null);
   }
   return status;
-}
-
-async function refreshGaPropertyInfo() {
-  const matchEl = document.getElementById('ga-property-match');
-  const allEl   = document.getElementById('ga-property-all');
-  matchEl.textContent = '';
-  matchEl.className = 'gsc-property-match hidden';
-  matchEl.title = '';
-  allEl.replaceChildren();
-
-  const tab = await getActiveTab();
-  const res = await sendMessageWithTimeout({ action: 'gaResolveProperty', pageUrl: tab.url, measurementId: gaDetectedId() });
-  if (!res || !res.connected) {
-    matchEl.textContent = 'Not connected';
-    matchEl.className = 'gsc-property-match gsc-property-match--none';
-    return;
-  }
-  if (res.error) {
-    matchEl.textContent = res.error === 'API_ERROR'
-      ? 'Enable the "Google Analytics Admin API" in Google Cloud'
-      : 'Could not load properties';
-    matchEl.title = res.detail || res.error;
-    matchEl.className = 'gsc-property-match gsc-property-match--none';
-    return;
-  }
-
-  _gaHost = res.host;
-  if (!res.properties.length) {
-    matchEl.textContent = 'No GA4 properties on this account';
-    matchEl.className = 'gsc-property-match gsc-property-match--none';
-    return;
-  }
-
-  // Once a property is linked, collapse to just that one (green), like the GSC
-  // box. The trash unlinks this domain and brings back the searchable picker.
-  const selected = res.property || res.detectedProperty;
-  const sel = selected && res.properties.find(p => p.property === selected);
-  if (sel) {
-    renderSelectedRow(allEl, sel.displayName,
-      async () => {
-        await sendMessageWithTimeout({ action: 'gaSetProperty', host: _gaHost, property: null });
-        renderGaPropertyOptions(allEl, res.properties, null, null, { detectedProperty: res.detectedProperty, detectedId: res.detectedId });
-      }, sel.property.replace('properties/', '#'));
-    return;
-  }
-
-  renderGaPropertyOptions(allEl, res.properties, res.property, null,
-    { detectedProperty: res.detectedProperty, detectedId: res.detectedId });
 }
 
 // Collapsed single-row view of the linked account/property (mirrors the GSC

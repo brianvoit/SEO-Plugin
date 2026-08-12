@@ -1283,7 +1283,6 @@ async function refreshAdsSettingsStatus() {
       // (the Manager/MCC ID is optional — non-manager accounts don't need it)
       setAdsConfigCollapsed(!!adsDeveloperToken);
     });
-    refreshAdsAccountInfo();
   } else {
     badge.textContent = 'Connect';
     badge.className = 'gsc-status-badge gsc-status-badge--disconnected';
@@ -1293,39 +1292,6 @@ async function refreshAdsSettingsStatus() {
     document.getElementById('btn-ads-edit-config').classList.add('hidden');
   }
   return status;
-}
-
-async function refreshAdsAccountInfo() {
-  const matchEl = document.getElementById('ads-account-match');
-  const allEl   = document.getElementById('ads-account-all');
-  matchEl.className = 'gsc-property-match hidden';
-  allEl.replaceChildren();
-
-  const tab = await getActiveTab();
-  const res = await sendMessageWithTimeout({ action: 'adsResolveAccount', pageUrl: tab.url });
-  if (!res || !res.connected) return;
-  if (res.error) {
-    matchEl.textContent = res.error === 'NO_DEV_TOKEN' ? 'Add a developer token above to list accounts' : adsErrorMessage(res.error, res.detail);
-    matchEl.className = 'gsc-property-match gsc-property-match--none';
-    return;
-  }
-  _adsHost = res.host;
-  if (!res.accounts.length) {
-    matchEl.textContent = 'No accounts on the connected login';
-    matchEl.className = 'gsc-property-match gsc-property-match--none';
-    return;
-  }
-  // Collapse to the linked account (green) once chosen, like the GSC/GA boxes
-  const sel = res.account && res.accounts.find(a => a.id === res.account);
-  if (sel) {
-    renderSelectedRow(allEl, sel.name,
-      async () => {
-        await sendMessageWithTimeout({ action: 'adsSetAccount', host: _adsHost, account: null });
-        renderAdsAccountOptions(allEl, res.accounts, null, null);
-      }, formatAdsId(sel.id));
-    return;
-  }
-  renderAdsAccountOptions(allEl, res.accounts, res.account, null);
 }
 
 async function connectAds() {
@@ -1398,7 +1364,6 @@ document.getElementById('btn-ads-token-vis').addEventListener('click', () => {
 document.getElementById('btn-ads-token-clear').addEventListener('click', async () => {
   await browser.storage.local.remove(['adsDeveloperToken', 'adsAccounts']);
   setAdsTokenState(false);
-  refreshAdsAccountInfo();
 });
 
 document.getElementById('btn-ads-save-config').addEventListener('click', async () => {
@@ -1415,7 +1380,6 @@ document.getElementById('btn-ads-save-config').addEventListener('click', async (
   // Collapse once the developer token is stored (Manager/MCC ID is optional)
   const { adsDeveloperToken } = await browser.storage.local.get('adsDeveloperToken');
   if (adsDeveloperToken) setAdsConfigCollapsed(true);
-  refreshAdsAccountInfo();
 });
 
 document.getElementById('btn-ads-goto-settings').addEventListener('click', () => showSettings());

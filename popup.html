@@ -242,12 +242,7 @@
         <div class="field-hint">Enable the "Google Search Console API" in your Google Cloud project.</div>
       </div>
 
-      <div id="gsc-connected-info" class="hidden">
-        <div class="gsc-property-box" id="gsc-property-box">
-          <span class="gsc-property-match hidden" id="gsc-property-match"></span>
-          <div class="gsc-property-all" id="gsc-property-all"></div>
-        </div>
-      </div>
+      <div id="gsc-connected-info" class="hidden"></div>
     </section>
 
     <section class="field-section">
@@ -264,12 +259,7 @@
         <div id="ga-connect-error" class="field-hint hint-red hidden"></div>
       </div>
 
-      <div id="ga-connected-info" class="hidden">
-        <div class="gsc-property-box">
-          <span class="gsc-property-match hidden" id="ga-property-match"></span>
-          <div class="gsc-property-all gsc-property-all--scroll" id="ga-property-all"></div>
-        </div>
-      </div>
+      <div id="ga-connected-info" class="hidden"></div>
     </section>
 
     <section class="field-section">
@@ -314,11 +304,6 @@
           <input type="text" id="ads-manager-id" class="wp-input" placeholder="123-456-7890" autocomplete="off" spellcheck="false" />
         </label>
         <button id="btn-ads-save-config" class="save-key-btn">Save</button>
-        </div>
-
-        <div class="gsc-property-box" id="ads-account-box">
-          <span class="gsc-property-match hidden" id="ads-account-match"></span>
-          <div class="gsc-property-all gsc-property-all--scroll" id="ads-account-all"></div>
         </div>
       </div>
     </section>
@@ -380,11 +365,6 @@
         <input type="text" id="webceo-base-url" class="wp-input" placeholder="https://seo.plaudit.com/api/" autocomplete="off" spellcheck="false" />
       </label>
       <button id="btn-webceo-save-config" class="save-key-btn">Save</button>
-      </div>
-
-      <div class="gsc-property-box" id="webceo-project-box">
-        <span class="gsc-property-match hidden" id="webceo-project-match"></span>
-        <div class="gsc-property-all gsc-property-all--scroll" id="webceo-project-all"></div>
       </div>
     </section>
 
@@ -514,7 +494,17 @@
         </svg>
         Back
       </button>
-      <button id="btn-client-delete" class="redirect-retrace-btn hidden" title="Delete this client">Delete</button>
+      <div class="settings-header-actions">
+        <button id="btn-client-delete" class="icon-btn hidden" title="Delete this client">
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2.5 4h11"/>
+            <path d="M6 4V2.8a.8.8 0 0 1 .8-.8h2.4a.8.8 0 0 1 .8.8V4"/>
+            <path d="M3.6 4l.6 8.5a1 1 0 0 0 1 .9h5.6a1 1 0 0 0 1-.9L12.4 4"/>
+            <line x1="6.6" y1="6.4" x2="6.8" y2="11"/>
+            <line x1="9.4" y1="6.4" x2="9.2" y2="11"/>
+          </svg>
+        </button>
+      </div>
     </div>
     <div id="client-content"></div>
   </div>

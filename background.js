@@ -610,8 +610,22 @@ function googleBase64UrlEncode(bytes) {
   return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+// Distinct from popup-shared.js's IS_CHROMIUM: this script runs standalone
+// (as the service worker on Chrome, an event page on Firefox) and never loads
+// the popup scripts, so the same URL-scheme check is recomputed here rather
+// than shared.
+const IS_CHROMIUM_BG = browser.runtime.getURL('').startsWith('chrome-extension://');
+
 function getGoogleRedirectUri() {
   const redirectBase = browser.identity.getRedirectURL();
+  // Chrome's own documented pattern for launchWebAuthFlow: register
+  // https://<extension-id>.chromiumapp.org/ (exactly what getRedirectURL
+  // already returns) as the client's Authorized redirect URI.
+  if (IS_CHROMIUM_BG) return redirectBase;
+  // Firefox: getRedirectURL returns https://<uuid>.extensions.allizom.org/,
+  // but launchWebAuthFlow also intercepts this loopback form built from the
+  // same uuid — and it's what's actually registered in Google Cloud Console
+  // for the existing Desktop app client, so it has to stay exactly as-is.
   const subdomain = new URL(redirectBase).hostname.split('.')[0];
   return `http://127.0.0.1/mozoauth2/${subdomain}`;
 }

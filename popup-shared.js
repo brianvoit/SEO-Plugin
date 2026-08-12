@@ -1,6 +1,17 @@
 // Loaded as a classic (non-module) script — declarations below are shared
 // globals across all popup-*.js files via the script order in popup.html.
 
+// ─── Which browser is this ───────────────────────────────────────────────────
+// Two things differ in ways the UI has to reflect, and both follow from how
+// the build is distributed rather than from any single API:
+//   * host permissions — optional and off by default in Firefox MV3, granted
+//     at install on Chromium, where permissions.request() would throw for them
+//   * updates — Chrome Web Store and Edge Add-ons update the extension
+//     themselves and forbid self-update mechanisms; the Firefox build is a
+//     self-distributed .xpi that has to check for its own updates
+// The extension-page URL scheme is the most direct signal available.
+const IS_CHROMIUM = browser.runtime.getURL('').startsWith('chrome-extension://');
+
 // ─── Claude model IDs ─────────────────────────────────────────────────────────
 // Update here when Anthropic releases new versions; every call in the extension
 // picks up the change automatically.

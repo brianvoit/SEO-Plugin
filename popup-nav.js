@@ -219,8 +219,11 @@ function hideDetailPanelToTab() {
 function showSettings() {
   enterDetailPanel();
   settingsPanel.classList.remove('hidden');
-  // The update checker lives only on the settings page now, pinned to the bottom
-  updateFooter.classList.remove('hidden');
+  // The update checker lives only on the settings page now, pinned to the
+  // bottom — and only on Firefox, which is self-distributed as an .xpi. The
+  // Chrome Web Store and Edge Add-ons update the extension themselves and
+  // prohibit extensions shipping their own update mechanism.
+  updateFooter.classList.toggle('hidden', IS_CHROMIUM);
   document.body.classList.add('settings-open');
   // Settings reads as the active "tab": light up the wrench, dim the tabs
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('is-active'));

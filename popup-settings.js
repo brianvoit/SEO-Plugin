@@ -41,6 +41,11 @@ async function hasPageAccess() {
 async function refreshPageAccessSection() {
   const section = document.getElementById('page-access-section');
   if (!section) return;
+  // Never offer this on Chromium. `*://*/*` is a required permission there, so
+  // permissions.request() throws outright ("not declared as optional") — the
+  // button could only ever fail. If a Chrome user has narrowed site access via
+  // the toolbar dropdown, that has to be undone in the same place.
+  if (IS_CHROMIUM) { section.classList.add('hidden'); return; }
   const granted = await hasPageAccess();
   section.classList.toggle('hidden', granted);
 }

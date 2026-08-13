@@ -289,6 +289,46 @@ async function loadRedirect(tabId) {
   }
 }
 
+// Runs `fn` against a tab's redirect entry, rehydrating from storage.session
+// when the in-memory Map has lost it.
+//
+// Chrome terminates the service worker after ~30s idle, which empties the Map.
+// Rehydrating at top level doesn't help: Chrome runs module code BEFORE
+// dispatching the event that woke the worker, so an async restore is still in
+// flight when the first listener fires. The listeners below used to read the
+// Map synchronously and bail on a miss, silently dropping the redirect chain
+// for any navigation that straddled a restart.
+//
+// Two properties matter here:
+//   * the warm case stays fully SYNCHRONOUS, so Firefox's blocking
+//     onHeadersReceived listener isn't made to wait on a promise chain during
+//     page load — that path behaves exactly as it did before
+//   * cold reads are serialized per tab, so two events that both miss can't
+//     read-modify-write over each other and lose a hop
+const _redirectQueue = new Map();   // tabId -> tail promise of that tab's work
+
+function withRedirectEntry(tabId, fn) {
+  // Warm and idle: no awaits, no queue — the original code path.
+  if (!_redirectQueue.has(tabId) && redirectByTab.has(tabId)) {
+    return fn(redirectByTab.get(tabId));
+  }
+
+  const prev = _redirectQueue.get(tabId) || Promise.resolve();
+  const next = prev
+    .then(async () => {
+      // `entry` may legitimately be null (no navigation recorded yet) —
+      // callers decide, exactly as they did with the bare Map lookup.
+      const entry = redirectByTab.has(tabId) ? redirectByTab.get(tabId) : await loadRedirect(tabId);
+      return fn(entry);
+    })
+    .catch(() => { /* one failed hop must not wedge the tab's queue */ });
+
+  _redirectQueue.set(tabId, next);
+  // Keep the queue from growing per tab for the life of the worker.
+  next.then(() => { if (_redirectQueue.get(tabId) === next) _redirectQueue.delete(tabId); });
+  return next;
+}
+
 // Toolbar/sidebar icon badge: the page's final status code, colour-coded the
 // same way the popup's status badge is (a 2xx reached via redirects reads amber).
 const BADGE_COLORS = { ok: '#16a34a', redirect: '#d97706', error: '#dc2626', server: '#6b7280' };
@@ -346,18 +386,21 @@ browser.webRequest.onBeforeRequest.addListener(details => {
   if (details.frameId !== 0) return;
   // Keep the finished previous chain around until onCommitted tells us whether
   // this navigation is a client (JS/meta) redirect — if so it gets stitched on.
-  const prev = redirectByTab.get(details.tabId);
-  saveRedirect(details.tabId, {
-    requestId: details.requestId,
-    chain: [],
-    finalUrl: null,
-    finalStatus: null,
-    error: null,
-    done: false,
-    startedAt: details.timeStamp,
-    _lastTs: details.timeStamp,
-    _pending: null,
-    prevChain: (prev && prev.done && prev.chain && prev.chain.length) ? prev.chain : null
+  // Goes through the queue so the lookup survives a worker restart and stays
+  // ordered against any still-pending work for this tab.
+  withRedirectEntry(details.tabId, prev => {
+    saveRedirect(details.tabId, {
+      requestId: details.requestId,
+      chain: [],
+      finalUrl: null,
+      finalStatus: null,
+      error: null,
+      done: false,
+      startedAt: details.timeStamp,
+      _lastTs: details.timeStamp,
+      _pending: null,
+      prevChain: (prev && prev.done && prev.chain && prev.chain.length) ? prev.chain : null
+    });
   });
   setActionBadge(details.tabId, '');   // clear while the new navigation loads
 }, REDIRECT_FILTER);
@@ -374,37 +417,40 @@ function takePendingHopMeta(entry, details) {
 
 browser.webRequest.onBeforeRedirect.addListener(details => {
   if (details.frameId !== 0) return;
-  const entry = redirectByTab.get(details.tabId);
-  if (!entry || entry.requestId !== details.requestId) return;
-  entry.chain.push({ url: details.url, status: details.statusCode, ...takePendingHopMeta(entry, details) });
-  saveRedirect(details.tabId, entry);
+  withRedirectEntry(details.tabId, entry => {
+    if (!entry || entry.requestId !== details.requestId) return;
+    entry.chain.push({ url: details.url, status: details.statusCode, ...takePendingHopMeta(entry, details) });
+    saveRedirect(details.tabId, entry);
+  });
 }, REDIRECT_FILTER);
 
 browser.webRequest.onCompleted.addListener(details => {
   if (details.frameId !== 0) return;
-  const entry = redirectByTab.get(details.tabId);
-  if (!entry || entry.requestId !== details.requestId) return;
-  entry.chain.push({ url: details.url, status: details.statusCode, ...takePendingHopMeta(entry, details) });
-  entry.finalUrl = details.url;
-  entry.finalStatus = details.statusCode;
-  entry.done = true;
-  entry.totalMs = entry.startedAt != null ? Math.max(0, Math.round(details.timeStamp - entry.startedAt)) : null;
-  saveRedirect(details.tabId, entry);
-  paintBadgeFromEntry(details.tabId, entry);
-  browser.runtime.sendMessage({ action: 'redirectUpdated', tabId: details.tabId }).catch(() => {});
+  withRedirectEntry(details.tabId, entry => {
+    if (!entry || entry.requestId !== details.requestId) return;
+    entry.chain.push({ url: details.url, status: details.statusCode, ...takePendingHopMeta(entry, details) });
+    entry.finalUrl = details.url;
+    entry.finalStatus = details.statusCode;
+    entry.done = true;
+    entry.totalMs = entry.startedAt != null ? Math.max(0, Math.round(details.timeStamp - entry.startedAt)) : null;
+    saveRedirect(details.tabId, entry);
+    paintBadgeFromEntry(details.tabId, entry);
+    browser.runtime.sendMessage({ action: 'redirectUpdated', tabId: details.tabId }).catch(() => {});
+  });
 }, REDIRECT_FILTER);
 
 browser.webRequest.onErrorOccurred.addListener(details => {
   if (details.frameId !== 0) return;
-  const entry = redirectByTab.get(details.tabId);
-  if (!entry || entry.requestId !== details.requestId) return;
-  entry.error = details.error;
-  entry.done = true;
-  saveRedirect(details.tabId, entry);
-  // Skip user-initiated cancellations (clicking away mid-load)
-  if (!/aborted/i.test(details.error || '')) {
-    setActionBadge(details.tabId, 'ERR', 'server');
-  }
+  withRedirectEntry(details.tabId, entry => {
+    if (!entry || entry.requestId !== details.requestId) return;
+    entry.error = details.error;
+    entry.done = true;
+    saveRedirect(details.tabId, entry);
+    // Skip user-initiated cancellations (clicking away mid-load)
+    if (!/aborted/i.test(details.error || '')) {
+      setActionBadge(details.tabId, 'ERR', 'server');
+    }
+  });
 }, REDIRECT_FILTER);
 
 // Security headers + TLS details for the document response. Captured here
@@ -428,47 +474,51 @@ const SECURITY_HEADER_NAMES = [
   'permissions-policy'
 ];
 
-browser.webRequest.onHeadersReceived.addListener(async details => {
+browser.webRequest.onHeadersReceived.addListener(details => {
   if (details.frameId !== 0) return;
-  const entry = redirectByTab.get(details.tabId);
-  if (!entry || entry.requestId !== details.requestId) return;
+  // Returned so Firefox's blocking listener waits for the getSecurityInfo read
+  // below. withRedirectEntry keeps the warm case synchronous, so in practice
+  // this only becomes a real promise after a service-worker restart.
+  return withRedirectEntry(details.tabId, async entry => {
+    if (!entry || entry.requestId !== details.requestId) return;
 
-  // Final hop's headers win (each redirect hop overwrites the previous)
-  const headers = {};
-  const cookies = [];
-  let xRobots = null;
-  for (const h of details.responseHeaders || []) {
-    const name = h.name.toLowerCase();
-    if (SECURITY_HEADER_NAMES.includes(name)) headers[name] = h.value || '';
-    if (name === 'set-cookie') {
-      // A Set-Cookie value can carry multiple cookies on separate lines
-      (h.value || '').split('\n').forEach(line => {
-        const cookieName = line.split('=')[0].trim();
-        if (cookieName) cookies.push(cookieName);
-      });
+    // Final hop's headers win (each redirect hop overwrites the previous)
+    const headers = {};
+    const cookies = [];
+    let xRobots = null;
+    for (const h of details.responseHeaders || []) {
+      const name = h.name.toLowerCase();
+      if (SECURITY_HEADER_NAMES.includes(name)) headers[name] = h.value || '';
+      if (name === 'set-cookie') {
+        // A Set-Cookie value can carry multiple cookies on separate lines
+        (h.value || '').split('\n').forEach(line => {
+          const cookieName = line.split('=')[0].trim();
+          if (cookieName) cookies.push(cookieName);
+        });
+      }
+      if (name === 'x-robots-tag') xRobots = h.value || '';
     }
-    if (name === 'x-robots-tag') xRobots = h.value || '';
-  }
-  entry.securityHeaders = headers;
-  // Stashed for the hop that onBeforeRedirect/onCompleted is about to push
-  entry._pending = { cookies, xRobots };
+    entry.securityHeaders = headers;
+    // Stashed for the hop that onBeforeRedirect/onCompleted is about to push
+    entry._pending = { cookies, xRobots };
 
-  if (CAN_READ_TLS && details.url.startsWith('https:')) {
-    try {
-      const sec = await browser.webRequest.getSecurityInfo(details.requestId, {});
-      const cert = sec.certificates && sec.certificates[0];
-      entry.tls = {
-        state: sec.state,                       // secure | weak | broken | insecure
-        protocol: sec.protocolVersion || null,
-        cipher: sec.cipherSuite || null,
-        issuer: cert?.issuer || null,
-        subject: cert?.subject || null,
-        validityStart: cert?.validity?.start ?? null,
-        validityEnd: cert?.validity?.end ?? null
-      };
-    } catch { /* security info unavailable for this request */ }
-  }
-  saveRedirect(details.tabId, entry);
+    if (CAN_READ_TLS && details.url.startsWith('https:')) {
+      try {
+        const sec = await browser.webRequest.getSecurityInfo(details.requestId, {});
+        const cert = sec.certificates && sec.certificates[0];
+        entry.tls = {
+          state: sec.state,                       // secure | weak | broken | insecure
+          protocol: sec.protocolVersion || null,
+          cipher: sec.cipherSuite || null,
+          issuer: cert?.issuer || null,
+          subject: cert?.subject || null,
+          validityStart: cert?.validity?.start ?? null,
+          validityEnd: cert?.validity?.end ?? null
+        };
+      } catch { /* security info unavailable for this request */ }
+    }
+    saveRedirect(details.tabId, entry);
+  });
 }, REDIRECT_FILTER, HEADERS_SPEC);
 
 // JS/meta redirects start a brand-new request, which webRequest sees as an
@@ -476,23 +526,25 @@ browser.webRequest.onHeadersReceived.addListener(async details => {
 // the previous page's chain gets stitched onto this one instead of dropped.
 browser.webNavigation.onCommitted.addListener(details => {
   if (details.frameId !== 0) return;
-  const entry = redirectByTab.get(details.tabId);
-  if (!entry || !entry.prevChain) return;
-  if ((details.transitionQualifiers || []).includes('client_redirect')) {
-    const prev = entry.prevChain.map(h => ({ ...h }));
-    prev[prev.length - 1].kind = 'client';   // junction hop: page issued a JS/meta redirect
-    entry.chain = prev.concat(entry.chain).slice(-REDIRECT_MAX_HOPS);
-    // Stitching prepends hops, so the first status just changed — repaint (a
-    // no-op while the new navigation is still in flight).
-    paintBadgeFromEntry(details.tabId, entry);
-    browser.runtime.sendMessage({ action: 'redirectUpdated', tabId: details.tabId }).catch(() => {});
-  }
-  entry.prevChain = null;
-  saveRedirect(details.tabId, entry);
+  withRedirectEntry(details.tabId, entry => {
+    if (!entry || !entry.prevChain) return;
+    if ((details.transitionQualifiers || []).includes('client_redirect')) {
+      const prev = entry.prevChain.map(h => ({ ...h }));
+      prev[prev.length - 1].kind = 'client';   // junction hop: page issued a JS/meta redirect
+      entry.chain = prev.concat(entry.chain).slice(-REDIRECT_MAX_HOPS);
+      // Stitching prepends hops, so the first status just changed — repaint (a
+      // no-op while the new navigation is still in flight).
+      paintBadgeFromEntry(details.tabId, entry);
+      browser.runtime.sendMessage({ action: 'redirectUpdated', tabId: details.tabId }).catch(() => {});
+    }
+    entry.prevChain = null;
+    saveRedirect(details.tabId, entry);
+  });
 });
 
 browser.tabs.onRemoved.addListener(tabId => {
   redirectByTab.delete(tabId);
+  _redirectQueue.delete(tabId);
   browser.storage.session.remove(redirectKey(tabId)).catch(() => {});
 });
 
@@ -2468,6 +2520,11 @@ const LINK_CHECK_TIMEOUT_MS = 8000;
 const LINK_CHECK_CONCURRENCY = 6;    // small pool — a page can have 100+ links
 const LINK_CHECK_MAX = 300;          // cap per request
 const LINK_CACHE_TTL_MS = 5 * 60 * 1000;
+// Deliberately NOT mirrored to storage.session, unlike redirectByTab. This is
+// a pure cache with a 5-minute TTL: losing it to a service-worker restart
+// costs a re-probe, never correctness. Persisting it would mean a storage
+// write per probed URL (up to 300 per sweep) to save work that expires in
+// minutes anyway — worse than the problem.
 const linkStatusCache = new Map();   // url -> { status, redirected, finalUrl, error, fetchedAt }
 
 // Bounded-concurrency map: run `worker` over `items`, at most `limit` at a time.
@@ -2523,12 +2580,36 @@ async function probeLinkStatus(url) {
   return out;
 }
 
+// Chrome terminates an idle service worker after ~30s. Touching an extension
+// API resets that timer, so long-running work holds the worker open by pinging
+// one on an interval. Returns a stop function; always call it in a `finally`,
+// or the worker is pinned awake for the rest of the browsing session.
+//
+// Firefox's event page suspends far less aggressively and the existing
+// behaviour there is fine, so this is Chromium-only.
+function keepWorkerAlive() {
+  if (!IS_CHROMIUM_BG) return () => {};
+  const timer = setInterval(() => {
+    browser.runtime.getPlatformInfo().catch(() => {});
+  }, 20000);
+  return () => clearInterval(timer);
+}
+
 async function checkLinkStatuses({ urls }) {
   const list = [...new Set((urls || []).filter(u => /^https?:\/\//i.test(u)))].slice(0, LINK_CHECK_MAX);
-  const probed = await runPool(list, LINK_CHECK_CONCURRENCY, probeLinkStatus);
-  const results = {};
-  list.forEach((u, i) => { results[u] = probed[i]; });
-  return { results };
+  // Worst case this runs for minutes: 300 URLs, 6 at a time, an 8s timeout
+  // each. The content script waits on it with a plain sendMessage and no
+  // timeout of its own, so a worker killed mid-sweep leaves the link overlay
+  // blank forever rather than surfacing an error.
+  const stopKeepAlive = keepWorkerAlive();
+  try {
+    const probed = await runPool(list, LINK_CHECK_CONCURRENCY, probeLinkStatus);
+    const results = {};
+    list.forEach((u, i) => { results[u] = probed[i]; });
+    return { results };
+  } finally {
+    stopKeepAlive();
+  }
 }
 
 // Live-check every declared icon URL (+ the legacy /favicon.ico) and parse the

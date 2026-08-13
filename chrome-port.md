@@ -55,7 +55,7 @@ Development now loads `dist/firefox/` or `dist/chrome/`, not the repo root.
 
 ### 3. Test suite ✅ — `npm test`
 
-All static; no browser is launched. 71 tests.
+All static; no browser is launched. 121 tests.
 
 | File | Catches |
 |---|---|
@@ -67,7 +67,14 @@ All static; no browser is launched. 71 tests.
 | `compat` | New Chrome-incompatible API use, against a recorded baseline |
 | `polyfill` | The polyfill failing to load first in any of Chrome's three contexts |
 | `redirect-queue` | Lost updates and stalls in the per-tab redirect queue |
+| `side-panel-command` | Alt+M losing the user gesture — asserts `sidePanel.open()` runs inline off the event, which is the one property reading the code can't confirm |
+| `branded-term` | The quick-add failing to reach the Client record, or its pattern not projecting across the client's other domains |
+| `client-prefill` | `+ Client` guessing the wrong name — pins the og → schema.org → title → domain order and the tagline reject rules |
 | `lint-firefox` | `web-ext lint` on `dist/firefox` — still 0 errors / 0 warnings / 0 notices |
+
+The last three were added after v2.0 to close out items previously listed as
+needing a human at a browser; see *Outstanding verification* below for what
+that did and didn't retire.
 
 ### 4. Compat linter and baseline ✅
 
@@ -219,11 +226,26 @@ Settings → OAuth Client.
 
 **Chrome checks not yet done:**
 
-- Alt+M (the gesture fix is unverified)
-- The Ads tab against API v25 — a four-version jump, never seen live data
-- Branded-term write-through to the Client panel, and `+ Client` prefill
-- Redirect chains surviving a worker restart: load a page, kill the service
-  worker from `chrome://extensions`, then navigate to a redirecting URL
+- **The Ads tab against API v25** — a four-version jump, never seen live data.
+  Nothing static can cover this: it needs a connected account. This is now the
+  only item on the list with no automated coverage at all.
+- **Alt+M** — the handler is now covered by `side-panel-command`, which pins
+  the actual failure mode (the call must not be deferred past an await; the
+  test fails against the pre-fix handler). That retires the code question, not
+  the platform one — only a real Chrome can confirm it accepts the gesture.
+- **Redirect chains surviving a worker restart** — `redirect-queue` covers the
+  rehydrate-and-serialize logic. A live pass is still worth doing once: load a
+  page, kill the service worker from `chrome://extensions`, then navigate to a
+  redirecting URL.
+- **Branded-term write-through and `+ Client` prefill** — covered by
+  `branded-term` and `client-prefill`. Both are ordinary popup→background
+  logic with no platform-specific behaviour, so these are considered closed.
 
-**Note:** the v2.0 tag predates the redirect-queue work and the Alt+M fix, so
-the released artifacts are behind `main`.
+Writing those tests turned up one latent defect, now fixed:
+`clientRegistryAddBrandedTerm` stripped `www.` *before* lowercasing, so an
+uppercase `WWW.` host would have been keyed where nothing else looks. Every
+caller passes a host already normalised out of `URL.hostname`, so it was never
+reachable from the UI — but it was inconsistent with `clientRegistryAddDomain`
+directly above it. Two other raw-string normalisers carry the same ordering
+(`getDomainAge`, and `norm` inside `webceoAggregateCompetitorMetrics`); both
+were left alone as out of scope, and neither is known to be reachable.

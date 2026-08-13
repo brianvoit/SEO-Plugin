@@ -5158,7 +5158,12 @@ async function clientRegistrySetBrandedTerms({ id, pattern }) {
 // Hosts with no client still work: they fall back to a bare per-host entry.
 async function clientRegistryAddBrandedTerm({ host, term }) {
   await ensureClientRegistryMigrated();
-  const domain = String(host || '').replace(/^www\./, '').toLowerCase();
+  // Lowercase BEFORE stripping www., or an uppercase "WWW." survives the
+  // strip and the entry is keyed somewhere nothing else looks. Same order as
+  // clientRegistryAddDomain above. Today's callers all hand over a host
+  // already normalised out of URL.hostname, so this is a guard on the
+  // message-router contract rather than a live fix.
+  const domain = String(host || '').toLowerCase().replace(/^www\./, '');
   const text = String(term || '').trim();
   if (!domain || !text) return { ok: false, error: 'BAD_INPUT' };
 

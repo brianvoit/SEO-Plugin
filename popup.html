@@ -453,14 +453,16 @@
       <div class="field-header">
         <span class="field-label">OAUTH CLIENT</span>
       </div>
-      <div class="field-hint">Shared by Search Console, Analytics, Ads, and Drive. Create an OAuth Client (type "Desktop app") in Google Cloud Console, enable the API for whichever services you connect, and add the redirect URI below. Credentials are stored locally and used only to talk directly to Google.</div>
+      <!-- Client type and secret copy differ per browser (Desktop app on
+           Firefox, Web application on Chrome) — set in popup-settings.js. -->
+      <div class="field-hint" id="oauth-client-hint"></div>
       <label class="wp-field">
         <span class="wp-field-label">OAuth Client ID</span>
         <input type="text" id="gsc-client-id" class="wp-input" placeholder="xxxxxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false" />
       </label>
       <label class="wp-field">
-        <span class="wp-field-label">OAuth Client Secret (optional)</span>
-        <input type="password" id="gsc-client-secret" class="wp-input" placeholder="Leave blank for Desktop app clients" autocomplete="off" spellcheck="false" />
+        <span class="wp-field-label" id="oauth-secret-label">OAuth Client Secret</span>
+        <input type="password" id="gsc-client-secret" class="wp-input" autocomplete="off" spellcheck="false" />
       </label>
       <label class="wp-field">
         <span class="wp-field-label">Redirect URI — register this in Google Cloud Console</span>

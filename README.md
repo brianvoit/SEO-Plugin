@@ -60,11 +60,37 @@ API they belong to.
 
 | Integration | What you need |
 |---|---|
-| Search Console / Analytics / Ads / Drive | Your own Google OAuth client ID + secret (Settings → Setup) |
+| Search Console / Analytics / Ads / Drive | Your own Google OAuth client ID + secret (Settings → Setup → OAuth Client) |
 | Google Ads | Additionally a Google Ads developer token |
 | Web CEO | API key + base URL (Agency Unlimited accounts) |
 | PageSpeed Insights | A free [PSI API key](https://developers.google.com/speed/docs/insights/v5/get-started) |
 | AI features | An Anthropic (Claude) API key |
+
+### The Google OAuth client is per-browser
+
+The two browsers need **different OAuth client types**, because each intercepts a
+different redirect URI. A client made for one will be rejected by the other, and the
+failure shows up only as an opaque error on Google's consent screen — so make the
+right one:
+
+| | Client type | Redirect URI to register |
+|---|---|---|
+| **Firefox** | Desktop app | `http://127.0.0.1/mozoauth2/<uuid>` |
+| **Chrome / Edge** | Web application | `https://<extension-id>.chromiumapp.org/` |
+
+Don't type the redirect URI by hand — Settings → Setup → OAuth Client shows the exact
+value for the browser you're in, with a copy button. Paste that into the client's
+**Authorized redirect URIs** in [Google Cloud Console](https://console.cloud.google.com/apis/credentials).
+
+Both clients can live in the same Cloud project. Credentials are stored in
+`browser.storage.local`, which each browser keeps separately, so the two installs don't
+interfere. The Web application client issues a secret and needs it; the Desktop app
+client works without one.
+
+Note that a Chrome extension's ID — and therefore its redirect URI — is derived from
+the folder it's loaded from, so it changes if you move `dist/chrome`, and again when the
+extension is published (the Web Store assigns its own ID). Add the new URI alongside the
+old one when that happens; a client can hold several.
 
 ## Development
 

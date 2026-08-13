@@ -166,10 +166,21 @@ browser.action.onClicked.addListener(async () => {
 // called synchronously off the event to keep the gesture, which is why the
 // window id is read first and no storage lookup happens in between.
 if (browser.commands?.onCommand) {
-  browser.commands.onCommand.addListener(async (command) => {
+  browser.commands.onCommand.addListener((command, tab) => {
     if (command !== 'toggle-side-panel' || !HAS_SIDE_PANEL) return;
-    const win = await browser.windows.getCurrent();
-    sidePanel.open({ windowId: win.id }).catch(() => {});
+    // sidePanel.open() must be called while the user gesture is still in
+    // scope, and Chrome drops that context across an await — the same reason
+    // the panel can't be opened from action.onClicked. onCommand hands us the
+    // active tab, so the window id is available without one.
+    if (tab?.windowId != null) {
+      sidePanel.open({ windowId: tab.windowId }).catch(() => {});
+      return;
+    }
+    // tab is documented as optional. Falling back to a lookup may lose the
+    // gesture and be rejected, but that beats not responding to the shortcut.
+    browser.windows.getCurrent()
+      .then(win => sidePanel.open({ windowId: win.id }))
+      .catch(() => {});
   });
 }
 

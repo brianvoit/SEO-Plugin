@@ -431,6 +431,27 @@ function setOauthDrawer(open) {
 
 function revealOauthClientSection() { setOauthDrawer(true); }
 
+// The two browsers need different Google Cloud client types, because they need
+// different redirect URIs (see getGoogleRedirectUri in background.js):
+//   Firefox — a Desktop app client, whose loopback http://127.0.0.1/mozoauth2/…
+//             URI Google accepts without a secret
+//   Chrome  — a Web application client, the only type that accepts the
+//             https://<id>.chromiumapp.org/ URI launchWebAuthFlow requires,
+//             and which does issue a secret
+// Getting this wrong is a dead end that surfaces only as an opaque Google
+// consent-screen error, so the copy has to say which one to make.
+(function applyOauthClientCopy() {
+  const type = IS_CHROMIUM ? 'Web application' : 'Desktop app';
+  const hint = document.getElementById('oauth-client-hint');
+  if (hint) {
+    hint.textContent = `Shared by Search Console, Analytics, Ads, and Drive. Create an OAuth Client (type "${type}") in Google Cloud Console, enable the API for whichever services you connect, and add the redirect URI below. Credentials are stored locally and used only to talk directly to Google.`;
+  }
+  const label = document.getElementById('oauth-secret-label');
+  const input = document.getElementById('gsc-client-secret');
+  if (label) label.textContent = IS_CHROMIUM ? 'OAuth Client Secret' : 'OAuth Client Secret (optional)';
+  if (input) input.placeholder = IS_CHROMIUM ? 'Required for Web application clients' : 'Leave blank for Desktop app clients';
+})();
+
 document.getElementById('btn-oauth-client-toggle').addEventListener('click', () => {
   const sec = document.getElementById('oauth-client-section');
   setOauthDrawer(!sec.classList.contains('oauth-open'));

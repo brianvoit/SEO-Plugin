@@ -19,6 +19,66 @@ function clientRegistryDraft() {
   return { id: null, name: '', domains: [], brandedTerms: '', driveFolderId: null, driveFolderName: null };
 }
 
+// Guesses for a brand-new client, taken from the tab the user is looking at.
+// Only ever used to PREFILL the inputs — nothing is persisted until the user
+// blurs the name or clicks + Domain, so a bad guess costs one edit.
+let _clientPrefill = null;
+
+// Strip a trailing brand segment off a page title: "Some Page | Acme Co"
+// → "Acme Co". Titles put the brand last far more often than first, and the
+// separator set here is what site templates actually emit.
+function brandFromTitle(title) {
+  const parts = String(title || '').split(/\s+[|–—·•-]\s+/);
+  if (parts.length < 2) return '';
+  const last = parts[parts.length - 1].trim();
+  // A long tail segment is usually a tagline ("Best Widgets in Ohio"), not a
+  // brand — better to fall through to the domain than to guess wrong.
+  return (last && last.length <= 40 && last.split(/\s+/).length <= 5) ? last : '';
+}
+
+// "acme-corp.co.uk" → "Acme Corp". Last-resort guess when the page carries no
+// explicit branding.
+function brandFromHost(host) {
+  const label = String(host || '').split('.')[0] || '';
+  return label
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, ch => ch.toUpperCase());
+}
+
+// Ordered best-guess: explicit site branding first, then schema.org, then the
+// title's brand segment, then the bare domain.
+function inferClientName(pageData, host) {
+  const og = (pageData && pageData.openGraph && pageData.openGraph.og) || {};
+  const explicit = (og['og:site_name'] || '').trim();
+  if (explicit) return explicit;
+
+  for (const item of (pageData && pageData.structuredData) || []) {
+    const types = [].concat(item['@type'] || []);
+    if (!types.some(t => t === 'Organization' || t === 'WebSite' || t === 'LocalBusiness')) continue;
+    const name = typeof item.name === 'string' ? item.name.trim() : '';
+    if (name) return name;
+  }
+
+  return brandFromTitle(pageData && pageData.title && pageData.title.text) || brandFromHost(host);
+}
+
+async function loadClientPrefill() {
+  _clientPrefill = null;
+  try {
+    const tab = await getActiveTab();
+    if (!tab || !tab.url) return;
+    const host = new URL(tab.url).hostname.replace(/^www\./, '').toLowerCase();
+    if (!host) return;
+    _clientPrefill = { host, name: brandFromHost(host) };
+    // Page read is best-effort — a restricted page (about:, PDF, store pages)
+    // still gets the domain-derived name above.
+    const pageData = await getPageDataFromTab(tab.id).catch(() => null);
+    if (pageData) _clientPrefill.name = inferClientName(pageData, host);
+  } catch { /* leave whatever we managed to derive */ }
+}
+
 function patchClientInList(client) {
   const i = _clients.findIndex(c => c.id === client.id);
   if (i === -1) _clients.push(client); else _clients[i] = client;
@@ -87,12 +147,18 @@ document.getElementById('btn-add-client').addEventListener('click', () => showCl
 async function openClientPanel(id) {
   document.getElementById('btn-client-delete').classList.toggle('hidden', !id);
   if (id) {
+    _clientPrefill = null;
     const res = await sendMessageWithTimeout({ action: 'clientRegistryGet', id });
     _editingClient = (res && res.client) || clientRegistryDraft();
+    renderClientPanelContent();
   } else {
     _editingClient = clientRegistryDraft();
+    // Render immediately so the panel isn't blank while the page is read,
+    // then re-render once the guesses land.
+    renderClientPanelContent();
+    await loadClientPrefill();
+    if (_clientPrefill && _editingClient && !_editingClient.id) renderClientPanelContent();
   }
-  renderClientPanelContent();
 }
 
 async function deleteCurrentClient() {
@@ -119,7 +185,11 @@ async function saveClientField(patch) {
 
 async function ensureClientPersisted() {
   if (_editingClient.id) return _editingClient.id;
-  await saveClientField({ name: _editingClient.name || 'New Client' });
+  // Keep the prefilled guess if the user went straight to + Domain without
+  // ever focusing the name field — otherwise it would save as "New Client"
+  // despite the name being visibly filled in.
+  const prefilled = _clientPrefill ? _clientPrefill.name : '';
+  await saveClientField({ name: _editingClient.name || prefilled || 'New Client' });
   return _editingClient.id;
 }
 
@@ -140,7 +210,9 @@ function renderClientPanelContent() {
   nameInput.type = 'text';
   nameInput.className = 'wp-input';
   nameInput.placeholder = 'Client name';
-  nameInput.value = client.name || '';
+  // A brand-new client starts with the guess from the active tab; an existing
+  // one always shows its stored name, even if that's blank.
+  nameInput.value = client.name || (!client.id && _clientPrefill ? _clientPrefill.name : '') || '';
   nameInput.autocomplete = 'off';
   nameInput.spellcheck = false;
   nameInput.addEventListener('blur', () => {
@@ -245,6 +317,12 @@ function renderDomainsSection(container, client) {
   input.placeholder = 'example.com';
   input.autocomplete = 'off';
   input.spellcheck = false;
+  // Prefill the active tab's host on a new client, as long as it isn't already
+  // attached. Left in the input rather than added automatically so opening
+  // + Client never silently binds a domain the user didn't intend.
+  if (!client.id && _clientPrefill && !(client.domains || []).some(d => d.domain === _clientPrefill.host)) {
+    input.value = _clientPrefill.host;
+  }
   const addBtn = document.createElement('button');
   addBtn.className = 'save-key-btn';
   addBtn.textContent = '+ Domain';

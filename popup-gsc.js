@@ -779,8 +779,11 @@ function gscEscapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// Append a query term to the current domain's branded-terms regex
-function addQueryToBranded(query) {
+// Append a query term to the current domain's branded-terms regex.
+// The append runs in the background so it lands on the owning Client's record
+// (and every domain that client owns), not just this host's map entry — see
+// clientRegistryAddBrandedTerm.
+async function addQueryToBranded(query) {
   let host = '';
   try { host = new URL(_gscPageUrl).hostname.replace(/^www\./, '').toLowerCase(); } catch { return; }
   if (!host) return;
@@ -791,15 +794,20 @@ function addQueryToBranded(query) {
   const existing = allBrandedTerms[host] || '';
   if (existing && isQueryBranded(term, existing)) return;   // already covered
 
-  allBrandedTerms[host] = existing ? `${existing}|${gscEscapeRegex(term)}` : gscEscapeRegex(term);
-  saveBrandedTerms().then(() => {
-    renderGscQueries(_gscQueries, _gscPageUrl);
-    if (typeof renderBrandDomains === 'function') renderBrandDomains();
-    // Newly branded query drops out of the table — backfill to keep ~25 visible,
-    // and (if hiding branded) take it out of the chart too.
-    topUpGscQueries(25);
-    refreshGscChartForBranded();
-  });
+  const res = await sendMessageWithTimeout({ action: 'clientRegistryAddBrandedTerm', host, term });
+  if (!res || !res.ok) return;
+
+  // Mirror the authoritative pattern back into the in-memory map. A client
+  // spanning several domains updates all of them, so re-read rather than
+  // assuming only `host` changed.
+  await loadBrandedTermsStore();
+
+  renderGscQueries(_gscQueries, _gscPageUrl);
+  if (typeof renderBrandDomains === 'function') renderBrandDomains();
+  // Newly branded query drops out of the table — backfill to keep ~25 visible,
+  // and (if hiding branded) take it out of the chart too.
+  topUpGscQueries(25);
+  refreshGscChartForBranded();
 }
 
 // Branded regex for the current page's domain

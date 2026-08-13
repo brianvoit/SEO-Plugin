@@ -2598,9 +2598,14 @@ async function clearFaviconCache({ tabId, urls }) {
 // API Center, approved by Google for production data), and — for MCC setups —
 // the manager account's login-customer-id. Customer IDs are 10 digits, no dashes.
 
-// Bump as Google sunsets versions (~1yr each). A 404 on every call usually
-// means this version is no longer served.
-const GA_ADS_API = 'https://googleads.googleapis.com/v21';
+// Bump as Google sunsets versions. Google moved to monthly releases in Jan
+// 2026, so a version now lasts roughly six months rather than a year — and
+// there's no grace period: on the sunset date every call starts failing with
+// "UNSUPPORTED_VERSION: Version vNN is deprecated. Requests to this version
+// will be blocked." Seeing that on every Ads call means bump this to the
+// newest generally available version (not the next one up, which just repeats
+// the exercise a few months later).
+const GA_ADS_API = 'https://googleads.googleapis.com/v25';
 const ADS_ACCOUNTS_STALE_MS = 7 * 24 * 60 * 60 * 1000;
 const ADS_STALE_MS = 6 * 60 * 60 * 1000;
 const ADS_DEBOUNCE_MS = 60 * 1000;
@@ -5050,6 +5055,45 @@ async function clientRegistrySetBrandedTerms({ id, pattern }) {
   return { ok: true, client };
 }
 
+// Quick-add from the Search and Ads tables ("+" next to a query). Those used
+// to write the per-host brandedTerms map directly from the popup, which left
+// the owning client's record stale until the Client panel happened to be saved
+// again. Routing the append through here keeps the two in step: the term lands
+// on the CLIENT's pattern, and that pattern is projected back across every
+// domain the client owns — so branding a term on one domain now applies to all
+// of them, matching how the Client panel already behaves.
+//
+// Hosts with no client still work: they fall back to a bare per-host entry.
+async function clientRegistryAddBrandedTerm({ host, term }) {
+  await ensureClientRegistryMigrated();
+  const domain = String(host || '').replace(/^www\./, '').toLowerCase();
+  const text = String(term || '').trim();
+  if (!domain || !text) return { ok: false, error: 'BAD_INPUT' };
+
+  const map = await bgLoadBrandedTerms();
+  const { clients } = await clientRegistryListRaw();
+  const client = clients.find(c => (c.domains || []).some(d => d.domain === domain)) || null;
+
+  // The client's pattern is authoritative when one owns this domain.
+  const current = client ? (client.brandedTerms || '') : (map[domain] || '');
+  let covered = false;
+  try { covered = !!current && new RegExp(current, 'i').test(text); } catch { covered = false; }
+  if (covered) return { ok: true, pattern: current, client };
+
+  const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = current ? `${current}|${escaped}` : escaped;
+
+  if (client) {
+    client.brandedTerms = pattern;
+    await clientRegistrySaveRaw(client);
+    for (const d of client.domains || []) if (d.domain) map[d.domain] = pattern;
+  } else {
+    map[domain] = pattern;
+  }
+  await bgSaveBrandedTerms(map);
+  return { ok: true, pattern, client };
+}
+
 // Image SEO prompt guidance for the WP Media Library generators — same
 // client-level shape and projection as branded terms above, but unlike
 // brandedTerms this map has only ever lived in storage.local (content.js
@@ -5252,6 +5296,7 @@ function routeMessage(message) {
     case 'clientRegistryAddDomain':      return clientRegistryAddDomain(message);
     case 'clientRegistryRemoveDomain':   return clientRegistryRemoveDomain(message);
     case 'clientRegistrySetBrandedTerms': return clientRegistrySetBrandedTerms(message);
+    case 'clientRegistryAddBrandedTerm':  return clientRegistryAddBrandedTerm(message);
     case 'clientRegistrySetImageSeo': return clientRegistrySetImageSeo(message);
     case 'driveConnectBrowse':   return driveConnectBrowse();
     case 'driveListFolders':     return driveListFolders(message);

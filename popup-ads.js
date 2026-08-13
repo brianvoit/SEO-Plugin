@@ -618,15 +618,17 @@ function buildAdsMetricTable(container, rows, { withQs = false, intentFilter = n
       circlePlus.appendChild(svgEl('line', { x1: '8', y1: '5.2', x2: '8', y2: '10.8' }));
       circlePlus.appendChild(svgEl('line', { x1: '5.2', y1: '8', x2: '10.8', y2: '8' }));
       addBtn.appendChild(circlePlus);
-      addBtn.addEventListener('click', e => {
+      addBtn.addEventListener('click', async e => {
         e.stopPropagation();
         if (!_adsHost || !r.text) return;
         const termText = r.text.trim();
         const existing = allBrandedTerms[_adsHost] || '';
         if (typeof isQueryBranded === 'function' && isQueryBranded(termText, existing)) return;
-        const escaped = termText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        allBrandedTerms[_adsHost] = existing ? `${existing}|${escaped}` : escaped;
-        saveBrandedTerms();
+        // Appended in the background so it lands on the owning Client's
+        // branded-terms regex, not just this host's map entry.
+        const res = await sendMessageWithTimeout({ action: 'clientRegistryAddBrandedTerm', host: _adsHost, term: termText });
+        if (!res || !res.ok) return;
+        await loadBrandedTermsStore();
         renderAdsAll();
       });
       term.appendChild(addBtn);

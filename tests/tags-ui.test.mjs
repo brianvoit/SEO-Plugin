@@ -37,9 +37,10 @@ function boot({ tags = null, rescan = null } = {}) {
   })();
 
   const sent = [];
+  const copied = [];
   w.TOP_FRAME = { frameId: 0 };
   w.getActiveTab = () => Promise.resolve({ id: 1, url: 'https://site.test/' });
-  w.copyToClipboard = () => {};
+  w.copyToClipboard = (text) => { copied.push(text); };
   w.showTagsPanel = () => {};
   w.browser = {
     tabs: {
@@ -52,7 +53,7 @@ function boot({ tags = null, rescan = null } = {}) {
 
   w.eval(`${src}\n;window.__t = { renderTagsEntry, renderTagsPanel, rescanTags, openTagsPanel };`);
   if (tags !== undefined) w.__t.renderTagsEntry({ marketingTags: tags });
-  return { w, d: w.document, sent, api: w.__t };
+  return { w, d: w.document, sent, copied, api: w.__t };
 }
 
 const chips = (b) => [...b.d.querySelectorAll('#tags-chips .tag-chip')];
@@ -220,5 +221,109 @@ describe('re-scanning', () => {
     const b = boot({ tags: { scannedAt: 1, flags: [], vendors: [v('ga4', 'GA4', 'analytics')] } });
     await b.api.rescanTags();   // harness rejects the sendMessage
     assert.equal(chips(b).length, 1, 'a failed re-scan wiped out what was already known');
+  });
+});
+
+describe('copying a tag ID', () => {
+  test('clicking the ID copies it to the clipboard', () => {
+    const b = boot({ tags: { scannedAt: 1, flags: [], vendors: [v('ga4', 'Google Analytics 4', 'analytics', { ids: ['G-ABC123'] })] } });
+    b.api.renderTagsPanel();
+    const idChip = b.d.querySelector('.tag-row-id');
+    idChip.dispatchEvent(new b.w.Event('click', { bubbles: true }));
+    assert.deepEqual(b.copied, ['G-ABC123']);
+  });
+
+  test('confirms the copy visually, then reverts', async () => {
+    // The copy itself was already silent-but-working; nothing told the user
+    // it happened, so the click looked like it did nothing.
+    const b = boot({ tags: { scannedAt: 1, flags: [], vendors: [v('ga4', 'Google Analytics 4', 'analytics', { ids: ['G-ABC123'] })] } });
+    b.api.renderTagsPanel();
+    const idChip = b.d.querySelector('.tag-row-id');
+    idChip.dispatchEvent(new b.w.Event('click', { bubbles: true }));
+
+    assert.equal(idChip.textContent, 'Copied');
+    assert.ok(idChip.classList.contains('tag-row-id--copied'));
+
+    await new Promise(r => setTimeout(r, 950));
+    assert.equal(idChip.textContent, 'G-ABC123');
+    assert.ok(!idChip.classList.contains('tag-row-id--copied'));
+  });
+
+  test('multiple IDs on one vendor each copy their own value', () => {
+    const b = boot({ tags: { scannedAt: 1, flags: [], vendors: [v('ga4', 'GA4', 'analytics', { ids: ['G-AAAAAA', 'G-BBBBBB'] })] } });
+    b.api.renderTagsPanel();
+    const idChips = [...b.d.querySelectorAll('.tag-row-id')];
+    assert.equal(idChips.length, 2);
+    idChips[1].dispatchEvent(new b.w.Event('click', { bubbles: true }));
+    assert.deepEqual(b.copied, ['G-BBBBBB']);
+  });
+});
+
+describe('recent events', () => {
+  const evt = (vendorId, label, name, at) => ({ vendorId, label, name, at });
+
+  test('a RECENT EVENTS section appears when events were captured', () => {
+    const b = boot({ tags: {
+      scannedAt: 2400, flags: [],
+      vendors: [v('ga4', 'Google Analytics 4', 'analytics')],
+      events: [evt('ga4', 'Google Analytics 4', 'page_view', 1200)]
+    } });
+    b.api.renderTagsPanel();
+    const labels = [...b.d.querySelectorAll('#tags-content .field-label')].map(el => el.textContent);
+    assert.ok(labels.includes('RECENT EVENTS'));
+  });
+
+  test('no section at all when nothing fired', () => {
+    const b = boot({ tags: { scannedAt: 1, flags: [], vendors: [v('ga4', 'GA4', 'analytics')], events: [] } });
+    b.api.renderTagsPanel();
+    const labels = [...b.d.querySelectorAll('#tags-content .field-label')].map(el => el.textContent);
+    assert.ok(!labels.includes('RECENT EVENTS'));
+  });
+
+  test('each row shows the event name, the vendor, and time since page load', () => {
+    const b = boot({ tags: {
+      scannedAt: 2400, flags: [],
+      vendors: [v('ga4', 'Google Analytics 4', 'analytics')],
+      events: [evt('ga4', 'Google Analytics 4', 'page_view', 1234)]
+    } });
+    b.api.renderTagsPanel();
+    const row = b.d.querySelector('.tag-event-row');
+    assert.equal(row.querySelector('.tag-event-name').textContent, 'page_view');
+    assert.equal(row.querySelector('.tag-event-vendor').textContent, 'Google Analytics 4');
+    assert.equal(row.querySelector('.tag-event-at').textContent, '1.2s');
+  });
+
+  test('renders events in the order the data already provides (trusts content.js\'s sort)', () => {
+    const b = boot({ tags: {
+      scannedAt: 1, flags: [],
+      vendors: [v('ga4', 'GA4', 'analytics')],
+      events: [evt('ga4', 'GA4', 'second', 300), evt('ga4', 'GA4', 'first', 100)]
+    } });
+    b.api.renderTagsPanel();
+    const names = [...b.d.querySelectorAll('.tag-event-name')].map(el => el.textContent);
+    assert.deepEqual(names, ['second', 'first']);
+  });
+
+  test('an event from a vendor currently flagged with a warning is visually marked', () => {
+    const b = boot({ tags: {
+      scannedAt: 1,
+      vendors: [v('ga4', 'GA4', 'analytics', { ids: ['G-ABC123'] })],
+      flags: [{ level: 'warning', vendorId: 'ga4', code: 'DUPLICATE_ID', text: 'twice' }],
+      events: [evt('ga4', 'GA4', 'page_view', 100)]
+    } });
+    b.api.renderTagsPanel();
+    assert.ok(b.d.querySelector('.tag-event-row').classList.contains('tag-event-row--warn'));
+  });
+
+  test('the section appears before the categorized vendor listing, after the flags', () => {
+    const b = boot({ tags: {
+      scannedAt: 1,
+      vendors: [v('ga4', 'GA4', 'analytics')],
+      flags: [{ level: 'info', vendorId: null, code: 'MULTIPLE_ANALYTICS', text: 'note' }],
+      events: [evt('ga4', 'GA4', 'page_view', 100)]
+    } });
+    b.api.renderTagsPanel();
+    const labels = [...b.d.querySelectorAll('#tags-content .field-label')].map(el => el.textContent);
+    assert.deepEqual(labels.slice(0, 3), ['WHAT TO LOOK AT', 'RECENT EVENTS', 'ANALYTICS']);
   });
 });

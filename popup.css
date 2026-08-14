@@ -1594,6 +1594,19 @@ body.settings-open #update-footer { margin-top: auto; }
 /* Long property lists (GA accounts can have dozens) scroll instead of growing */
 .gsc-property-all--scroll { max-height: 190px; overflow-y: auto; }
 
+/* A confident match from a tag already detected on the current page — pinned
+   above the (hidden-until-typed) search list so the answer doesn't require
+   the user to type the exact name of something already known. */
+.gsc-property-suggested { margin-bottom: 8px; }
+.gsc-property-suggested-badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 3px;
+}
+
 /* Linked property/account row: the option fills, the trash sits far right */
 .gsc-property-row { display: flex; align-items: center; gap: 6px; }
 .gsc-property-row .gsc-property-option { flex: 1; min-width: 0; }
@@ -3627,6 +3640,7 @@ body.settings-open #update-footer { margin-top: auto; }
   cursor: pointer;
 }
 .tag-row-id:hover { color: var(--accent); border-color: var(--accent); }
+.tag-row-id--copied { color: var(--hint-green); border-color: var(--hint-green); }
 
 .tag-row-meta {
   font-size: 11px;
@@ -3648,6 +3662,51 @@ body.settings-open #update-footer { margin-top: auto; }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tag-events-hint { margin-bottom: 6px; }
+
+.tag-events-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.tag-event-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 11.5px;
+}
+.tag-event-row:last-child { border-bottom: none; }
+.tag-event-row--warn { border-left: 2px solid var(--hint-amber); padding-left: 6px; }
+
+.tag-event-name {
+  color: var(--text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-event-vendor {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-event-at {
+  flex-shrink: 0;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10.5px;
+  color: var(--text-none);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Utility */

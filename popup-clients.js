@@ -532,7 +532,45 @@ async function onDriveFolderPicked(folder) {
 // A generic version of the four tabs' renderXPropertyOptions (which are all
 // hardcoded to "the current tab's host") — the Client panel needs to pick a
 // binding for an arbitrary domain, not necessarily the one being viewed.
-function renderClientBindingOptions(container, items, selected, { idKey, labelKey, sublabelKey }, onSelect) {
+
+function buildBindingOption(item, idKey, labelKey, sublabelKey, isActive, onSelect) {
+  const id = item[idKey];
+  const label = item[labelKey] || id;
+  const sub = sublabelKey ? item[sublabelKey] : null;
+  const opt = document.createElement('button');
+  opt.className = 'gsc-property-option' + (isActive ? ' gsc-property-option--active' : '');
+  opt.dataset.search = `${label} ${sub || ''} ${id}`.toLowerCase();
+
+  const radio = document.createElement('span');
+  radio.className = 'gsc-property-radio';
+  const text = document.createElement('span');
+  text.className = 'gsc-property-option-text';
+  text.textContent = label;
+  opt.append(radio, text);
+
+  if (sub) {
+    const idEl = document.createElement('span');
+    idEl.className = 'gsc-property-id';
+    idEl.textContent = sub;
+    opt.appendChild(idEl);
+  }
+
+  opt.addEventListener('click', () => onSelect(id));
+  return opt;
+}
+
+// A client can carry hundreds of properties/accounts once an account has
+// enough history — showing them all at once (the original behavior: every
+// row rendered, none hidden) was exactly the "messy wall of rows" this fixes.
+// Now nothing is shown until there's a query, and matches are capped so a
+// broad query can't reproduce the same wall.
+const CLIENT_BINDING_RESULTS_CAP = 30;
+
+// `suggested`, when given, is a confident match this page's own detected tag
+// already points to (see clientBindingFetch's measurementId pass-through for
+// GA4) — pinned above the search box regardless of what's typed, since making
+// the user type the exact name of something already known defeats the point.
+function renderClientBindingOptions(container, items, selected, { idKey, labelKey, sublabelKey, suggested }, onSelect) {
   container.replaceChildren();
   if (!items.length) {
     const hint = document.createElement('div');
@@ -542,46 +580,70 @@ function renderClientBindingOptions(container, items, selected, { idKey, labelKe
     return;
   }
 
+  if (suggested) {
+    const sugItem = items.find(i => i[idKey] === suggested.id);
+    if (sugItem) {
+      const row = document.createElement('div');
+      row.className = 'gsc-property-suggested';
+      const badge = document.createElement('div');
+      badge.className = 'gsc-property-suggested-badge';
+      badge.textContent = suggested.reason;
+      row.appendChild(badge);
+      row.appendChild(buildBindingOption(sugItem, idKey, labelKey, sublabelKey, sugItem[idKey] === selected, onSelect));
+      container.appendChild(row);
+    }
+  }
+
+  // Matches the in-tab pickers' own structure (.gsc-property-all, scrollable)
+  // rather than appending straight into .gsc-property-box — that box has no
+  // gap between children, so without this wrapper a capped list of up to 30
+  // rows would stack edge-to-edge with no spacing between them.
+  const list = document.createElement('div');
+  list.className = 'gsc-property-all gsc-property-all--scroll';
+  container.appendChild(list);
+
   const search = document.createElement('input');
   search.type = 'text';
   search.className = 'ga-property-search';
-  search.placeholder = 'Search…';
+  search.placeholder = `Search ${items.length} ${items.length === 1 ? 'option' : 'options'}…`;
   search.autocomplete = 'off';
   search.spellcheck = false;
-  container.appendChild(search);
+  list.appendChild(search);
 
-  items.forEach(item => {
-    const id = item[idKey];
-    const label = item[labelKey] || id;
-    const sub = sublabelKey ? item[sublabelKey] : null;
-    const opt = document.createElement('button');
-    opt.className = 'gsc-property-option' + (id === selected ? ' gsc-property-option--active' : '');
-    opt.dataset.search = `${label} ${sub || ''} ${id}`.toLowerCase();
+  const hint = document.createElement('div');
+  hint.className = 'field-hint hint-muted';
+  hint.textContent = 'Start typing to search…';
+  list.appendChild(hint);
 
-    const radio = document.createElement('span');
-    radio.className = 'gsc-property-radio';
-    const text = document.createElement('span');
-    text.className = 'gsc-property-option-text';
-    text.textContent = label;
-    opt.append(radio, text);
+  const more = document.createElement('div');
+  more.className = 'field-hint hint-muted hidden';
+  list.appendChild(more);
 
-    if (sub) {
-      const idEl = document.createElement('span');
-      idEl.className = 'gsc-property-id';
-      idEl.textContent = sub;
-      opt.appendChild(idEl);
-    }
+  const options = items.map(item => buildBindingOption(item, idKey, labelKey, sublabelKey, item[idKey] === selected, onSelect));
+  options.forEach(opt => list.appendChild(opt));
 
-    opt.addEventListener('click', () => onSelect(id));
-    container.appendChild(opt);
-  });
-
-  search.addEventListener('input', () => {
+  function applyFilter() {
     const q = search.value.trim().toLowerCase();
-    container.querySelectorAll('.gsc-property-option').forEach(el => {
-      el.classList.toggle('hidden', q && !el.dataset.search.includes(q));
+    hint.classList.toggle('hidden', !!q);
+    if (!q) {
+      options.forEach(opt => opt.classList.add('hidden'));
+      more.classList.add('hidden');
+      return;
+    }
+    let shown = 0, matched = 0;
+    options.forEach(opt => {
+      const isMatch = opt.dataset.search.includes(q);
+      if (isMatch) matched++;
+      const show = isMatch && shown < CLIENT_BINDING_RESULTS_CAP;
+      opt.classList.toggle('hidden', !show);
+      if (show) shown++;
     });
-  });
+    const overflow = matched - shown;
+    more.textContent = overflow > 0 ? `+${overflow} more — keep typing to narrow it down` : '';
+    more.classList.toggle('hidden', overflow <= 0);
+  }
+  search.addEventListener('input', applyFilter);
+  applyFilter();   // establishes the hidden-until-typed initial state
 }
 
 const CLIENT_BINDING_KINDS = {
@@ -590,6 +652,20 @@ const CLIENT_BINDING_KINDS = {
   ads:    { label: 'Google Ads',     action: 'adsSetAccount',     paramKey: 'account' },
   webceo: { label: 'Web CEO',        action: 'webceoSetProject',  paramKey: 'project' }
 };
+
+// The GA4 measurement ID Tags & Pixels already found on the CURRENT tab, if
+// any — prefer that broader detector (it also catches gtag loaded via GTM,
+// which the older narrow gaMeasurementIds field misses), falling back to the
+// original field for safety. Only meaningful for whichever domain matches the
+// tab actually being inspected; a client's other domains have no live page to
+// have detected anything from.
+function detectedGaMeasurementId() {
+  if (typeof pageData === 'undefined' || !pageData) return null;
+  const vendors = pageData.marketingTags && pageData.marketingTags.vendors;
+  const ga4 = Array.isArray(vendors) && vendors.find(v => v.id === 'ga4');
+  if (ga4 && ga4.ids && ga4.ids[0]) return ga4.ids[0];
+  return (pageData.gaMeasurementIds && pageData.gaMeasurementIds[0]) || null;
+}
 
 async function clientBindingFetch(domain, kind) {
   const pageUrl = `https://${domain}/`;
@@ -605,11 +681,15 @@ async function clientBindingFetch(domain, kind) {
     };
   }
   if (kind === 'ga') {
-    const r = await sendMessageWithTimeout({ action: 'gaResolveProperty', pageUrl });
+    const measurementId = domain === _currentClientHost ? detectedGaMeasurementId() : null;
+    const r = await sendMessageWithTimeout({ action: 'gaResolveProperty', pageUrl, measurementId });
     return {
       connected: r.connected, error: r.error, detail: r.detail,
       items: (r.properties || []).map(p => ({ id: p.property, label: p.displayName, sub: p.account })),
-      selected: r.property || null
+      selected: r.property || null,
+      suggested: r.detectedProperty
+        ? { id: r.detectedProperty, reason: measurementId ? `${measurementId} detected on this page` : 'Detected on this page' }
+        : null
     };
   }
   if (kind === 'ads') {
@@ -676,7 +756,7 @@ async function fillClientBindingBox(box, domain, kind) {
     return;
   }
 
-  renderClientBindingOptions(box, res.items, res.selected, { idKey: 'id', labelKey: 'label', sublabelKey: 'sub' }, async (id) => {
+  renderClientBindingOptions(box, res.items, res.selected, { idKey: 'id', labelKey: 'label', sublabelKey: 'sub', suggested: res.suggested }, async (id) => {
     await sendMessageWithTimeout({ action: cfg.action, host: domain, [cfg.paramKey]: id });
     rerender();
   });

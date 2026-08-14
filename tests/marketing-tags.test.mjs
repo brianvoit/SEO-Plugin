@@ -36,8 +36,13 @@ const source = src.slice(from, to);
 function scan(html, resources = []) {
   const dom = new JSDOM(`<!doctype html><html><body>${html}</body></html>`, { url: 'https://site.test/' });
   const { window } = dom;
+  // A plain string keeps the older load/duplicate tests terse (order/timing
+  // doesn't matter to them); an {name, startTime} object lets the event tests
+  // below control ordering explicitly.
   window.performance.getEntriesByType = (type) =>
-    type === 'resource' ? resources.map(name => ({ name })) : [];
+    type === 'resource'
+      ? resources.map((r, i) => typeof r === 'string' ? { name: r, startTime: (i + 1) * 100 } : { startTime: (i + 1) * 100, ...r })
+      : [];
 
   const { detectMarketingTags, TAG_VENDORS } = new Function(
     'document', 'performance',
@@ -322,5 +327,105 @@ describe('the rule table itself', () => {
       if (hit.length > 1) overlaps.push(`${id} → ${hit.join(', ')}`);
     }
     assert.deepEqual(overlaps, []);
+  });
+});
+
+describe('fired events — what a tag actually SENT, not just what loaded', () => {
+  const ev = (res, i = 0) => res.events[i];
+
+  test('GA4: event name comes from the en= param on the /g/collect hit', () => {
+    const res = scan('', ['https://www.google-analytics.com/g/collect?v=2&tid=G-ABC123&en=page_view']);
+    assert.equal(res.events.length, 1);
+    assert.equal(ev(res).vendorId, 'ga4');
+    assert.equal(ev(res).name, 'page_view');
+  });
+
+  test('GA4: the gtag.js library load itself is not an event', () => {
+    const res = scan('', ['https://www.googletagmanager.com/gtag/js?id=G-ABC123']);
+    assert.deepEqual(res.events, []);
+  });
+
+  test('GA4: a regional collect subdomain still counts', () => {
+    const res = scan('', ['https://region1.google-analytics.com/g/collect?en=purchase']);
+    assert.equal(ev(res).name, 'purchase');
+  });
+
+  test('Universal Analytics: t=event uses the event action (ea), not the literal word "event"', () => {
+    const res = scan('', ['https://www.google-analytics.com/collect?v=1&t=event&ec=video&ea=play&el=intro']);
+    assert.equal(ev(res).name, 'play');
+  });
+
+  test('Universal Analytics: t=pageview uses the hit type itself', () => {
+    const res = scan('', ['https://www.google-analytics.com/collect?v=1&t=pageview']);
+    assert.equal(ev(res).name, 'pageview');
+  });
+
+  test('Meta Pixel: event name comes from ev=, and the library load is not itself an event', () => {
+    const res = scan('', [
+      'https://connect.facebook.net/en_US/fbevents.js',
+      'https://www.facebook.com/tr?id=123&ev=Purchase&noscript=1'
+    ]);
+    assert.equal(res.events.length, 1, 'the library load was counted as an event');
+    assert.equal(ev(res).name, 'Purchase');
+  });
+
+  test('TikTok: event name comes from the track endpoint, not the pixel library', () => {
+    const res = scan('', [
+      'https://analytics.tiktok.com/i18n/pixel/events.js?sdkid=ABC',
+      'https://analytics.tiktok.com/api/v2/pixel/track?event=CompletePayment'
+    ]);
+    assert.equal(res.events.length, 1);
+    assert.equal(ev(res).name, 'CompletePayment');
+  });
+
+  test('Pinterest: event name comes from event=', () => {
+    const res = scan('', ['https://ct.pinterest.com/v3/?event=checkout&ad_account_id=123']);
+    assert.equal(ev(res).name, 'checkout');
+  });
+
+  test('Bing UET: a custom event carries evt=', () => {
+    const res = scan('', ['https://bat.bing.com/action/0?ti=12345678&evt=custom&ec=signup']);
+    assert.equal(ev(res).name, 'custom');
+  });
+
+  test('Bing UET: a plain page-view hit has no evt= at all, and still gets a sensible label', () => {
+    const res = scan('', ['https://bat.bing.com/action/0?ti=12345678']);
+    assert.equal(ev(res).name, 'page view');
+  });
+
+  test('Adobe: pageName gives a readable label', () => {
+    const res = scan('', ['https://metrics.site.test/b/ss/acmeprod/1/JS-2.22.0/s?pageName=Homepage']);
+    assert.equal(ev(res).name, 'Homepage');
+  });
+
+  test('Adobe: a beacon with no pageName still counts, with a generic label', () => {
+    const res = scan('', ['https://metrics.site.test/b/ss/acmeprod/1/JS-2.22.0/s?events=event1']);
+    assert.equal(ev(res).name, 'beacon');
+  });
+
+  test('a vendor with no hit matcher (e.g. Hotjar) never produces an event', () => {
+    const res = scan('', ['https://static.hotjar.com/c/hotjar-2345678.js']);
+    assert.deepEqual(res.events, []);
+  });
+
+  test('events sort newest first', () => {
+    const res = scan('', [
+      { name: 'https://www.google-analytics.com/g/collect?en=first', startTime: 100 },
+      { name: 'https://www.google-analytics.com/g/collect?en=second', startTime: 300 },
+      { name: 'https://www.google-analytics.com/g/collect?en=third', startTime: 200 }
+    ]);
+    assert.deepEqual(res.events.map(e => e.name), ['second', 'third', 'first']);
+  });
+
+  test('events are capped even when many fired', () => {
+    const many = Array.from({ length: 40 }, (_, i) => `https://www.google-analytics.com/g/collect?en=e${i}`);
+    const res = scan('', many);
+    assert.ok(res.events.length <= 30, `expected the 30-event cap, got ${res.events.length}`);
+  });
+
+  test('the same URL query values are percent-decoded and length-capped', () => {
+    const long = 'x'.repeat(200);
+    const res = scan('', [`https://www.google-analytics.com/g/collect?en=${encodeURIComponent('some event ' + long)}`]);
+    assert.ok(ev(res).name.length <= 60, 'event name was not capped');
   });
 });

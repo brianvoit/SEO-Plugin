@@ -141,6 +141,9 @@ function renderTagsPanel() {
 
   if (flags.length) root.appendChild(tagsFlagsSection(flags));
 
+  const events = (_tagsData && _tagsData.events) || [];
+  if (events.length) root.appendChild(tagsEventsSection(events));
+
   TAG_CATEGORIES.forEach(([cat, label]) => {
     const inCat = vendors.filter(v => v.cat === cat);
     if (!inCat.length) return;
@@ -188,6 +191,56 @@ function tagsFlagsSection(flags) {
   return section;
 }
 
+// Seconds since the page started loading, on the same performance.now() basis
+// as scannedAt — so an event's time and the scan-note footer always agree,
+// with no wall-clock/timezone math needed on either side.
+function fmtTagTime(ms) {
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function tagsEventsSection(events) {
+  const section = document.createElement('section');
+  section.className = 'field-section';
+
+  const header = document.createElement('div');
+  header.className = 'field-label';
+  header.textContent = 'RECENT EVENTS';
+  section.appendChild(header);
+
+  const hint = document.createElement('div');
+  hint.className = 'field-hint hint-muted tag-events-hint';
+  hint.textContent = 'What these tags have actually sent, most recent first — not just what loaded.';
+  section.appendChild(hint);
+
+  const list = document.createElement('div');
+  list.className = 'tag-events-list';
+  events.forEach(ev => {
+    const row = document.createElement('div');
+    row.className = 'tag-event-row' + (tagsWarned(ev.vendorId) ? ' tag-event-row--warn' : '');
+
+    const name = document.createElement('span');
+    name.className = 'tag-event-name';
+    name.textContent = ev.name;
+    row.appendChild(name);
+
+    const vendor = document.createElement('span');
+    vendor.className = 'tag-event-vendor';
+    vendor.textContent = ev.label;
+    row.appendChild(vendor);
+
+    const at = document.createElement('span');
+    at.className = 'tag-event-at';
+    at.textContent = fmtTagTime(ev.at);
+    at.title = 'Time since the page started loading';
+    row.appendChild(at);
+
+    list.appendChild(row);
+  });
+  section.appendChild(list);
+
+  return section;
+}
+
 function tagVendorRow(v) {
   const row = document.createElement('div');
   row.className = 'tag-row' + (tagsWarned(v.id) ? ' tag-row--warn' : '');
@@ -205,7 +258,21 @@ function tagVendorRow(v) {
     chip.className = 'tag-row-id';
     chip.textContent = id;
     chip.title = 'Click to copy';
-    chip.addEventListener('click', () => copyToClipboard(id));
+    chip.addEventListener('click', () => {
+      copyToClipboard(id);
+      // The copy itself was already silent-but-working — nothing confirmed
+      // it happened, so a click here looked like it did nothing.
+      if (chip.dataset.flashing) return;
+      chip.dataset.flashing = '1';
+      const original = id;
+      chip.textContent = 'Copied';
+      chip.classList.add('tag-row-id--copied');
+      setTimeout(() => {
+        chip.textContent = original;
+        chip.classList.remove('tag-row-id--copied');
+        delete chip.dataset.flashing;
+      }, 900);
+    });
     head.appendChild(chip);
   });
 

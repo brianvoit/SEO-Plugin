@@ -253,13 +253,20 @@ function getGaMeasurementIds() {
 const TAG_VENDORS = [
   // ── Analytics ──
   { id: 'ga4', label: 'Google Analytics 4', cat: 'analytics',
-    url: /googletagmanager\.com\/gtag\/js/i, idFrom: [/[?&]id=(G-[A-Z0-9]+)/i], inline: /\b(G-[A-Z0-9]{6,})\b/ },
+    url: /googletagmanager\.com\/gtag\/js/i, idFrom: [/[?&]id=(G-[A-Z0-9]+)/i], inline: /\b(G-[A-Z0-9]{6,})\b/,
+    // /g/collect is the actual measurement hit (page_view, custom events, …),
+    // sent to the bare domain or a regional subdomain (region1.google-analytics.com).
+    hit: { url: /google-analytics\.com\/g\/collect/i, event: /[?&]en=([^&]+)/i } },
   { id: 'ua', label: 'Universal Analytics', cat: 'analytics',
-    url: /google-analytics\.com\/(analytics|ga)\.js/i, inline: /\b(UA-\d{4,}-\d+)\b/ },
+    url: /google-analytics\.com\/(analytics|ga)\.js/i, inline: /\b(UA-\d{4,}-\d+)\b/,
+    hit: { url: /google-analytics\.com\/(r\/)?collect/i, event: uaHitEventName } },
   { id: 'adobe-analytics', label: 'Adobe Analytics', cat: 'analytics', beacon: true,
     // AppMeasurement is the library; /b/ss/<rsid>/ is the tracking beacon,
-    // which only ever shows up in resource timing.
-    url: /(AppMeasurement\.js|\/b\/ss\/)/i, idFrom: [/\/b\/ss\/([^/]+)\//i] },
+    // which only ever shows up in resource timing. Every beacon fetch IS a
+    // hit, so the event matcher reuses the same URL — pageName just gives it
+    // a readable label when the page sent one.
+    url: /(AppMeasurement\.js|\/b\/ss\/)/i, idFrom: [/\/b\/ss\/([^/]+)\//i],
+    hit: { url: /\/b\/ss\//i, event: /[?&]pageName=([^&]+)/i }, hitDefault: 'beacon' },
   { id: 'matomo', label: 'Matomo', cat: 'analytics', url: /(matomo|piwik)\.(js|php)/i },
   { id: 'plausible', label: 'Plausible', cat: 'analytics', url: /plausible\.io\/js\//i },
   { id: 'fathom', label: 'Fathom', cat: 'analytics', url: /(cdn\.usefathom\.com|usefathom\.com\/script\.js)/i },
@@ -301,24 +308,97 @@ const TAG_VENDORS = [
   { id: 'floodlight', label: 'Floodlight', cat: 'pixel', beacon: true, url: /fls\.doubleclick\.net|ad\.doubleclick\.net\/activity/i },
   { id: 'meta-pixel', label: 'Meta Pixel', cat: 'pixel', beacon: true,
     url: /connect\.facebook\.net\/.*\/fbevents\.js|facebook\.com\/tr/i,
-    idFrom: [/[?&]id=(\d+)/i], inline: /fbq\s*\(\s*['"]init['"]\s*,\s*['"](\d+)['"]/ },
+    idFrom: [/[?&]id=(\d+)/i], inline: /fbq\s*\(\s*['"]init['"]\s*,\s*['"](\d+)['"]/,
+    // Narrower than `url` above on purpose — only the beacon itself is a hit,
+    // not the fbevents.js library load.
+    hit: { url: /facebook\.com\/tr/i, event: /[?&]ev=([^&]+)/i } },
   { id: 'linkedin', label: 'LinkedIn Insight', cat: 'pixel', beacon: true,
     url: /snap\.licdn\.com|px\.ads\.linkedin\.com/i, inline: /_linkedin_partner_id\s*=\s*['"](\d+)['"]/ },
   { id: 'twitter', label: 'X / Twitter', cat: 'pixel', beacon: true, url: /static\.ads-twitter\.com|analytics\.twitter\.com/i },
-  { id: 'tiktok', label: 'TikTok', cat: 'pixel', beacon: true, url: /analytics\.tiktok\.com/i },
-  { id: 'pinterest', label: 'Pinterest', cat: 'pixel', beacon: true, url: /(s\.pinimg\.com\/ct|ct\.pinterest\.com)/i },
+  { id: 'tiktok', label: 'TikTok', cat: 'pixel', beacon: true, url: /analytics\.tiktok\.com/i,
+    hit: { url: /analytics\.tiktok\.com\/api\/v\d+\/pixel/i, event: /[?&]event=([^&]+)/i } },
+  { id: 'pinterest', label: 'Pinterest', cat: 'pixel', beacon: true, url: /(s\.pinimg\.com\/ct|ct\.pinterest\.com)/i,
+    hit: { url: /ct\.pinterest\.com/i, event: /[?&]event=([^&]+)/i } },
   { id: 'reddit', label: 'Reddit', cat: 'pixel', beacon: true, url: /(www\.redditstatic\.com\/ads|alb\.reddit\.com)/i },
   { id: 'bing-uet', label: 'Bing UET', cat: 'pixel', beacon: true,
-    url: /bat\.bing\.com/i, inline: /\bti\s*:\s*['"]?(\d{6,})['"]?/ }
+    url: /bat\.bing\.com/i, inline: /\bti\s*:\s*['"]?(\d{6,})['"]?/,
+    // A plain page-view hit carries no `evt` param at all — hitDefault covers
+    // that case rather than reporting a blank event name.
+    hit: { url: /bat\.bing\.com\/action/i, event: /[?&]evt=([^&]+)/i }, hitDefault: 'page view' }
 ];
 
+// Universal Analytics' hit type lives in `t` (pageview, event, timing, social,
+// …); for the common "t=event" case the human-meaningful label is the event
+// ACTION (`ea`), not the literal word "event" — everything else just uses the
+// hit type itself. Kept as a function rather than one regex since this is the
+// one vendor where the event name depends on more than a single capture group.
+function uaHitEventName(url) {
+  const t = /[?&]t=([^&]+)/i.exec(url);
+  if (!t) return null;
+  if (t[1] === 'event') {
+    const ea = /[?&]ea=([^&]+)/i.exec(url);
+    return ea ? ea[1] : 'event';
+  }
+  return t[1];
+}
+
 const TAG_EVIDENCE_CAP = 5;    // per vendor — matches the house self-capping convention
+const TAG_EVENTS_CAP = 30;     // across all vendors combined, newest first
 
 function tagIdsFromUrl(vendor, url) {
   return (vendor.idFrom || [])
     .map(re => { const m = re.exec(url); return m && m[1]; })
     .filter(Boolean)
     .map(v => v.toUpperCase());
+}
+
+// `hit.event` is either a RegExp (first capture group is the event name) or a
+// function taking the URL and returning one — Universal Analytics needs the
+// latter since its label depends on more than one query param.
+function tagEventName(vendor, url) {
+  if (!vendor.hit || !vendor.hit.event) return null;
+  const spec = vendor.hit.event;
+  let raw = typeof spec === 'function' ? spec(url) : (spec.exec(url) || [])[1];
+  if (!raw) return null;
+  try { raw = decodeURIComponent(raw); } catch { /* leave as sent */ }
+  return raw.replace(/\+/g, ' ').slice(0, 60);
+}
+
+// A resource entry per vendor.hit is a genuine tracked event (a page_view, an
+// add_to_cart, a conversion) — not just a script load. Rebuilt from the same
+// resource-timing list `detectMarketingTags` already reads for load counts,
+// so it inherits the same limitation: entries the browser has since evicted
+// from its buffer (raised below, but still bounded) are gone for good, which
+// is why the panel reads "won't appear until you refresh" rather than
+// promising a complete history.
+function collectTagEvents(entries) {
+  const events = [];
+  entries.forEach(e => {
+    TAG_VENDORS.forEach(v => {
+      if (!v.hit || !v.hit.url.test(e.name)) return;
+      events.push({
+        vendorId: v.id,
+        label: v.label,
+        name: tagEventName(v, e.name) || v.hitDefault || 'event',
+        at: Math.round(e.startTime)
+      });
+    });
+  });
+  events.sort((a, b) => b.at - a.at);
+  return events.slice(0, TAG_EVENTS_CAP);
+}
+
+// Chrome/Firefox both default the resource-timing buffer to ~250 entries and
+// silently drop the oldest once it's full — on a page that makes a lot of
+// requests, early events (the ones most likely to matter, e.g. the initial
+// page_view) are the first to go. Raised once per page; harmless if the
+// browser is already past that count by the time this runs.
+let _tagPerfBufferRaised = false;
+function ensureTagPerfBuffer() {
+  if (_tagPerfBufferRaised) return;
+  _tagPerfBufferRaised = true;
+  try { if (typeof performance.setResourceTimingBufferSize === 'function') performance.setResourceTimingBufferSize(500); }
+  catch { /* not critical — detection still works off whatever is retained */ }
 }
 
 // Accumulator per vendor. The Sets/Map here are working state only — the
@@ -408,6 +488,7 @@ function tagFlags(accs) {
 }
 
 function detectMarketingTags() {
+  ensureTagPerfBuffer();
   const found = new Map();
 
   const matchUrl = (url, where) => {
@@ -458,7 +539,8 @@ function detectMarketingTags() {
   return {
     scannedAt: Math.round((typeof performance !== 'undefined' && performance.now) ? performance.now() : 0),
     vendors: accs.map(a => a.rec),
-    flags: tagFlags(accs)
+    flags: tagFlags(accs),
+    events: collectTagEvents(entries)
   };
 }
 

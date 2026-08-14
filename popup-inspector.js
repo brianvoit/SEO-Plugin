@@ -1738,6 +1738,7 @@ function render(data, expandMeta = false) {
   renderHreflang(data);
   renderFavicon(data);
   renderDates(data);
+  if (typeof renderTagsEntry === 'function') renderTagsEntry(data);
   renderOverlayToggle(data.altOverlayActive);
   renderLinkOverlayToggle(data.linkOverlayActive);
   if (typeof loadPageSpeedData === 'function') loadPageSpeedData(false);

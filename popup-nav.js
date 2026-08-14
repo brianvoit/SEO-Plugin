@@ -20,6 +20,7 @@ const siteauditPanel  = document.getElementById('siteaudit-panel');
 const pagespeedPanel  = document.getElementById('pagespeed-panel');
 const utmPanel        = document.getElementById('utm-panel');
 const clientPanel     = document.getElementById('client-panel');
+const tagsPanel       = document.getElementById('tags-panel');
 const searchTab     = document.getElementById('search-tab');
 const analyticsTab  = document.getElementById('analytics-tab');
 const adsTab        = document.getElementById('ads-tab');
@@ -68,6 +69,7 @@ function hideDetailPanels() {
   pagespeedPanel.classList.add('hidden');
   utmPanel.classList.add('hidden');
   clientPanel.classList.add('hidden');
+  tagsPanel.classList.add('hidden');
 }
 
 function showActiveTab() {
@@ -199,6 +201,12 @@ function showUtmPanel() {
   if (typeof openUtmPanel === 'function') openUtmPanel();
 }
 
+function showTagsPanel() {
+  enterDetailPanel();
+  tagsPanel.classList.remove('hidden');
+  if (typeof openTagsPanel === 'function') openTagsPanel();
+}
+
 // Opens directly from the CLIENTS list in Settings, so — unlike every panel
 // above — its Back button returns to Settings, not the active data tab (see
 // hideClientPanelToSettings below).
@@ -314,6 +322,7 @@ document.getElementById('btn-pagespeed').addEventListener('click', showPageSpeed
 document.getElementById('btn-pagespeed-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-utm').addEventListener('click', showUtmPanel);
 document.getElementById('btn-utm-back').addEventListener('click', hideDetailPanelToTab);
+document.getElementById('btn-tags-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-client-back').addEventListener('click', hideClientPanelToSettings);
 document.getElementById('btn-client-delete').addEventListener('click', () => { if (typeof deleteCurrentClient === 'function') deleteCurrentClient(); });
 
@@ -339,7 +348,8 @@ document.querySelectorAll('#main-tabs [data-tab]').forEach(btn => {
       || !siteauditPanel.classList.contains('hidden')
       || !pagespeedPanel.classList.contains('hidden')
       || !utmPanel.classList.contains('hidden')
-      || !clientPanel.classList.contains('hidden');
+      || !clientPanel.classList.contains('hidden')
+      || !tagsPanel.classList.contains('hidden');
     if (tab === activeTab && !inPanel) return;
     activeTab = tab;
     // Settings reloads page data on exit; other panels just return to the tab

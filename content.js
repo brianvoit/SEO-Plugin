@@ -218,6 +218,250 @@ function getGaMeasurementIds() {
   return Array.from(ids).slice(0, 10);
 }
 
+// ─── Marketing tags & pixels ─────────────────────────────────────────────────
+// What analytics / tag management / heatmap / ad-pixel technology is actually
+// installed on this page.
+//
+// Detection runs against the DOM *and* performance resource timing, because
+// neither alone is enough: a tag manager injects most of a site's stack after
+// load, and plenty of pixels never create an element at all (they fire as a
+// beacon, a fetch, or an <img>). Resource timing catches both.
+//
+// What the two sources mean, precisely — this is easy to get wrong:
+//   `dom`     an element for it exists in the page RIGHT NOW
+//   `network` a resource-timing entry exists, i.e. it really was fetched
+// `dom` does NOT mean "hardcoded in the served HTML". querySelectorAll runs
+// against the live DOM, so a script the tag manager injected a moment ago is
+// indistinguishable from one the server sent. Nothing here claims otherwise —
+// an earlier draft flagged "hardcoded AND injected" on that basis and would
+// have fired on every ordinary install.
+//
+// Deliberately DOM/timing only: reading page globals (dataLayer, _satellite,
+// fbq) would need a page-context bridge this extension doesn't have, and
+// nearly every vendor ID is recoverable from a script URL or inline snippet
+// without one.
+
+// One record per vendor, grouped by category for the panel's rendering order.
+//
+// `url` is matched against BOTH script srcs and resource-timing URLs, and must
+// be PATH-specific wherever vendors share a host: Tag Manager and GA4 both
+// live on googletagmanager.com and differ only by /gtm.js vs /gtag/js, so a
+// host-only pattern would report both on any page carrying either.
+//
+// `idFrom` patterns run against the matched URL; `inline` runs against inline
+// script text, and its first capture group (when present) is taken as an ID.
+const TAG_VENDORS = [
+  // ── Analytics ──
+  { id: 'ga4', label: 'Google Analytics 4', cat: 'analytics',
+    url: /googletagmanager\.com\/gtag\/js/i, idFrom: [/[?&]id=(G-[A-Z0-9]+)/i], inline: /\b(G-[A-Z0-9]{6,})\b/ },
+  { id: 'ua', label: 'Universal Analytics', cat: 'analytics',
+    url: /google-analytics\.com\/(analytics|ga)\.js/i, inline: /\b(UA-\d{4,}-\d+)\b/ },
+  { id: 'adobe-analytics', label: 'Adobe Analytics', cat: 'analytics', beacon: true,
+    // AppMeasurement is the library; /b/ss/<rsid>/ is the tracking beacon,
+    // which only ever shows up in resource timing.
+    url: /(AppMeasurement\.js|\/b\/ss\/)/i, idFrom: [/\/b\/ss\/([^/]+)\//i] },
+  { id: 'matomo', label: 'Matomo', cat: 'analytics', url: /(matomo|piwik)\.(js|php)/i },
+  { id: 'plausible', label: 'Plausible', cat: 'analytics', url: /plausible\.io\/js\//i },
+  { id: 'fathom', label: 'Fathom', cat: 'analytics', url: /(cdn\.usefathom\.com|usefathom\.com\/script\.js)/i },
+  { id: 'mixpanel', label: 'Mixpanel', cat: 'analytics', url: /(cdn\.mxpnl\.com|api\.mixpanel\.com)/i },
+  { id: 'amplitude', label: 'Amplitude', cat: 'analytics', url: /(cdn\.amplitude\.com|api\.amplitude\.com|amplitude\.js)/i },
+  { id: 'heap', label: 'Heap', cat: 'analytics', url: /(cdn\.heapanalytics\.com|heapanalytics\.com\/js)/i },
+
+  // ── Tag managers & consent ──
+  { id: 'gtm', label: 'Google Tag Manager', cat: 'tagmanager',
+    url: /googletagmanager\.com\/(gtm\.js|ns\.html)/i, idFrom: [/[?&]id=(GTM-[A-Z0-9]+)/i], inline: /\b(GTM-[A-Z0-9]{4,})\b/ },
+  { id: 'adobe-launch', label: 'Adobe Launch / DTM', cat: 'tagmanager',
+    url: /(assets\.adobedtm\.com|launch[-.].*\.adobe)/i },
+  { id: 'tealium', label: 'Tealium', cat: 'tagmanager', url: /tags\.tiqcdn\.com/i },
+  { id: 'segment', label: 'Segment', cat: 'tagmanager',
+    url: /(cdn\.segment\.(com|io)|api\.segment\.io)/i, idFrom: [/analytics\.js\/v\d\/([^/]+)\//i] },
+  { id: 'onetrust', label: 'OneTrust', cat: 'tagmanager', url: /(cdn\.cookielaw\.org|onetrust\.com)/i },
+  { id: 'cookiebot', label: 'Cookiebot', cat: 'tagmanager', url: /consent\.cookiebot\.com/i },
+  { id: 'osano', label: 'Osano', cat: 'tagmanager', url: /(cmp\.osano\.com|osano\.com\/)/i },
+  { id: 'klaro', label: 'Klaro', cat: 'tagmanager', url: /klaro(\.min)?\.js/i },
+
+  // ── Heatmap & session replay ──
+  { id: 'crazyegg', label: 'Crazy Egg', cat: 'heatmap',
+    url: /(script\.crazyegg\.com|crazyegg\.com\/pages)/i, idFrom: [/crazyegg\.com\/pages\/scripts\/(\d+)/i] },
+  { id: 'hotjar', label: 'Hotjar', cat: 'heatmap',
+    url: /static\.hotjar\.com/i, idFrom: [/hotjar-(\d+)\./i], inline: /hjid\s*:\s*(\d+)/ },
+  { id: 'fullstory', label: 'FullStory', cat: 'heatmap',
+    url: /(edge\.fullstory\.com|fullstory\.com\/s\/fs\.js)/i },
+  { id: 'clarity', label: 'Microsoft Clarity', cat: 'heatmap',
+    url: /clarity\.ms/i, idFrom: [/clarity\.ms\/tag\/([a-z0-9]+)/i] },
+  { id: 'mouseflow', label: 'Mouseflow', cat: 'heatmap', url: /(cdn\.mouseflow\.com|mouseflow\.com\/projects)/i },
+  { id: 'luckyorange', label: 'Lucky Orange', cat: 'heatmap', url: /(luckyorange\.com|luckyorange\.net)/i },
+  { id: 'smartlook', label: 'Smartlook', cat: 'heatmap', url: /(web-sdk\.smartlook\.com|smartlook\.com\/recorder)/i },
+
+  // ── Ad & conversion pixels ──
+  { id: 'google-ads', label: 'Google Ads', cat: 'pixel', beacon: true,
+    // Conversion tracking; distinct from gtag.js analytics loads by path.
+    url: /googleadservices\.com\/pagead\/conversion|google\.com\/pagead\/(1p-)?conversion/i,
+    idFrom: [/conversion\/(\d+)/i] },
+  { id: 'floodlight', label: 'Floodlight', cat: 'pixel', beacon: true, url: /fls\.doubleclick\.net|ad\.doubleclick\.net\/activity/i },
+  { id: 'meta-pixel', label: 'Meta Pixel', cat: 'pixel', beacon: true,
+    url: /connect\.facebook\.net\/.*\/fbevents\.js|facebook\.com\/tr/i,
+    idFrom: [/[?&]id=(\d+)/i], inline: /fbq\s*\(\s*['"]init['"]\s*,\s*['"](\d+)['"]/ },
+  { id: 'linkedin', label: 'LinkedIn Insight', cat: 'pixel', beacon: true,
+    url: /snap\.licdn\.com|px\.ads\.linkedin\.com/i, inline: /_linkedin_partner_id\s*=\s*['"](\d+)['"]/ },
+  { id: 'twitter', label: 'X / Twitter', cat: 'pixel', beacon: true, url: /static\.ads-twitter\.com|analytics\.twitter\.com/i },
+  { id: 'tiktok', label: 'TikTok', cat: 'pixel', beacon: true, url: /analytics\.tiktok\.com/i },
+  { id: 'pinterest', label: 'Pinterest', cat: 'pixel', beacon: true, url: /(s\.pinimg\.com\/ct|ct\.pinterest\.com)/i },
+  { id: 'reddit', label: 'Reddit', cat: 'pixel', beacon: true, url: /(www\.redditstatic\.com\/ads|alb\.reddit\.com)/i },
+  { id: 'bing-uet', label: 'Bing UET', cat: 'pixel', beacon: true,
+    url: /bat\.bing\.com/i, inline: /\bti\s*:\s*['"]?(\d{6,})['"]?/ }
+];
+
+const TAG_EVIDENCE_CAP = 5;    // per vendor — matches the house self-capping convention
+
+function tagIdsFromUrl(vendor, url) {
+  return (vendor.idFrom || [])
+    .map(re => { const m = re.exec(url); return m && m[1]; })
+    .filter(Boolean)
+    .map(v => v.toUpperCase());
+}
+
+// Accumulator per vendor. The Sets/Map here are working state only — the
+// public record handed back to the popup has to survive structured cloning,
+// so finalizeTags() converts them before returning.
+function tagAcc(map, vendor) {
+  let acc = map.get(vendor.id);
+  if (!acc) {
+    acc = {
+      rec: { id: vendor.id, label: vendor.label, cat: vendor.cat, ids: [], where: [], loads: 0, fetches: 0, evidence: [] },
+      beacon: !!vendor.beacon,
+      urls: new Set(),          // distinct URLs seen, from any source
+      idUrls: new Map(),        // id → Set of URLs that carried it
+      urlFetches: new Map()     // url → how many network entries it produced
+    };
+    map.set(vendor.id, acc);
+  }
+  return acc;
+}
+
+function tagSee(map, vendor, url, where, ids) {
+  const acc = tagAcc(map, vendor);
+  const rec = acc.rec;
+  if (!rec.where.includes(where)) rec.where.push(where);
+  (ids || []).forEach(v => {
+    if (!v) return;
+    if (!rec.ids.includes(v)) rec.ids.push(v);
+    if (url) {
+      if (!acc.idUrls.has(v)) acc.idUrls.set(v, new Set());
+      acc.idUrls.get(v).add(url);
+    }
+  });
+  if (!url) return;
+  acc.urls.add(url);
+  if (where === 'network') acc.urlFetches.set(url, (acc.urlFetches.get(url) || 0) + 1);
+  if (rec.evidence.length < TAG_EVIDENCE_CAP && !rec.evidence.some(e => e.url === url)) {
+    rec.evidence.push({ url: String(url).slice(0, 300), where });
+  }
+}
+
+// Problems that follow from the detection data itself. Anything needing page
+// globals or consent state is deliberately out of scope — inferring it from
+// load order alone produces confident false alarms on correct setups.
+function tagFlags(accs) {
+  const flags = [];
+  const vendors = accs.map(a => a.rec);
+
+  accs.forEach(({ rec, beacon, idUrls, urlFetches }) => {
+    // The case worth building the feature for: one property counted twice,
+    // silently doubling every session. Two independent structural signals,
+    // both of which mean "this really fired more than once":
+    //   1. the same ID reachable from two different script URLs
+    //   2. the same URL fetched more than once
+    // Beacon endpoints (/b/ss/, facebook.com/tr, bat.bing.com) legitimately
+    // fire once per tracked event, so they're exempt from the second rule.
+    const dupId = [...idUrls.entries()].find(([, urls]) => urls.size > 1);
+    const dupUrl = beacon ? null : [...urlFetches.entries()].find(([, n]) => n > 1);
+
+    if (dupId) {
+      flags.push({ level: 'warning', vendorId: rec.id, code: 'DUPLICATE_ID',
+        text: `${rec.label} loads ${dupId[0]} from ${dupId[1].size} different scripts — that property is very likely being counted twice.` });
+    } else if (dupUrl) {
+      flags.push({ level: 'warning', vendorId: rec.id, code: 'DUPLICATE_ID',
+        text: `${rec.label} was fetched ${dupUrl[1]} times from the same URL — likely double-counting.` });
+    }
+  });
+
+  if (vendors.some(v => v.id === 'ua')) {
+    flags.push({ level: 'warning', vendorId: 'ua', code: 'LEGACY_UA',
+      text: 'Universal Analytics stopped processing data in July 2023 — this tag still loads but collects nothing.' });
+  }
+
+  const CONSENT = /onetrust|cookiebot|osano|klaro/;
+  const managers = vendors.filter(v => v.cat === 'tagmanager' && !CONSENT.test(v.id));
+  if (managers.length > 1) {
+    flags.push({ level: 'info', vendorId: null, code: 'MULTIPLE_TAG_MANAGERS',
+      text: `${managers.length} tag managers present (${managers.map(m => m.label).join(', ')}).` });
+  }
+
+  const analytics = vendors.filter(v => v.cat === 'analytics');
+  if (analytics.length > 1) {
+    flags.push({ level: 'info', vendorId: null, code: 'MULTIPLE_ANALYTICS',
+      text: `${analytics.length} analytics tools present (${analytics.map(a => a.label).join(', ')}).` });
+  }
+
+  return flags;
+}
+
+function detectMarketingTags() {
+  const found = new Map();
+
+  const matchUrl = (url, where) => {
+    if (!url) return;
+    TAG_VENDORS.forEach(v => {
+      if (v.url && v.url.test(url)) tagSee(found, v, url, where, tagIdsFromUrl(v, url));
+    });
+  };
+
+  // 1. Script elements currently in the page (server-sent or injected — see
+  //    the note above; the two are not distinguishable here).
+  document.querySelectorAll('script[src]').forEach(s => matchUrl(s.src, 'dom'));
+
+  // 2. Pixel fallbacks — Meta, Pinterest and friends ship an <img> inside
+  //    <noscript>, often the only trace when the script itself is blocked.
+  document.querySelectorAll('img[src], noscript').forEach(el => {
+    if (el.tagName === 'IMG') { matchUrl(el.src, 'dom'); return; }
+    const m = /<img[^>]+src=["']([^"']+)["']/i.exec(el.textContent || '');
+    if (m) matchUrl(m[1], 'dom');
+  });
+
+  // 3. Inline snippets — where the ID lives when the loader is inlined rather
+  //    than fetched (fbq('init', …), hjid, _linkedin_partner_id). These carry
+  //    no URL, so they contribute an ID and nothing to the load counts.
+  document.querySelectorAll('script:not([src])').forEach(s => {
+    const text = s.textContent || '';
+    if (!text) return;
+    TAG_VENDORS.forEach(v => {
+      if (!v.inline) return;
+      const m = v.inline.exec(text);
+      if (m) tagSee(found, v, null, 'dom', [m[1] && m[1].toUpperCase()]);
+    });
+  });
+
+  // 4. What actually loaded, including anything injected after page load.
+  //    Guarded: resource timing is standard in both browsers, but the buffer
+  //    can be empty or cleared by the page and this must never throw.
+  let entries = [];
+  try { entries = performance.getEntriesByType('resource') || []; } catch { entries = []; }
+  entries.forEach(e => matchUrl(e.name, 'network'));
+
+  const accs = Array.from(found.values());
+  accs.forEach(a => {
+    a.rec.loads = a.urls.size;
+    a.rec.fetches = [...a.urlFetches.values()].reduce((n, c) => n + c, 0);
+  });
+
+  return {
+    scannedAt: Math.round((typeof performance !== 'undefined' && performance.now) ? performance.now() : 0),
+    vendors: accs.map(a => a.rec),
+    flags: tagFlags(accs)
+  };
+}
+
 function getPageData() {
   const titleEl     = document.querySelector('title');
   const titleText   = titleEl ? titleEl.textContent.trim() : '';
@@ -254,6 +498,7 @@ function getPageData() {
     structuredDataInvalid: sd.invalid,
     dates:            getDates(),
     gaMeasurementIds: getGaMeasurementIds(),
+    marketingTags:    detectMarketingTags(),
     hreflang:         hl.tags,
     pageLanguage:     hl.pageLanguage,
     favicon:          getFavicon(),
@@ -1608,6 +1853,19 @@ browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       try { data = getPageData(); } catch (e) { data = { _readError: String((e && e.message) || e) }; }
       sendResponse(data);
     });
+    return true;
+  }
+
+  // Re-scan tags on demand. Detection is a snapshot, and tags a tag manager
+  // injects late can land after the popup's getPageData read — so the Tags
+  // panel re-scans on open and on Refresh. Kept separate from getPageData so
+  // that costs one small message instead of re-reading the whole page and
+  // re-rendering all of Overview.
+  if (message.action === 'getMarketingTags') {
+    let tags;
+    try { tags = detectMarketingTags(); }
+    catch (e) { tags = { scannedAt: 0, vendors: [], flags: [], _readError: String((e && e.message) || e) }; }
+    sendResponse(tags);
     return true;
   }
 

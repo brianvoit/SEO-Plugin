@@ -3529,5 +3529,126 @@ body.settings-open #update-footer { margin-top: auto; }
 #drive-folder-browser .field-hint { padding: 0 12px; }
 #drive-folder-browser .wp-form-actions { padding: 10px 12px; margin-top: 0; border-top: 1px solid var(--border); }
 
+/* ── Tags & Pixels ───────────────────────────────────────────────────────── */
+
+.tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+/* Builds on .gsc-intent-chip — this only adds the warning treatment and the
+   ID pill, so the base pill/hover behaviour stays shared. */
+.tag-chip { cursor: pointer; }
+
+.tag-chip--warn {
+  border-color: var(--hint-amber);
+  color: var(--hint-amber);
+}
+.tag-chip--warn:hover { border-color: var(--hint-amber); }
+
+.tag-chip-id {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+}
+
+.tag-chip-warn {
+  font-weight: 700;
+  color: var(--hint-amber);
+}
+
+.tags-summary--warn { color: var(--hint-amber); font-weight: 600; }
+
+/* Panel */
+.tag-flag {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+.tag-flag:last-child { border-bottom: none; }
+
+.tag-flag-dot {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+.tag-flag--warning .tag-flag-dot {
+  color: var(--hint-amber);
+  background: color-mix(in srgb, var(--hint-amber) 16%, transparent);
+}
+.tag-flag--info .tag-flag-dot {
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) 14%, transparent);
+}
+
+.tag-row {
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+}
+.tag-row:last-child { border-bottom: none; }
+.tag-row--warn { border-left: 2px solid var(--hint-amber); padding-left: 8px; }
+
+.tag-row-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-row-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.tag-row-id {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--bg-section);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.tag-row-id:hover { color: var(--accent); border-color: var(--accent); }
+
+.tag-row-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.tag-row-urls {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 4px;
+}
+
+.tag-row-url {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10px;
+  color: var(--text-none);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Utility */
 .hidden { display: none !important; }

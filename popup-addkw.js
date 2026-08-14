@@ -1405,6 +1405,7 @@ async function exportAddKwToDoc(btn, groups) {
     btn.classList.add('is-success');
     btn.title = 'Opened ✓';
     setTimeout(() => { btn.classList.remove('is-success'); btn.title = origTitle; }, 3000);
+    maybeOfferExportFolder(pageUrl);
   } else {
     btn.classList.add('is-error');
     btn.title = `Export failed: ${(res && res.error) || 'unknown error'}`;
@@ -1439,6 +1440,7 @@ async function exportAddKwBlindspotsToSheet(btn, ideas) {
     btn.classList.add('is-success');
     btn.title = 'Added ✓';
     setTimeout(() => { btn.classList.remove('is-success'); btn.title = origTitle; }, 3000);
+    maybeOfferExportFolder(pageUrl);
   } else {
     btn.classList.add('is-error');
     btn.title = `Export failed: ${(res && res.error) || 'unknown error'}`;

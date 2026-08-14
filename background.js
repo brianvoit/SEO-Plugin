@@ -4519,8 +4519,7 @@ function docsUrlLabel(pageUrl) {
 // Multipart-upload an HTML body to Drive, which converts it to a native Google
 // Doc. Shared by every "Export to Google Doc" path. Returns { url } or
 // { notConnected, error } / { error, detail }.
-async function docsUploadHtmlDoc(accessToken, docTitle, html) {
-  const folderId = await docsGetOrCreateFolder(accessToken);
+async function docsUploadHtmlDoc(accessToken, docTitle, html, folderId) {
   const metadata = { name: docTitle, mimeType: 'application/vnd.google-apps.document' };
   if (folderId) metadata.parents = [folderId];
 
@@ -4534,7 +4533,7 @@ async function docsUploadHtmlDoc(accessToken, docTitle, html) {
     html + '\r\n' +
     `--${boundary}--`;
 
-  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id&supportsAllDrives=true', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
@@ -4558,10 +4557,11 @@ async function docsExportActionPlan({ plan, pageUrl, fetchedAt }) {
   const token = await docsGetAccessToken();
   if (token.error) return { notConnected: true, error: token.error };
 
+  const { folderId } = await resolveExportFolder(token.accessToken, pageUrl, DRIVE_PLANS_SUBDIR);
   const date = new Date().toISOString().slice(0, 10);
   const docTitle = `${date}: Action Plan For ${docsUrlLabel(pageUrl)}`;
   const html = buildActionPlanHtml(plan, docTitle, fetchedAt);
-  return docsUploadHtmlDoc(token.accessToken, docTitle, html);
+  return docsUploadHtmlDoc(token.accessToken, docTitle, html, folderId);
 }
 
 // Negative keywords as nested bullets: one bullet per exclusion list, with its
@@ -4592,10 +4592,11 @@ async function docsExportNegatives({ lists, pageUrl }) {
   const token = await docsGetAccessToken();
   if (token.error) return { notConnected: true, error: token.error };
 
+  const { folderId } = await resolveExportFolder(token.accessToken, pageUrl, DRIVE_PLANS_SUBDIR);
   const date = new Date().toISOString().slice(0, 10);
   const docTitle = `${date}: Negative Keywords For ${docsUrlLabel(pageUrl)}`;
   const html = buildNegativesHtml(lists, docTitle);
-  return docsUploadHtmlDoc(token.accessToken, docTitle, html);
+  return docsUploadHtmlDoc(token.accessToken, docTitle, html, folderId);
 }
 
 // New keywords as nested bullets: one bullet per ad group, with its added
@@ -4620,10 +4621,11 @@ async function docsExportAddKeywords({ groups, pageUrl }) {
   const token = await docsGetAccessToken();
   if (token.error) return { notConnected: true, error: token.error };
 
+  const { folderId } = await resolveExportFolder(token.accessToken, pageUrl, DRIVE_PLANS_SUBDIR);
   const date = new Date().toISOString().slice(0, 10);
   const docTitle = `${date}: Added Keywords For ${docsUrlLabel(pageUrl)}`;
   const html = buildAddKeywordsHtml(groups, docTitle);
-  return docsUploadHtmlDoc(token.accessToken, docTitle, html);
+  return docsUploadHtmlDoc(token.accessToken, docTitle, html, folderId);
 }
 
 // ─── Google Sheets: per-domain keyword-brainstorm history ──────────────────
@@ -4656,17 +4658,33 @@ function sheetsDomainFromUrl(pageUrl) {
 // trust — the user may have deleted the file in Drive since last export — and
 // silently recreated on 404/trashed, matching the same no-warning precedent
 // as docsGetOrCreateFolder above.
-async function sheetsGetOrCreateSpreadsheet(accessToken, cacheKey, { title, tabName, headerRow }) {
+async function sheetsGetOrCreateSpreadsheet(accessToken, cacheKey, { title, tabName, headerRow, pageUrl }) {
+  const { folderId: targetFolderId } = await resolveExportFolder(accessToken, pageUrl, DRIVE_EXPORTS_SUBDIR);
+
   const { sheetsSpreadsheetIds } = await browser.storage.local.get('sheetsSpreadsheetIds');
   const cache = sheetsSpreadsheetIds || {};
   const cached = cache[cacheKey];
   if (cached && cached.id) {
-    const check = await fetch(`https://www.googleapis.com/drive/v3/files/${cached.id}?fields=id,trashed`, {
+    const check = await fetch(`https://www.googleapis.com/drive/v3/files/${cached.id}?fields=id,trashed,parents&supportsAllDrives=true`, {
       headers: { Authorization: `Bearer ${accessToken}` }
     }).catch(() => null);
     if (check && check.ok) {
       const meta = await check.json();
-      if (!meta.trashed) return { id: cached.id };
+      if (!meta.trashed) {
+        // Re-parent, don't duplicate: the file may predate a Client folder
+        // being attached (or the attached folder changing) since this sheet
+        // was first created. Moving it preserves its append history instead
+        // of silently forking a second copy of it.
+        const currentParents = meta.parents || [];
+        if (targetFolderId && !currentParents.includes(targetFolderId)) {
+          const removeQ = currentParents.length ? `&removeParents=${currentParents.join(',')}` : '';
+          await fetch(
+            `https://www.googleapis.com/drive/v3/files/${cached.id}?addParents=${targetFolderId}${removeQ}&supportsAllDrives=true`,
+            { method: 'PATCH', headers: { Authorization: `Bearer ${accessToken}` } }
+          ).catch(() => {});
+        }
+        return { id: cached.id };
+      }
     }
     // 404, trashed, or network error: fall through and recreate below.
   }
@@ -4689,12 +4707,12 @@ async function sheetsGetOrCreateSpreadsheet(accessToken, cacheKey, { title, tabN
   }
   const { spreadsheetId } = await createRes.json();
 
-  // Sheets-API-created files land at Drive root — re-parent into the shared
-  // exports folder alongside the Doc exports. Best-effort: still usable at
-  // Drive root if this fails.
-  const folderId = await docsGetOrCreateFolder(accessToken);
-  if (folderId) {
-    await fetch(`https://www.googleapis.com/drive/v3/files/${spreadsheetId}?addParents=${folderId}&removeParents=root`, {
+  // Sheets-API-created files land at Drive root — re-parent into the
+  // resolved export folder (a Client's own SEO Inspector/Exports, or the
+  // shared Marketing Plans folder for domains with no Client attached).
+  // Best-effort: still usable at Drive root if this fails.
+  if (targetFolderId) {
+    await fetch(`https://www.googleapis.com/drive/v3/files/${spreadsheetId}?addParents=${targetFolderId}&removeParents=root&supportsAllDrives=true`, {
       method: 'PATCH',
       headers: { Authorization: `Bearer ${accessToken}` }
     }).catch(() => {});
@@ -4752,7 +4770,8 @@ async function sheetsExportBlindspotIdeas({ ideas, pageUrl }) {
   const sheet = await sheetsGetOrCreateSpreadsheet(token.accessToken, domain, {
     title: `Ads Inspector Blindspot Ideas — ${domain}`,
     tabName: SHEETS_TAB_NAME,
-    headerRow: SHEETS_HEADER_ROW
+    headerRow: SHEETS_HEADER_ROW,
+    pageUrl
   });
   if (sheet.notConnected || sheet.error) return sheet;
 
@@ -4791,7 +4810,8 @@ async function sheetsExportGscQueries({ rows, pageUrl, rangeDays }) {
   const sheet = await sheetsGetOrCreateSpreadsheet(token.accessToken, `gsc-queries::${domain}`, {
     title: `Search Inspector Queries — ${domain}`,
     tabName: SHEETS_GSC_TAB_NAME,
-    headerRow: SHEETS_GSC_HEADER_ROW
+    headerRow: SHEETS_GSC_HEADER_ROW,
+    pageUrl
   });
   if (sheet.notConnected || sheet.error) return sheet;
 
@@ -4837,7 +4857,8 @@ async function sheetsExportAdsTable({ table, rows, pageUrl, rangeDays }) {
   const sheet = await sheetsGetOrCreateSpreadsheet(token.accessToken, cfg.cacheKey(domain), {
     title: cfg.title(domain),
     tabName: cfg.tabName,
-    headerRow: cfg.headerRow
+    headerRow: cfg.headerRow,
+    pageUrl
   });
   if (sheet.notConnected || sheet.error) return sheet;
 
@@ -5050,6 +5071,18 @@ async function clientRegistryGet({ id }) {
   return { client };
 }
 
+// Used by the export-folder prompt (popup-shared.js) to check, before an
+// export runs, whether the page's domain belongs to a client that hasn't
+// attached a Drive folder yet. Read-only — never auto-creates a client for
+// an unregistered domain, same "never gate on having a Client" rule as
+// everywhere else this registry is read from the export path.
+async function clientRegistryFindByDomain({ domain }) {
+  await ensureClientRegistryMigrated();
+  const { clients } = await clientRegistryListRaw();
+  const client = clients.find(c => (c.domains || []).some(d => d.domain === domain)) || null;
+  return { client };
+}
+
 // Handles only the fields that carry no override/cache implications (name,
 // keywords, Drive folder). Domain membership and branded terms go through
 // their own actions below, which cascade the flat-map cleanup a plain
@@ -5070,6 +5103,12 @@ async function clientRegistrySave({ client }) {
   if ('driveFolderId' in client) {
     existing.driveFolderId = client.driveFolderId || null;
     existing.driveFolderName = client.driveFolderName || null;
+    // A fresh folder attachment clears any earlier "not now" — the whole
+    // reason to dismiss the prompt (no folder to offer) no longer applies.
+    if (existing.driveFolderId) existing.driveFolderPromptDismissed = false;
+  }
+  if ('driveFolderPromptDismissed' in client) {
+    existing.driveFolderPromptDismissed = !!client.driveFolderPromptDismissed;
   }
   await clientRegistrySaveRaw(existing);
   return { ok: true, client: existing };
@@ -5305,6 +5344,98 @@ async function driveVerifyFolder({ folderId }) {
   return { missing: false, name: meta.name };
 }
 
+// ─── Export retargeting: land exports in a Client's own Drive folder ───────
+// Every export (Docs and Sheets alike) used to go straight to the single
+// app-managed Marketing Plans folder via docsGetOrCreateFolder, regardless of
+// which client's page it came from. Now that a Client can have its own
+// attached Drive folder (driveFolderId, set via the folder browser above),
+// exports for a domain owned by such a client should land inside it, under
+// an app-owned "SEO Inspector" subfolder so they don't get dropped loose into
+// the user's own Clients/<name>/ folder. Domains with no client — or whose
+// client has no folder attached, or whose folder has gone missing — keep
+// today's exact behaviour: the global Marketing Plans fallback.
+const DRIVE_APP_SUBFOLDER = 'SEO Inspector';
+const DRIVE_EXPORTS_SUBDIR = 'Exports';
+const DRIVE_PLANS_SUBDIR = 'Plans';
+
+// Finds (or creates) a folder named `name` directly under `parentId`.
+// Dedupe-safe: queries by name+parent+mimeType+trashed=false before
+// creating, so a retry (or two exports racing) never produces a duplicate
+// "SEO Inspector" folder. supportsAllDrives covers a client folder that
+// lives inside a Shared Drive.
+async function driveFindOrCreateFolder(accessToken, parentId, name) {
+  const q = `'${parentId}' in parents and name='${name.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  const listUrl = new URL('https://www.googleapis.com/drive/v3/files');
+  listUrl.searchParams.set('q', q);
+  listUrl.searchParams.set('fields', 'files(id,name)');
+  listUrl.searchParams.set('supportsAllDrives', 'true');
+  listUrl.searchParams.set('includeItemsFromAllDrives', 'true');
+  const listRes = await fetch(listUrl, { headers: { Authorization: `Bearer ${accessToken}` } }).catch(() => null);
+  if (listRes && listRes.ok) {
+    const data = await listRes.json();
+    if (data.files && data.files[0]) return data.files[0].id;
+  }
+  const createRes = await fetch('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] })
+  });
+  if (!createRes.ok) return null;
+  const { id } = await createRes.json();
+  return id;
+}
+
+// Resolves the two-level `SEO Inspector/<sub>` path inside a Client's Drive
+// folder, caching the derived id locally (never synced — it's derivable,
+// same discipline as sheetsSpreadsheetIds) and healing the same way
+// sheetsGetOrCreateSpreadsheet verifies a cached id before trusting it. The
+// cache is also invalidated automatically if the client's root folder itself
+// changed (a re-pick via Browse…) since last resolved.
+async function driveResolveClientSubfolder(accessToken, clientId, rootFolderId, sub) {
+  const cacheKey = `${clientId}::${sub}`;
+  const { driveExportFolderIds } = await browser.storage.local.get('driveExportFolderIds');
+  const cache = driveExportFolderIds || {};
+  const cached = cache[cacheKey];
+  if (cached && cached.rootFolderId === rootFolderId) {
+    const check = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${cached.id}?fields=id,trashed&supportsAllDrives=true`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    ).catch(() => null);
+    if (check && check.ok) {
+      const meta = await check.json();
+      if (!meta.trashed) return cached.id;
+    }
+  }
+
+  const appFolderId = await driveFindOrCreateFolder(accessToken, rootFolderId, DRIVE_APP_SUBFOLDER);
+  if (!appFolderId) return null;
+  const subId = await driveFindOrCreateFolder(accessToken, appFolderId, sub);
+  if (!subId) return null;
+
+  cache[cacheKey] = { id: subId, rootFolderId, updatedAt: Date.now() };
+  await browser.storage.local.set({ driveExportFolderIds: cache });
+  return subId;
+}
+
+// The single entry point every export path resolves its destination folder
+// through. `sub` is DRIVE_EXPORTS_SUBDIR for a stable history-log Sheet or
+// DRIVE_PLANS_SUBDIR for a dated one-per-run Doc.
+async function resolveExportFolder(accessToken, pageUrl, sub) {
+  const domain = sheetsDomainFromUrl(pageUrl);
+  const { clients } = await clientRegistryListRaw();
+  const client = clients.find(c => (c.domains || []).some(d => d.domain === domain));
+
+  if (client && client.driveFolderId) {
+    const verify = await driveVerifyFolder({ folderId: client.driveFolderId }).catch(() => ({ missing: true }));
+    if (!verify.missing) {
+      const subId = await driveResolveClientSubfolder(accessToken, client.id, client.driveFolderId, sub);
+      if (subId) return { folderId: subId, clientId: client.id };
+    }
+  }
+  const folderId = await docsGetOrCreateFolder(accessToken);
+  return { folderId, clientId: null };
+}
+
 // ─── Google Search Console: message handlers ────────────────────────────────
 
 // Distinguishes "no case matched" from "a handler resolved to undefined", so
@@ -5388,6 +5519,7 @@ function routeMessage(message) {
     case 'sheetsExportAdsTable': return sheetsExportAdsTable(message);
     case 'clientRegistryList':   return clientRegistryList();
     case 'clientRegistryGet':    return clientRegistryGet(message);
+    case 'clientRegistryFindByDomain': return clientRegistryFindByDomain(message);
     case 'clientRegistrySave':   return clientRegistrySave(message);
     case 'clientRegistryDelete': return clientRegistryDelete(message);
     case 'clientRegistryAddDomain':      return clientRegistryAddDomain(message);

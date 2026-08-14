@@ -129,6 +129,36 @@ async function sendMessageWithTimeout(message, timeoutMs = 30000) {
   }
 }
 
+// ─── Export-folder attach prompt ─────────────────────────────────────────────
+// Every "Export to Google Docs/Sheets" button across the app calls this right
+// alongside its actual export message. If the page's domain belongs to a
+// Client that hasn't attached a Drive folder yet (and hasn't already said
+// "not now"), it offers to jump straight to attaching one — otherwise the
+// export keeps landing in the shared Marketing Plans folder with no way to
+// know a per-client option exists. Deliberately fire-and-forget: it never
+// gates or awaits the export itself, which proceeds into whichever folder
+// resolveExportFolder (background.js) would already resolve — the client's,
+// once attached, or the shared one until then. A domain with no Client at
+// all is left alone entirely; there's nothing to offer.
+async function maybeOfferExportFolder(pageUrl) {
+  try {
+    const domain = new URL(pageUrl).hostname.replace(/^www\./, '');
+    if (!domain) return;
+    const res = await sendMessageWithTimeout({ action: 'clientRegistryFindByDomain', domain });
+    const client = res && res.client;
+    if (!client || client.driveFolderId || client.driveFolderPromptDismissed) return;
+
+    const attach = confirm(
+      `"${client.name || domain}" doesn't have a Drive folder attached yet, so this export is going to the shared Marketing Plans folder instead of a folder of its own.\n\nAttach one now?`
+    );
+    if (attach) {
+      if (typeof showClientPanel === 'function') showClientPanel(client.id);
+    } else {
+      await sendMessageWithTimeout({ action: 'clientRegistrySave', client: { id: client.id, driveFolderPromptDismissed: true } });
+    }
+  } catch { /* best-effort — never block an export over this */ }
+}
+
 // Performs the full Claude Messages API round trip — fetch, status check,
 // AND body parse — and returns the parsed response body directly. The abort
 // timer stays armed for the entire round trip, not just the initial fetch()

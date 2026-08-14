@@ -1501,6 +1501,7 @@ function wireAdsExport(csvId, sheetId, tableId, table, withQs) {
       btn.classList.add('is-success');
       btn.title = 'Added ✓';
       setTimeout(() => { btn.classList.remove('is-success'); btn.title = origTitle; }, 3000);
+      maybeOfferExportFolder(pageUrl);
     } else {
       btn.classList.add('is-error');
       btn.title = `Export failed: ${(res && res.error) || 'unknown error'}`;
@@ -2833,6 +2834,7 @@ async function exportNegativesToDoc(btn, lists) {
     browser.tabs.create({ url: res.url });
     btn.textContent = 'Opened ✓';
     setTimeout(() => { btn.textContent = orig; }, 3000);
+    maybeOfferExportFolder(pageUrl);
   } else {
     btn.textContent = orig;
     btn.title = `Export failed: ${(res && res.error) || 'unknown error'}`;

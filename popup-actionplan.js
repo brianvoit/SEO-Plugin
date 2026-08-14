@@ -831,6 +831,7 @@ async function exportToGoogleDocs(btn) {
       btn.classList.remove('is-success');
       btn.title = 'Export to Google Doc';
     }, 3000);
+    maybeOfferExportFolder(pageUrl);
   } else {
     btn.title = `Export failed: ${(res && res.error) || 'unknown error'}`;
   }

@@ -1,4 +1,4 @@
-// Tests background.js's commands.onCommand handler — the Alt+M shortcut that
+// Tests bg-core.js's commands.onCommand handler — the Alt+M shortcut that
 // opens Chrome's side panel.
 //
 // Chrome rejects sidePanel.open() unless it is called while the user-gesture
@@ -7,7 +7,7 @@
 // read a window id, so by the time it called open() the gesture was gone and
 // Chrome could refuse the shortcut. It can't be caught by a browser-free
 // smoke test and it can't be caught by reading the code — "did it await?" is
-// a runtime property. So the real handler is sliced out of background.js and
+// a runtime property. So the real handler is sliced out of bg-core.js and
 // run against fakes that record WHEN each call happens, not just whether.
 
 import { test, describe, beforeEach } from 'node:test';
@@ -19,12 +19,12 @@ import { ROOT } from './helpers.mjs';
 const START = 'if (browser.commands?.onCommand)';
 const END = '// ─── Pop-out window';
 
-const src = await readFile(path.join(ROOT, 'background.js'), 'utf8');
+const src = await readFile(path.join(ROOT, 'bg-core.js'), 'utf8');
 const from = src.indexOf(START);
 const to = src.indexOf(END);
 
 test('the command handler is still where the test expects it', () => {
-  assert.ok(from !== -1, `could not find "${START}" in background.js — update this test's slice markers`);
+  assert.ok(from !== -1, `could not find "${START}" in bg-core.js — update this test's slice markers`);
   assert.ok(to > from, `could not find "${END}" after the command handler`);
 });
 

@@ -1,4 +1,4 @@
-// Tests background.js's clientRegistryAddBrandedTerm — the "+" beside a query
+// Tests bg-clients.js's clientRegistryAddBrandedTerm — the "+" beside a query
 // in the Search and Ads tables.
 //
 // This one carries a real behaviour change, not just a bug fix: the quick-add
@@ -9,22 +9,20 @@
 // of a multi-domain client now brands it on all of them. That blast radius is
 // exactly what wants pinning down.
 //
-// The whole of background.js is loaded into a vm rather than slicing one
+// The whole background is loaded into a vm rather than slicing one
 // function out, because the interesting behaviour lives in how this function
 // composes with the registry it reads and writes (migration, the sharded
 // client records, the sync/local branded-terms fallback).
 
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import vm from 'node:vm';
-import { ROOT } from './helpers.mjs';
+import { backgroundSource } from './helpers.mjs';
 
-const src = await readFile(path.join(ROOT, 'background.js'), 'utf8');
+const src = await backgroundSource();
 
 /**
- * Boots the real background.js against fake storage.
+ * Boots the real background (all bg-*.js, concatenated) against fake storage.
  * Anything the extension touches that isn't storage is absorbed by a
  * self-returning proxy — listener registration, alarms, menus and the like all
  * run at load time and none of them matter here.

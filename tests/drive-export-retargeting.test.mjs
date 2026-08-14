@@ -1,4 +1,4 @@
-// Tests background.js's export-folder retargeting: resolveExportFolder,
+// Tests bg-export.js/bg-clients.js's export-folder retargeting: resolveExportFolder,
 // driveFindOrCreateFolder, driveResolveClientSubfolder, and the re-parent
 // logic in sheetsGetOrCreateSpreadsheet.
 //
@@ -11,19 +11,17 @@
 // domains, clients with no folder attached, and a folder that's gone missing
 // all keep exactly the prior global-fallback behaviour.
 //
-// The whole of background.js is loaded into a vm (same approach as
+// The whole background is loaded into a vm (same approach as
 // branded-term.test.mjs) against fake storage and a small in-memory fake
 // Drive/Sheets reachable through a mocked fetch — real enough to exercise the
 // actual query/create/patch calls the shipped code makes, without a network.
 
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import vm from 'node:vm';
-import { ROOT } from './helpers.mjs';
+import { backgroundSource } from './helpers.mjs';
 
-const src = await readFile(path.join(ROOT, 'background.js'), 'utf8');
+const src = await backgroundSource();
 
 /** A tiny fake Drive + Sheets backing store, driven entirely through fetch. */
 function makeDriveMock() {
@@ -128,7 +126,7 @@ function makeDriveMock() {
   return { fetchMock, files, addFolder };
 }
 
-/** Boots the real background.js against fake storage and a fake fetch. */
+/** Boots the real background (all bg-*.js) against fake storage and a fake fetch. */
 function boot({ local = {}, sync = {}, fetchImpl } = {}) {
   const auto = () => new Proxy(function () {}, {
     get: (t, p) => (p === 'then' || typeof p === 'symbol') ? undefined : auto(),

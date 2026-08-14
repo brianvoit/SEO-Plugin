@@ -1,31 +1,31 @@
 {
   "//": "Known Chrome/Edge incompatibilities that exist today. tests/compat.test.mjs fails on any violation NOT listed here, and also fails on any entry here that no longer matches — so this file cannot drift from reality. Milestone 2 deletes entries as it ports each area. Keys are '<file>::<ruleId>'.",
   "violations": {
-    "background.js::sidebarAction": {
+    "bg-core.js::sidebarAction": {
       "status": "intentional",
       "reason": "Ported. sidebarAction.toggle() is now behind HAS_SIDEBAR_ACTION and is the Firefox path only. Chrome never reaches it: applyDisplayMode calls sidePanel.setPanelBehavior({openPanelOnActionClick}) so the browser opens the panel itself on toolbar click, which is the only way to keep the user gesture Chrome requires."
     },
-    "background.js::menus-namespace": {
+    "bg-core.js::menus-namespace": {
       "status": "intentional",
       "reason": "Ported. The single remaining reference is the feature-detect `browser.menus || browser.contextMenus`; every call site now goes through that alias, so Chrome uses contextMenus."
     },
-    "background.js::menus-onShown-refresh": {
+    "bg-core.js::menus-onShown-refresh": {
       "status": "intentional",
       "reason": "Ported. onShown/refresh are now inside a capability branch used only on Firefox, where they're the cheapest correct option. Chrome takes the else-branch: eager syncToggleCheckmarks() driven by storage.onChanged, plus a resync when a toggle's sendMessage fails."
     },
-    "background.js::getSecurityInfo": {
+    "bg-core.js::getSecurityInfo": {
       "status": "intentional",
       "reason": "Ported. Guarded by CAN_READ_TLS (a typeof check on the function itself), so it only runs on Firefox. Chrome leaves entry.tls unset and popup-dns.js falls back to #tls-note. The call has to stay in the source — this is the Firefox branch."
     },
-    "background.js::webRequest-blocking": {
+    "bg-core.js::webRequest-blocking": {
       "status": "intentional",
       "reason": "Ported. The ['blocking','responseHeaders'] literal is now the Firefox arm of HEADERS_SPEC, selected by the same CAN_READ_TLS check — 'blocking' existed solely to make getSecurityInfo work. Chrome registers with ['responseHeaders'] only."
     },
-    "background.js::originUrl": {
+    "bg-core.js::originUrl": {
       "status": "intentional",
       "reason": "Ported. Now reads `d.originUrl || d.initiator`, accepting Firefox's property or Chrome's. The Firefox name necessarily remains in the source."
     },
-    "background.js::moz-extension-scheme": {
+    "bg-core.js::moz-extension-scheme": {
       "status": "intentional",
       "reason": "Ported. The self-request check accepts moz-extension:// or chrome-extension://. The Firefox scheme necessarily remains in the source."
     },

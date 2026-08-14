@@ -1,10 +1,10 @@
-// Tests background.js's withRedirectEntry() — the per-tab queue that keeps
+// Tests bg-core.js's withRedirectEntry() — the per-tab queue that keeps
 // redirect chains intact across a Chrome service-worker restart.
 //
 // This is the one piece of genuinely concurrent code in the extension, it
 // guards correctness rather than polish, and it cannot be exercised without a
 // browser — so it's tested here by slicing the real function text out of
-// background.js and running it against fake storage. Testing a reimplementation
+// bg-core.js and running it against fake storage. Testing a reimplementation
 // would prove nothing; this runs the shipped code.
 
 import { test, describe, beforeEach } from 'node:test';
@@ -16,12 +16,12 @@ import { ROOT } from './helpers.mjs';
 const START = 'const _redirectQueue = new Map()';
 const END = 'browser.webRequest.onBeforeRequest';
 
-const src = await readFile(path.join(ROOT, 'background.js'), 'utf8');
+const src = await readFile(path.join(ROOT, 'bg-core.js'), 'utf8');
 const from = src.indexOf(START);
 const to = src.indexOf(END);
 
 test('the queue implementation is still where the test expects it', () => {
-  assert.ok(from !== -1, `could not find "${START}" in background.js — update this test's slice markers`);
+  assert.ok(from !== -1, `could not find "${START}" in bg-core.js — update this test's slice markers`);
   assert.ok(to > from, `could not find "${END}" after the queue definition`);
 });
 

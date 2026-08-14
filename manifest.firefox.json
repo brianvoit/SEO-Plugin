@@ -11,7 +11,18 @@
   },
   "permissions": ["menus", "webRequestBlocking"],
   "background": {
-    "scripts": ["background.js"]
+    "scripts": [
+      "bg-core.js",
+      "bg-auth.js",
+      "bg-gsc.js",
+      "bg-ga.js",
+      "bg-page.js",
+      "bg-ads.js",
+      "bg-webceo.js",
+      "bg-export.js",
+      "bg-clients.js",
+      "bg-router.js"
+    ]
   },
   "sidebar_action": {
     "default_panel": "popup.html",

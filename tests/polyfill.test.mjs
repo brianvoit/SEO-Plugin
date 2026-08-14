@@ -12,6 +12,7 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { DIST, readJson } from './helpers.mjs';
+import { BACKGROUND_FILES } from '../scripts/build.mjs';
 
 const POLYFILL = 'browser-polyfill.js';
 const chromeDir = path.join(DIST, 'chrome');
@@ -27,17 +28,22 @@ describe('chrome build', () => {
     assert.ok(existsSync(path.join(chromeDir, POLYFILL)), `dist/chrome/${POLYFILL} missing`);
   });
 
-  test('service worker imports the polyfill before background.js', async () => {
+  test('service worker imports the polyfill before any background file', async () => {
     const m = await builtManifest('chrome');
     const swPath = path.join(chromeDir, m.background.service_worker);
     assert.ok(existsSync(swPath), `service worker entry ${m.background.service_worker} missing`);
 
+    // The background is several files now; the polyfill has to precede all of
+    // them, since the very first line of bg-core.js already uses `browser.*`.
+    // background-split.test.mjs owns the full list-agreement check.
     const sw = await readFile(swPath, 'utf8');
     const polyIdx = sw.indexOf(POLYFILL);
-    const bgIdx = sw.indexOf('background.js');
     assert.ok(polyIdx !== -1, 'service worker does not import the polyfill');
-    assert.ok(bgIdx !== -1, 'service worker does not import background.js');
-    assert.ok(polyIdx < bgIdx, 'polyfill must be imported before background.js');
+    for (const f of BACKGROUND_FILES) {
+      const idx = sw.indexOf(f);
+      assert.ok(idx !== -1, `service worker does not import ${f}`);
+      assert.ok(polyIdx < idx, `polyfill must be imported before ${f}`);
+    }
   });
 
   test('content scripts list the polyfill first', async () => {
@@ -65,9 +71,9 @@ describe('firefox build', () => {
     assert.ok(!html.includes(POLYFILL), 'Firefox popup.html should not reference the polyfill');
   });
 
-  test('keeps a plain background script, not a generated worker entry', async () => {
+  test('keeps plain background scripts, not a generated worker entry', async () => {
     const m = await builtManifest('firefox');
-    assert.deepEqual(m.background.scripts, ['background.js']);
+    assert.deepEqual(m.background.scripts, BACKGROUND_FILES);
     assert.ok(!existsSync(path.join(firefoxDir, 'sw.js')), 'sw.js is a Chrome-only build artifact');
   });
 });

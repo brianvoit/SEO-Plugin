@@ -27,13 +27,21 @@ describe('the file list', () => {
     // The reverse direction: a new file that nobody wired up would otherwise
     // sit there silently, never loaded, its handlers permanently missing.
     const found = (await readdir(ROOT)).filter(f => /^bg-.*\.js$/.test(f)).sort();
-    assert.deepEqual(found, [...BACKGROUND_FILES].sort(), 'a bg-*.js file is not in BACKGROUND_FILES');
+    const listed = BACKGROUND_FILES.filter(f => f.startsWith('bg-')).sort();
+    assert.deepEqual(found, listed, 'a bg-*.js file is not in BACKGROUND_FILES');
   });
 
-  test('bg-core.js loads first', () => {
-    // It is the only file that executes anything at load time, and it defines
+  test('oauth-config.js loads before anything reads it', () => {
+    // It is pure constants that the build rewrites, and bg-auth.js reads them
+    // at call time — but keeping it first means the values exist for the whole
+    // of the background's life, with no ordering to reason about.
+    assert.equal(BACKGROUND_FILES[0], 'oauth-config.js');
+  });
+
+  test('bg-core.js is the first of the bg-* files', () => {
+    // It is the only one that executes anything at load time, and it defines
     // the capability flags and shared helpers the rest read.
-    assert.equal(BACKGROUND_FILES[0], 'bg-core.js');
+    assert.equal(BACKGROUND_FILES.filter(f => f.startsWith('bg-'))[0], 'bg-core.js');
   });
 });
 
@@ -66,7 +74,7 @@ describe('load-order safety', () => {
     // after every file has loaded. bg-router.js relies on exactly that to
     // register the onMessage router ahead of the handlers it dispatches to.
     const REGISTRATION = /^browser\.[A-Za-z.?]+\.(addListener|removeListener)\(/;
-    for (const f of BACKGROUND_FILES.filter(x => x !== 'bg-core.js')) {
+    for (const f of BACKGROUND_FILES.filter(x => x !== 'bg-core.js' && x !== 'oauth-config.js')) {
       const src = await readFile(path.join(ROOT, f), 'utf8');
       const offenders = src.split('\n')
         .map((l, i) => [i + 1, l])

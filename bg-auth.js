@@ -73,8 +73,28 @@ async function googleEnsureEmail(authKey) {
   return null;
 }
 
-async function googleOAuthConnect(scope, authKey) {
+// The OAuth client to authenticate as. A client the user entered in Setup
+// always wins over the bundled one, so anyone with their own Cloud project
+// keeps using it, and everyone can migrate off the shared client without a
+// rebuild once it hits Google's 100-user cap for unverified apps.
+//
+// Deliberately all-or-nothing: a user-entered ID is used with the user's own
+// secret, never crossed with the bundled one. Mixing an ID from one client
+// with a secret from another fails at the token exchange with an opaque
+// invalid_client, which is a miserable thing to debug.
+async function googleOAuthCredentials() {
   const { gscClientId, gscClientSecret } = await browser.storage.local.get(['gscClientId', 'gscClientSecret']);
+  if (gscClientId) return { clientId: gscClientId, clientSecret: gscClientSecret || '', bundled: false };
+  return { clientId: BUNDLED_GOOGLE_CLIENT_ID, clientSecret: BUNDLED_GOOGLE_CLIENT_SECRET, bundled: true };
+}
+
+/** Whether this build shipped with a usable default client. */
+function hasBundledOAuthClient() {
+  return !!BUNDLED_GOOGLE_CLIENT_ID;
+}
+
+async function googleOAuthConnect(scope, authKey) {
+  const { clientId: gscClientId, clientSecret: gscClientSecret } = await googleOAuthCredentials();
   if (!gscClientId) return { error: 'NO_CLIENT_ID' };
 
   const redirectUri = getGoogleRedirectUri();
@@ -180,9 +200,11 @@ async function googleDisconnect(authKey, extraKeys) {
 }
 
 async function googleGetAccessToken(authKey) {
-  const stored = await browser.storage.local.get([authKey, 'gscClientId', 'gscClientSecret']);
+  const stored = await browser.storage.local.get(authKey);
   const auth = stored[authKey];
-  const { gscClientId, gscClientSecret } = stored;
+  // Refresh has to present the same client the grant was issued to, so this
+  // resolves the same way the connect flow did.
+  const { clientId: gscClientId, clientSecret: gscClientSecret } = await googleOAuthCredentials();
   if (!auth) return { error: 'NOT_CONNECTED' };
   if (auth.expiresAt > Date.now() + 60000) return { accessToken: auth.accessToken };
 

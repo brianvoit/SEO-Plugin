@@ -84,6 +84,7 @@ const POLYFILL_SRC = path.join(ROOT, 'node_modules', 'webextension-polyfill', 'd
 // pure declarations and could be listed in any order; they're kept in
 // dependency-ish order for readability, not correctness.
 export const BACKGROUND_FILES = [
+  'oauth-config.js',
   'bg-core.js',
   'bg-auth.js',
   'bg-gsc.js',
@@ -126,6 +127,35 @@ async function addPolyfill(outDir, manifest) {
   );
 }
 
+// Bakes the shipped OAuth client into the build. The repo is public, so the
+// credentials come from the environment (CI secrets) and never from source —
+// oauth-config.js is checked in with empty values and rewritten here.
+//
+// With the variables unset this is a no-op and the build ships the empty
+// defaults, which is exactly the bring-your-own-client behaviour the extension
+// has always had. That means an ordinary `npm run build` on a machine with no
+// secrets produces a working extension, and the file's shape is identical
+// either way.
+const OAUTH_CONFIG = 'oauth-config.js';
+
+async function injectOAuthClient(outDir) {
+  const id = process.env.GOOGLE_CLIENT_ID || '';
+  const secret = process.env.GOOGLE_CLIENT_SECRET || '';
+  if (!id) return { bundled: false };
+
+  // JSON.stringify escapes quotes/backslashes, so a credential with an odd
+  // character can't break out of the literal.
+  const src = (await readFile(path.join(ROOT, OAUTH_CONFIG), 'utf8'))
+    .replace(/^const BUNDLED_GOOGLE_CLIENT_ID = .*$/m,     `const BUNDLED_GOOGLE_CLIENT_ID = ${JSON.stringify(id)};`)
+    .replace(/^const BUNDLED_GOOGLE_CLIENT_SECRET = .*$/m, `const BUNDLED_GOOGLE_CLIENT_SECRET = ${JSON.stringify(secret)};`);
+
+  if (!src.includes(JSON.stringify(id))) {
+    throw new Error(`${OAUTH_CONFIG}: could not substitute the client id — has the declaration been renamed?`);
+  }
+  await writeFile(path.join(outDir, OAUTH_CONFIG), src);
+  return { bundled: true };
+}
+
 async function build(browser) {
   const outDir = path.join(DIST, browser);
   await rm(outDir, { recursive: true, force: true });
@@ -142,9 +172,11 @@ async function build(browser) {
   // Mutates `manifest` (content_scripts), so it must run before the write.
   if (browser === 'chrome') await addPolyfill(outDir, manifest);
 
+  const oauth = await injectOAuthClient(outDir);
+
   await writeFile(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 
-  return { browser, outDir, version: manifest.version };
+  return { browser, outDir, version: manifest.version, bundledOAuth: oauth.bundled };
 }
 
 // Only run when invoked directly, so the tests can import the helpers above.

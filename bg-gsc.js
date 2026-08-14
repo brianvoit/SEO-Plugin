@@ -17,7 +17,10 @@ async function gscGetStatus() {
     connected: !!gscAuth,
     redirectUri: getGoogleRedirectUri(),
     connectedAt: gscAuth?.connectedAt ?? null,
-    email: gscAuth ? await googleEnsureEmail('gscAuth') : null
+    email: gscAuth ? await googleEnsureEmail('gscAuth') : null,
+    // Lets Setup present the OAuth Client drawer as optional rather than as a
+    // required first step, on builds that ship a default client.
+    hasBundledOAuth: hasBundledOAuthClient()
   };
 }
 

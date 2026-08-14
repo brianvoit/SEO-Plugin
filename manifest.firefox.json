@@ -12,6 +12,7 @@
   "permissions": ["menus", "webRequestBlocking"],
   "background": {
     "scripts": [
+      "oauth-config.js",
       "bg-core.js",
       "bg-auth.js",
       "bg-gsc.js",

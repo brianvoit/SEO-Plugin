@@ -452,6 +452,22 @@ function revealOauthClientSection() { setOauthDrawer(true); }
   if (input) input.placeholder = IS_CHROMIUM ? 'Required for Web application clients' : 'Leave blank for Desktop app clients';
 })();
 
+// On builds that ship a default OAuth client, this whole drawer stops being a
+// required first step and becomes an override for people who want their own
+// Cloud project. Called from refreshGscSettingsStatus once the background has
+// reported whether a client was baked in — the popup can't see the constant
+// itself, since it lives in the background's scope.
+function applyOauthClientOptionality(hasBundled) {
+  const toggle = document.getElementById('btn-oauth-client-toggle');
+  if (toggle) {
+    toggle.firstChild.textContent = hasBundled ? 'OAuth Client (optional) ' : 'OAuth Client ';
+  }
+  const hint = document.getElementById('oauth-client-hint');
+  if (hint && hasBundled) {
+    hint.textContent = 'Optional. Connecting works out of the box — this extension ships with its own Google OAuth client. Add your own only if you would rather the connections run through your own Google Cloud project, in which case register the redirect URI below there first.';
+  }
+}
+
 document.getElementById('btn-oauth-client-toggle').addEventListener('click', () => {
   const sec = document.getElementById('oauth-client-section');
   setOauthDrawer(!sec.classList.contains('oauth-open'));

@@ -1405,6 +1405,7 @@ document.querySelectorAll('#gsc-metric-toggles .gsc-metric-toggle').forEach(btn 
 async function refreshGscSettingsStatus() {
   const status = await sendMessageWithTimeout({ action: 'gscGetStatus' });
   document.getElementById('gsc-redirect-uri').value = status.redirectUri;
+  if (typeof applyOauthClientOptionality === 'function') applyOauthClientOptionality(status.hasBundledOAuth);
 
   const badge         = document.getElementById('gsc-status-badge');
   const setupForm     = document.getElementById('gsc-setup-form');

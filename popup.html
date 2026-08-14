@@ -699,6 +699,32 @@
     <div id="tags-content"></div>
   </div>
 
+  <!-- Keyword Phrases detail panel -->
+  <div id="phrases-panel" class="hidden">
+    <div class="settings-header">
+      <button id="btn-phrases-back" class="settings-back-btn">
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="10 3 4 8 10 13"/>
+        </svg>
+        Back
+      </button>
+      <span class="bl-header-meta" id="phrases-header-meta"></span>
+      <button id="btn-phrases-refresh" class="redirect-retrace-btn" title="Re-scan the page">Refresh</button>
+    </div>
+    <div class="gsc-query-search-bar" id="phrases-search-bar">
+      <input type="text" id="phrases-search" class="gsc-query-search-input"
+        placeholder="Filter phrases (regex: term|term2)" autocomplete="off" spellcheck="false" />
+      <button id="btn-phrases-search-mode" class="gsc-query-search-mode-btn" title="Toggle include/exclude">Match</button>
+      <label class="ranking-onpage-toggle phrases-brand-toggle"><input type="checkbox" id="phrases-brand-toggle" checked /> Brand</label>
+    </div>
+    <div id="phrases-gap" class="phrases-gap hidden"></div>
+    <div id="phrases-tables"></div>
+    <div class="phrases-export-row">
+      <button id="btn-phrases-export-csv" class="save-key-btn">Download CSV</button>
+      <button id="btn-phrases-export-sheet" class="save-key-btn">Add to Google Sheet</button>
+    </div>
+  </div>
+
   <!-- AI Action Plan detail panel -->
   <div id="actionplan-panel" class="hidden">
     <div class="settings-header">
@@ -1561,6 +1587,14 @@
     <section class="field-section">
       <div class="field-header">
         <span class="field-label">HEADINGS</span>
+        <button class="field-nav-btn field-nav-btn--inline" id="btn-phrases" title="Top keyword phrases on this page" disabled>
+          <div class="field-nav-right">
+            <span id="phrases-summary" class="field-nav-summary"></span>
+            <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 3 11 8 6 13"/>
+            </svg>
+          </div>
+        </button>
       </div>
       <div id="headings-warnings"></div>
       <div id="headings-list" class="headings-list"></div>
@@ -1805,6 +1839,7 @@
   <script src="popup-siteaudit.js"></script>
   <script src="popup-pagespeed.js"></script>
   <script src="popup-tags.js"></script>
+  <script src="popup-phrases.js"></script>
   <script src="popup-annotations.js"></script>
   <script src="popup-chart-annotations.js"></script>
   <script src="popup-redirects.js"></script>

@@ -3246,6 +3246,49 @@ async function adsGetAdsDetail({ pageUrl, adIds }) {
   return { ads };
 }
 
+// A lightweight, date-range-free sibling of adsGetPageData's final-URL
+// matching above (line ~2976) — the Keyword Phrases panel's "Ad" chip only
+// needs to know WHAT TEXT is running on ads targeting this page, not any
+// performance metrics, so this skips the metrics query and date range
+// entirely rather than reusing the heavier, cached-by-range adsGetPageData.
+async function adsGetPageAdCopy({ pageUrl }) {
+  const tokenResult = await adsGetAccessToken();
+  if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
+  if (tokenResult.error === 'REAUTH_REQUIRED') return { connected: false, reauthRequired: true };
+  if (tokenResult.error) return { connected: true, error: tokenResult.error };
+  const accessToken = tokenResult.accessToken;
+
+  const { adsDeveloperToken } = await browser.storage.local.get('adsDeveloperToken');
+  if (!adsDeveloperToken) return { connected: true, error: 'NO_DEV_TOKEN' };
+
+  const host = gscPageHost(pageUrl);
+  const customerId = await adsGetAccount(host);
+  if (!customerId) return { connected: true, error: 'NO_ACCOUNT', host };
+
+  const target = adsNormUrl(pageUrl);
+  const adRes = await adsSearch(accessToken, customerId,
+    `SELECT ad_group_ad.ad.id, ad_group_ad.ad.final_urls
+     FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED'`);
+  if (adRes.error) return { connected: true, error: adRes.error, detail: adRes.detail };
+
+  const adIds = [];
+  (adRes.rows || []).forEach(r => {
+    const urls = (r.adGroupAd?.ad?.finalUrls) || [];
+    if (urls.some(u => adsNormUrl(u) === target)) adIds.push(String(r.adGroupAd.ad.id));
+  });
+  if (!adIds.length) return { connected: true, texts: [] };
+
+  const detail = await adsGetAdsDetail({ pageUrl, adIds });
+  if (detail.error) return { connected: true, error: detail.error };
+
+  const texts = [];
+  Object.values(detail.ads || {}).forEach(ad => {
+    (ad.headlines || []).forEach(h => { if (h.text) texts.push(h.text); });
+    (ad.descriptions || []).forEach(d => { if (d.text) texts.push(d.text); });
+  });
+  return { connected: true, texts: [...new Set(texts)] };
+}
+
 // ─── Negative keywords: write campaign-level exclusion lists ──────────────────
 // For each campaign, push the chosen terms into a NEGATIVE_KEYWORDS shared set
 // (exclusion list): reuse an attached list, else create one + attach it, then add
@@ -4824,6 +4867,42 @@ async function sheetsExportGscQueries({ rows, pageUrl, rangeDays }) {
   return { url: `https://docs.google.com/spreadsheets/d/${sheet.id}/edit` };
 }
 
+// ─── Google Sheets: Keyword Phrases export ──────────────────────────────────
+// Same one-spreadsheet-per-domain history-log model as the exports above.
+// Rows arrive fully formed from popup-phrases.js, which owns the placement
+// chips, brand matching and the GSC/volume merge.
+
+const SHEETS_PHRASES_TAB_NAME = 'Keyword Phrases';
+const SHEETS_PHRASES_HEADER_ROW = [
+  'Date Exported', 'Page URL',
+  'Words', 'Phrase', 'Count', 'Density %', 'Prominence', 'Placement',
+  'Clicks', 'Impressions', 'Position', 'Volume'
+];
+
+async function sheetsExportPhrases({ rows, pageUrl }) {
+  const token = await docsGetAccessToken();
+  if (token.error) return { notConnected: true, error: token.error };
+
+  if (!Array.isArray(rows) || !rows.length) return { error: 'NO_ROWS' };
+
+  const domain = sheetsDomainFromUrl(pageUrl);
+  const sheet = await sheetsGetOrCreateSpreadsheet(token.accessToken, `phrases::${domain}`, {
+    title: `Keyword Phrases — ${domain}`,
+    tabName: SHEETS_PHRASES_TAB_NAME,
+    headerRow: SHEETS_PHRASES_HEADER_ROW,
+    pageUrl
+  });
+  if (sheet.notConnected || sheet.error) return sheet;
+
+  const dateAdded = new Date().toISOString().slice(0, 10);
+  const values = rows.map(r => [dateAdded, pageUrl, ...r]);
+
+  const appendRes = await sheetsAppendRows(token.accessToken, sheet.id, SHEETS_PHRASES_TAB_NAME, values);
+  if (appendRes.notConnected || appendRes.error) return appendRes;
+
+  return { url: `https://docs.google.com/spreadsheets/d/${sheet.id}/edit` };
+}
+
 // ─── Google Sheets: Ads-tab table exports (Keywords / Search Terms) ─────────
 // Same history-log model again; one spreadsheet per domain per table.
 
@@ -5473,6 +5552,7 @@ function routeMessage(message) {
     case 'adsGetChartData':    return adsGetChartData(message);
     case 'adsGetMoreSearchTerms': return adsGetMoreSearchTerms(message);
     case 'adsGetAdsDetail':    return adsGetAdsDetail(message);
+    case 'adsGetPageAdCopy':   return adsGetPageAdCopy(message);
     case 'adsGetCampaignNegLists': return adsGetCampaignNegLists(message);
     case 'adsGetAllAdGroups':  return adsGetAllAdGroups(message);
     case 'adsGetAllKeywords':  return adsGetAllKeywords(message);
@@ -5516,6 +5596,7 @@ function routeMessage(message) {
     case 'docsExportAddKeywords': return docsExportAddKeywords(message);
     case 'sheetsExportBlindspotIdeas': return sheetsExportBlindspotIdeas(message);
     case 'sheetsExportGscQueries': return sheetsExportGscQueries(message);
+    case 'sheetsExportPhrases':   return sheetsExportPhrases(message);
     case 'sheetsExportAdsTable': return sheetsExportAdsTable(message);
     case 'clientRegistryList':   return clientRegistryList();
     case 'clientRegistryGet':    return clientRegistryGet(message);

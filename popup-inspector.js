@@ -1739,6 +1739,7 @@ function render(data, expandMeta = false) {
   renderFavicon(data);
   renderDates(data);
   if (typeof renderTagsEntry === 'function') renderTagsEntry(data);
+  if (typeof renderPhrasesEntry === 'function') renderPhrasesEntry(data);
   renderOverlayToggle(data.altOverlayActive);
   renderLinkOverlayToggle(data.linkOverlayActive);
   if (typeof loadPageSpeedData === 'function') loadPageSpeedData(false);

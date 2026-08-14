@@ -589,6 +589,158 @@ function getPageData() {
   };
 }
 
+// ─── Keyword phrase analysis (Headings panel's "top phrases" screen) ────────
+// n-gram extraction over the page's own body copy, kept out of getPageData
+// (expensive relative to everything else there) and computed on demand only
+// when the phrases panel opens — same "detect-on-open, not on every load"
+// shape as detectMarketingTags above.
+
+// Articles, prepositions, conjunctions, pronouns, common auxiliaries/adverbs —
+// words that carry no topical meaning on their own. A phrase is only trimmed
+// at its ENDS (see phraseNgrams below): "best time to visit" survives even
+// though "to" is a stopword, because interior function words are part of a
+// meaningful phrase — only a phrase that STARTS or ENDS on one is discarded.
+const PHRASE_STOPWORDS = new Set([
+  'a','an','the','and','or','but','nor','so','yet','for','of','to','in','on','at','by','with',
+  'from','into','onto','upon','over','under','above','below','between','among','through','during',
+  'before','after','since','until','while','about','against','without','within','along','across',
+  'behind','beyond','despite','except','inside','outside','near','off','out','per','than','via',
+  'is','are','was','were','be','been','being','am','do','does','did','doing','done','has','have',
+  'had','having','will','would','shall','should','can','could','may','might','must','ought',
+  'i','me','my','mine','myself','we','us','our','ours','ourselves','you','your','yours','yourself',
+  'yourselves','he','him','his','himself','she','her','hers','herself','it','its','itself','they',
+  'them','their','theirs','themselves','this','that','these','those','who','whom','whose','which',
+  'what','whatever','whoever','whichever',
+  'as','if','then','than','because','although','though','unless','whereas','not','no','nor',
+  'here','there','when','where','why','how','all','any','both','each','few','more','most','other',
+  'some','such','only','own','same','too','very','just','also','further','once','still',
+  'up','down','ever','never','always','often','sometimes','rather','quite',
+  'really','actually','basically','simply','soon','already','well'
+]);
+
+// Blocks are walked separately (never bridged) so a phrase never straddles
+// two unrelated pieces of copy — the last word of one paragraph and the
+// first word of the next never get glued into a fake n-gram. Only leaf-most
+// matches count (a block containing another countable block is skipped) so
+// e.g. <li><p>…</p></li> isn't double-counted.
+const PHRASE_BLOCK_SELECTOR = 'h1,h2,h3,h4,h5,h6,p,li,td,th,blockquote,dd,dt,figcaption,caption,summary';
+const PHRASE_CANDIDATE_CAP = 40;    // per n-length, before the popup's own regex/Brand filtering
+const PHRASE_LINKED_TEXT_CAP = 300;
+
+function phraseTokenize(text) {
+  const raw = (text.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}'-]*/gu)) || [];
+  return raw.filter(t => t.replace(/['-]/g, '').length > 1 || /\d/.test(t));
+}
+
+function phraseBlockTexts() {
+  const blocks = [];
+  document.querySelectorAll(PHRASE_BLOCK_SELECTOR).forEach(el => {
+    if (!isBodyContent(el)) return;
+    if (el.querySelector(PHRASE_BLOCK_SELECTOR)) return;   // leaf-most only
+    const text = (el.textContent || '').trim();
+    if (text) blocks.push(text);
+  });
+  return blocks;
+}
+
+function phraseLinkedTexts() {
+  const texts = [];
+  const seen = new Set();
+  document.querySelectorAll('a[href]').forEach(a => {
+    if (!isBodyContent(a)) return;
+    const t = (a.textContent || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    if (t && !seen.has(t)) { seen.add(t); texts.push(t); }
+  });
+  return texts.slice(0, PHRASE_LINKED_TEXT_CAP);
+}
+
+// Counts every 1–4 word n-gram across all body blocks, trimming stopwords
+// off each phrase's ends only. Returns { counts: Map<phrase, {count,firstIndex,n}>,
+// totalTokens } — firstIndex is a page-wide token offset (blocks counted in
+// document order) so prominence can score "how early on the page" globally,
+// not just within one block.
+function phraseNgrams(blocks) {
+  const counts = new Map();
+  let offset = 0;
+  blocks.forEach(text => {
+    const tokens = phraseTokenize(text);
+    for (let n = 1; n <= 4; n++) {
+      for (let i = 0; i + n <= tokens.length; i++) {
+        const slice = tokens.slice(i, i + n);
+        if (PHRASE_STOPWORDS.has(slice[0]) || PHRASE_STOPWORDS.has(slice[slice.length - 1])) continue;
+        const phrase = slice.join(' ');
+        const idx = offset + i;
+        const rec = counts.get(phrase);
+        if (rec) { rec.count++; if (idx < rec.firstIndex) rec.firstIndex = idx; }
+        else counts.set(phrase, { count: 1, firstIndex: idx, n });
+      }
+    }
+    offset += tokens.length;
+  });
+  return { counts, totalTokens: offset };
+}
+
+const PHRASE_TAG_BONUS = { title: 40, h1: 30, h2: 15, h3: 5, h4: 5, h5: 5, h6: 5 };
+
+function detectKeywordPhrases() {
+  const { counts, totalTokens } = phraseNgrams(phraseBlockTexts());
+
+  const titleText = (document.querySelector('title')?.textContent || '').trim().toLowerCase();
+  const descText   = (document.querySelector('meta[name="description"]')?.getAttribute('content') || '').trim().toLowerCase();
+  const headingTexts = {};
+  [1, 2, 3, 4, 5, 6].forEach(lvl => {
+    headingTexts[lvl] = Array.from(document.querySelectorAll(`h${lvl}`))
+      .filter(isBodyContent)
+      .map(el => (el.textContent || '').trim().toLowerCase().replace(/\s+/g, ' '));
+  });
+  const linkedTexts = phraseLinkedTexts();
+
+  function annotate(phrase, rec) {
+    const chips = [];
+    if (titleText && titleText.includes(phrase)) chips.push('title');
+    if (descText && descText.includes(phrase)) chips.push('description');
+    let tagBonus = chips.includes('title') ? PHRASE_TAG_BONUS.title : 0;
+    [1, 2, 3, 4, 5, 6].forEach(lvl => {
+      if (headingTexts[lvl].some(t => t.includes(phrase))) {
+        chips.push(`h${lvl}`);
+        tagBonus = Math.max(tagBonus, PHRASE_TAG_BONUS[`h${lvl}`] || 0);
+      }
+    });
+    if (linkedTexts.some(t => t.includes(phrase))) chips.push('linked');
+
+    const positionScore = totalTokens > 0 ? Math.max(0, 100 * (1 - rec.firstIndex / totalTokens)) : 0;
+    const prominence = Math.round(Math.min(100, positionScore * 0.6 + tagBonus));
+    const density = totalTokens > 0 ? rec.count / totalTokens : 0;
+
+    return { phrase, count: rec.count, density, prominence, chips };
+  }
+
+  const tables = {};
+  [1, 2, 3, 4].forEach(n => {
+    tables[n] = [...counts.entries()]
+      .filter(([, r]) => r.n === n)
+      .sort((a, b) => b[1].count - a[1].count || a[1].firstIndex - b[1].firstIndex)
+      .slice(0, PHRASE_CANDIDATE_CAP)
+      .map(([phrase, rec]) => annotate(phrase, rec));
+  });
+
+  return { scannedAt: Date.now(), totalWords: totalTokens, tables };
+}
+
+// Substring test for a batch of terms against the page's body copy — the
+// same nav/footer-excluded blocks detectKeywordPhrases counts, so a query
+// reported as absent here is genuinely absent from the CONTENT, not merely
+// missing from a top-N table.
+function phrasesPresence(terms) {
+  const hay = ' ' + phraseBlockTexts().join(' \n ').toLowerCase().replace(/\s+/g, ' ') + ' ';
+  const present = [];
+  (terms || []).forEach(t => {
+    const s = String(t || '').toLowerCase().trim().replace(/\s+/g, ' ');
+    if (s && hay.includes(s)) present.push(t);
+  });
+  return { present };
+}
+
 // ─── Tooltip ─────────────────────────────────────────────────────────────────
 
 function getTooltip() {
@@ -1948,6 +2100,29 @@ browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     try { tags = detectMarketingTags(); }
     catch (e) { tags = { scannedAt: 0, vendors: [], flags: [], _readError: String((e && e.message) || e) }; }
     sendResponse(tags);
+    return true;
+  }
+
+  // Same on-demand shape as getMarketingTags above — kept out of getPageData
+  // since the n-gram walk is real work, only worth doing when the phrases
+  // panel is actually opened.
+  if (message.action === 'getKeywordPhrases') {
+    let phrases;
+    try { phrases = detectKeywordPhrases(); }
+    catch (e) { phrases = { scannedAt: 0, totalWords: 0, tables: { 1: [], 2: [], 3: [], 4: [] }, _readError: String((e && e.message) || e) }; }
+    sendResponse(phrases);
+    return true;
+  }
+
+  // Backs the phrases panel's content-gap check: "Google sends this page
+  // impressions for a query the page never actually says." Done here rather
+  // than by shipping the whole body text to the popup — the popup only needs
+  // a yes/no per query, and the page text can be very large.
+  if (message.action === 'checkPhrasePresence') {
+    let res;
+    try { res = phrasesPresence(message.terms); }
+    catch { res = { present: [] }; }
+    sendResponse(res);
     return true;
   }
 

@@ -1370,6 +1370,11 @@ body.settings-open #update-footer { margin-top: auto; }
 .field-nav-btn:disabled { cursor: default; opacity: 0.55; }
 .field-nav-btn:not(:disabled):hover .field-nav-summary { color: var(--accent); }
 
+/* Sits beside a .field-label inside a .field-header, rather than being the
+   header's only child (Structured Data, Backlinks, etc.) — so it must not
+   claim the row's full width. */
+.field-nav-btn--inline { width: auto; flex-shrink: 0; }
+
 .field-nav-right {
   display: flex;
   align-items: center;
@@ -3011,6 +3016,48 @@ body.settings-open #update-footer { margin-top: auto; }
   border-radius: 3px;
   padding: 1px 4px;
   letter-spacing: 0.04em;
+}
+
+/* ── Keyword Phrases panel ─────────────────────────────────────────────────── */
+/* Rows reuse .ranking-row's grid/typography wholesale; only the phrase cell's
+   wrapping behaviour differs — a 4-word phrase plus its placement chips needs
+   to wrap rather than ellipsis away the chips. */
+.phrases-row .ranking-cell-term { flex-wrap: wrap; row-gap: 2px; }
+.phrases-row .ranking-keyword { white-space: normal; overflow: visible; }
+.phrases-chips { display: inline-flex; flex-wrap: wrap; gap: 3px; align-items: center; }
+.phrases-chip-primary { color: #fff; background: var(--accent); }
+.phrases-chip-brand   { color: var(--hint-amber); background: color-mix(in srgb, var(--hint-amber) 16%, transparent); }
+.phrases-chip-linked  { color: var(--hint-green); background: color-mix(in srgb, var(--hint-green) 16%, transparent); }
+
+/* This search bar is a direct child of the panel rather than living inside a
+   .field-section, so it has to carry that section's horizontal inset itself
+   or it renders edge-to-edge while every table below it is indented. */
+#phrases-search-bar { padding: 8px 14px 0; }
+.phrases-brand-toggle { flex-shrink: 0; }
+.phrases-export-row { display: flex; gap: 8px; padding: 10px 14px 16px; }
+
+/* Content gap — queries this page ranks for but never says. Amber rather than
+   red: it's an opportunity, not a fault. */
+.phrases-gap {
+  margin: 0 14px 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--hint-amber);
+  background: color-mix(in srgb, var(--hint-amber) 8%, transparent);
+  border-radius: 0 6px 6px 0;
+}
+.phrases-gap-title {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--hint-amber); margin-bottom: 2px;
+}
+.phrases-gap-hint { font-size: 10.5px; color: var(--text-muted); margin-bottom: 6px; }
+.phrases-gap-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  font-size: 11.5px; padding: 2px 0;
+}
+.phrases-gap-term { color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phrases-gap-impr {
+  flex-shrink: 0; font-size: 10px; color: var(--text-muted);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
 
 /* ── Ads-sourced Vol/competition cell + 12-month trend hover popover ────────── */

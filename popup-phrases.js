@@ -50,16 +50,14 @@ const PHRASE_CHIP_LABEL = {
 
 // ─── Overview entry ───────────────────────────────────────────────────────────
 
+// The link sits in the WORD COUNT header, which already shows the count — so
+// it only has to say what it opens, not restate the number.
 function renderPhrasesEntry(data) {
   const btn = document.getElementById('btn-phrases');
-  const summary = document.getElementById('phrases-summary');
-  if (!btn || !summary) return;
-
-  const words = (data && data.bodyWordCount) || 0;
+  if (!btn) return;
   // Nothing to count means nothing to show — the panel would be four empty
-  // tables, so the chevron stays inert rather than opening a dead end.
-  btn.disabled = words === 0;
-  summary.textContent = words ? `${words.toLocaleString()} words` : '';
+  // tables, so the link stays inert rather than opening a dead end.
+  btn.disabled = ((data && data.bodyWordCount) || 0) === 0;
 }
 
 // ─── Panel ────────────────────────────────────────────────────────────────────

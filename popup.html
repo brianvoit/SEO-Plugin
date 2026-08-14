@@ -1593,7 +1593,14 @@
         <div id="gsc-inspection-list"></div>
       </div>
       <div class="split-half">
-        <span class="field-label">WORD COUNT</span>
+        <div class="field-header field-header--flush">
+          <span class="field-label">WORD COUNT</span>
+          <button class="field-nav-btn field-nav-btn--inline" id="btn-phrases" disabled
+                  title="Keyword phrase analysis — the words and phrases this page actually uses"
+                  aria-label="Keyword phrase analysis — the words and phrases this page actually uses">
+            <span class="field-nav-summary">Analysis</span>
+          </button>
+        </div>
         <div class="field-meta" id="wordcount-text"></div>
         <div class="field-meta" id="ai-readability">—</div>
       </div>
@@ -1615,14 +1622,6 @@
     <section class="field-section">
       <div class="field-header">
         <span class="field-label">HEADINGS</span>
-        <button class="field-nav-btn field-nav-btn--inline" id="btn-phrases" title="Top keyword phrases on this page" disabled aria-label="Top keyword phrases on this page">
-          <div class="field-nav-right">
-            <span id="phrases-summary" class="field-nav-summary"></span>
-            <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="6 3 11 8 6 13"/>
-            </svg>
-          </div>
-        </button>
       </div>
       <div id="headings-warnings"></div>
       <div id="headings-list" class="headings-list"></div>

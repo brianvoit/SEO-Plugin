@@ -114,18 +114,25 @@ const rowPhrases = (b, n) =>
 const b0 = boot().api;
 
 describe('the Overview entry', () => {
-  test('shows the page word count and enables the chevron', () => {
+  test('enables the Analysis link on a page with copy', () => {
+    // It lives in the WORD COUNT header, which already shows the number — the
+    // link only has to say what it opens.
     const b = boot();
     b.api.renderPhrasesEntry({ bodyWordCount: 1240 });
-    assert.equal(b.d.getElementById('phrases-summary').textContent, '1,240 words');
     assert.equal(b.d.getElementById('btn-phrases').disabled, false);
   });
 
   test('stays disabled on a page with no body copy', () => {
-    // Opening would give four empty tables — a dead end, so the chevron
+    // Opening would give four empty tables — a dead end, so the link
     // shouldn't invite the click.
     const b = boot();
     b.api.renderPhrasesEntry({ bodyWordCount: 0 });
+    assert.equal(b.d.getElementById('btn-phrases').disabled, true);
+  });
+
+  test('survives a page read that returned nothing at all', () => {
+    const b = boot();
+    assert.doesNotThrow(() => b.api.renderPhrasesEntry(null));
     assert.equal(b.d.getElementById('btn-phrases').disabled, true);
   });
 });

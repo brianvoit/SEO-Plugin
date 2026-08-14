@@ -1375,6 +1375,11 @@ body.settings-open #update-footer { margin-top: auto; }
    claim the row's full width. */
 .field-nav-btn--inline { width: auto; flex-shrink: 0; }
 
+/* Word Count's header shares a split row with Indexability, whose half has a
+   bare label and no header. The usual 5px would push this column's content
+   down relative to its neighbour. */
+.field-header--flush { margin-bottom: 0; }
+
 .field-nav-right {
   display: flex;
   align-items: center;

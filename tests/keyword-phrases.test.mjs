@@ -78,6 +78,28 @@ describe('what counts as page content', () => {
     assert.equal(row(res, 1, 'widget'), undefined);
   });
 
+  test('cookie-consent banners are excluded structurally', () => {
+    // These sit in <body>, outside nav/header/footer, so the landmark rules
+    // above never catch them — and on a site with a persistent banner they
+    // can outrank the actual copy.
+    const res = scan(`
+      <div id="cookie-banner"><p>manage your widget preferences</p></div>
+      <div class="cc-consent-modal"><p>widget widget widget</p></div>
+      <div aria-label="Cookie notice"><p>widget</p></div>
+      <p>telescope</p>
+    `);
+    assert.equal(row(res, 1, 'widget'), undefined, 'consent-banner copy leaked into the tables');
+    assert.ok(row(res, 1, 'telescope'));
+  });
+
+  test('a legitimate word is not excluded just for sitting near one', () => {
+    // The selector matches containers, not text — a paragraph mentioning
+    // cookies in real content still counts.
+    const res = scan('<p>our chocolate biscuits and shortbread</p>');
+    assert.ok(row(res, 1, 'biscuits'));
+    assert.ok(row(res, 1, 'shortbread'));
+  });
+
   test('phrases never bridge two blocks', () => {
     // "shoes running" only exists if the last word of one paragraph is glued
     // to the first of the next — a phrase the page never actually says.
@@ -106,6 +128,22 @@ describe('stopwords', () => {
     // stopwords would destroy exactly the phrases this screen exists to find.
     const res = scan('<p>the best time to visit japan today</p>');
     assert.ok(row(res, 4, 'best time to visit'), 'an interior stopword broke a real phrase');
+  });
+
+  test('consent and legal boilerplate is dropped', () => {
+    // The backstop for banners whose markup gives nothing away for the
+    // structural rule to match on.
+    const res = scan('<p>we use cookies and consent tracking under our privacy policy telescope</p>');
+    ['cookies', 'consent', 'privacy', 'policy'].forEach(w =>
+      assert.equal(row(res, 1, w), undefined, `"${w}" should not rank as a keyword`));
+    assert.ok(row(res, 1, 'telescope'), 'real content alongside it still counts');
+  });
+
+  test('the boilerplate list is a known trade-off, not an oversight', () => {
+    // A page genuinely ABOUT privacy policy under-reports its own subject.
+    // Pinned so the behaviour is a decision on record rather than a surprise.
+    const res = scan('<h1>Privacy Policy</h1><p>our privacy policy explains cookies</p>');
+    assert.equal(row(res, 2, 'privacy policy'), undefined);
   });
 
   test('single letters are dropped, but numbers survive', () => {

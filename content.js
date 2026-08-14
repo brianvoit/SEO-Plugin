@@ -615,7 +615,18 @@ const PHRASE_STOPWORDS = new Set([
   'here','there','when','where','why','how','all','any','both','each','few','more','most','other',
   'some','such','only','own','same','too','very','just','also','further','once','still',
   'up','down','ever','never','always','often','sometimes','rather','quite',
-  'really','actually','basically','simply','soon','already','well'
+  'really','actually','basically','simply','soon','already','well',
+  // Consent/legal boilerplate. Cookie banners and policy links sit in the body,
+  // not in nav or footer, so the structural exclusion below never catches them —
+  // and on a site with a persistent banner they can outrank the real copy.
+  //
+  // TRADE-OFF, worth knowing: this is a blunt word list, so a page genuinely
+  // ABOUT privacy or cookie policy will under-report its own subject. That's
+  // the deliberate call — those pages are rare, and every other page on a site
+  // carries this boilerplate.
+  'cookie','cookies','consent','gdpr','ccpa','privacy','policy','policies',
+  'accept','decline','preferences','disclaimer','terms','copyright','rights',
+  'reserved','trademark'
 ]);
 
 // Blocks are walked separately (never bridged) so a phrase never straddles
@@ -636,10 +647,24 @@ function phraseTokenize(text) {
   return raw.filter(t => t.replace(/['-]/g, '').length > 1 || /\d/.test(t));
 }
 
+// Consent banners are the one piece of boilerplate isBodyContent can't see:
+// they're usually a fixed-position div dropped straight into <body>, outside
+// any nav/header/footer/aside. Matching on the id/class conventions the major
+// consent platforms use catches most of them structurally, which is a better
+// fix than the word list — the words only exist as a backstop for banners
+// whose markup gives nothing away.
+const PHRASE_CONSENT_SELECTOR = [
+  '[id*="cookie" i]', '[class*="cookie" i]',
+  '[id*="consent" i]', '[class*="consent" i]',
+  '[id*="gdpr" i]', '[class*="gdpr" i]',
+  '[aria-label*="cookie" i]', '[aria-label*="consent" i]'
+].join(',');
+
 function phraseBlockTexts() {
   const blocks = [];
   document.querySelectorAll(PHRASE_BLOCK_SELECTOR).forEach(el => {
     if (!isBodyContent(el)) return;
+    if (el.closest(PHRASE_CONSENT_SELECTOR)) return;
     if (el.querySelector(PHRASE_BLOCK_SELECTOR)) return;   // leaf-most only
     const text = (el.textContent || '').trim();
     if (text) blocks.push(text);

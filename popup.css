@@ -3027,6 +3027,13 @@ body.settings-open #update-footer { margin-top: auto; }
 /* Rows reuse .ranking-row's grid/typography wholesale; only the phrase cell's
    wrapping behaviour differs — a 4-word phrase plus its placement chips needs
    to wrap rather than ellipsis away the chips. */
+/* Nine columns don't fit a 400px popup. Rather than crush the phrase column
+   to a few characters, the table scrolls sideways in its own box — and in the
+   sidebar or pop-out, where there is room, nothing scrolls. min-width keeps
+   the grid from collapsing instead of overflowing. */
+.phrases-scroll { overflow-x: auto; overscroll-behavior-x: contain; }
+.phrases-scroll .phrases-row { min-width: 520px; }
+
 .phrases-row .ranking-cell-term { flex-wrap: wrap; row-gap: 2px; }
 .phrases-row .ranking-keyword { white-space: normal; overflow: visible; }
 /* margin-left:auto pushes the chips to the cell's right edge, so the phrases

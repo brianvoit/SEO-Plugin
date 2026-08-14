@@ -522,7 +522,7 @@ const SHEETS_PHRASES_TAB_NAMES = { 1: 'One Word', 2: 'Two Words', 3: 'Three Word
 const SHEETS_PHRASES_HEADER_ROW = [
   'Date Exported', 'Page URL',
   'Phrase', 'Count', 'Density %', 'Prominence', 'Placement',
-  'Clicks', 'Impressions', 'Position', 'Volume'
+  'Clicks', 'Impressions', 'Position', 'Volume', 'Competition', 'Est. CPC'
 ];
 
 async function sheetsExportPhrases({ tables, pageUrl }) {

@@ -60,6 +60,17 @@ function boot({ scan = null, branded = {}, gsc = null, adCopy = null } = {}) {
     return w.document.importNode(doc.documentElement, true);
   };
   w.gscCsvCell = (v) => `"${String(v).replace(/"/g, '""')}"`;
+  // popup-gsc.js's real CPC helpers — the phrases panel reuses them rather
+  // than re-deriving a number the Search tab already computes.
+  w.gscCpcMicros = (v) => {
+    if (!v) return 0;
+    const lo = v.lowTopOfPageBidMicros, hi = v.highTopOfPageBidMicros;
+    if (lo != null && hi != null) return (Number(lo) + Number(hi)) / 2;
+    if (hi != null) return Number(hi);
+    if (lo != null) return Number(lo);
+    return 0;
+  };
+  w.gscFormatCpc = (micros) => '$' + (micros / 1e6).toFixed(2);
   w.gscSelectedRange = 30;
   w.maybeOfferExportFolder = () => {};
   w.sendMessageWithTimeout = (msg) => {
@@ -317,22 +328,25 @@ describe('Request more', () => {
 
 describe('compact numbers', () => {
   test('thousands and millions are abbreviated', () => {
-    assert.equal(b0.phrasesCompactNum(301000), '301k');
+    assert.equal(b0.phrasesCompactNum(301000), '301K');
     assert.equal(b0.phrasesCompactNum(4100000), '4.1M');
   });
 
-  test('one decimal only below ten, where it carries information', () => {
-    assert.equal(b0.phrasesCompactNum(1500), '1.5k');
-    assert.equal(b0.phrasesCompactNum(22000), '22k');
+  test('uses the same uppercase K as the Search and Ads tables', () => {
+    // gscFormatVolume has always rendered K/M; a lowercase k here would put
+    // two different conventions on adjacent screens.
+    assert.equal(b0.phrasesCompactNum(1100), '1.1K');
+    assert.equal(b0.phrasesCompactNum(22000), '22K');
     assert.equal(b0.phrasesCompactNum(12400000), '12M');
   });
 
   test('a trailing .0 is dropped rather than shown', () => {
-    assert.equal(b0.phrasesCompactNum(2000), '2k');
+    assert.equal(b0.phrasesCompactNum(2000), '2K');
     assert.equal(b0.phrasesCompactNum(3000000), '3M');
   });
 
   test('values under a thousand are left alone', () => {
+    assert.equal(b0.phrasesCompactNum(999), '999');
     assert.equal(b0.phrasesCompactNum(880), '880');
     assert.equal(b0.phrasesCompactNum(0), '0');
   });
@@ -341,12 +355,70 @@ describe('compact numbers', () => {
     assert.equal(b0.phrasesCompactNum(null), '—');
   });
 
-  test('the Volume column renders through it', () => {
+  test('the Volume column renders through it, keeping the exact figure on hover', () => {
     const b = boot();
     b.api.setData({ totalWords: 100, tables: tables({ 1: [p('telescope', 9)] }) });
     b.api.setVolume({ telescope: { avgMonthlySearches: 301000 } });
     b.api.renderPhrasesPanel();
-    assert.match(section(b, 1).textContent, /301k/);
+    assert.match(section(b, 1).textContent, /301K/);
+    const titled = [...section(b, 1).querySelectorAll('[title]')].map(e => e.title);
+    assert.ok(titled.some(t => /301,000/.test(t)), 'the exact volume should survive as a tooltip');
+  });
+
+  test('impressions are abbreviated too', () => {
+    const b = boot();
+    b.api.setData({ totalWords: 100, tables: tables({ 1: [p('telescope', 9)] }) });
+    b.api.setGsc({ telescope: { clicks: 12, impressions: 1100, position: 4.2 } });
+    b.api.renderPhrasesPanel();
+    assert.match(section(b, 1).textContent, /1\.1K/);
+  });
+});
+
+describe('competition and CPC', () => {
+  test('both columns appear once volume data has landed', () => {
+    const b = boot();
+    b.api.setData({ totalWords: 100, tables: tables({ 1: [p('telescope', 9)] }) });
+    b.api.renderPhrasesPanel();
+    let heads = [...b.d.querySelectorAll('.ranking-row--header .ranking-cell-num')].map(e => e.textContent);
+    assert.ok(!heads.includes('Comp'));
+
+    b.api.setVolume({ telescope: { avgMonthlySearches: 301000, competition: 'HIGH' } });
+    b.api.renderPhrasesPanel();
+    heads = [...b.d.querySelectorAll('.ranking-row--header .ranking-cell-num')].map(e => e.textContent);
+    assert.ok(heads.includes('Comp'));
+    assert.ok(heads.includes('CPC'));
+  });
+
+  test('competition renders the same Low/Med/High labels the Search tab uses', () => {
+    const b = boot();
+    b.api.setData({ totalWords: 100, tables: tables({ 1: [p('a', 9), p('b', 8), p('c', 7)] }) });
+    b.api.setVolume({
+      a: { avgMonthlySearches: 10, competition: 'LOW' },
+      b: { avgMonthlySearches: 10, competition: 'MEDIUM' },
+      c: { avgMonthlySearches: 10, competition: 'HIGH' }
+    });
+    b.api.renderPhrasesPanel();
+    const cells = [...section(b, 1).querySelectorAll('.gsc-query-diff')].map(e => e.textContent);
+    assert.deepEqual(cells, ['Low', 'Med', 'High']);
+  });
+
+  test('a phrase with no competition data shows a dash', () => {
+    const b = boot();
+    b.api.setData({ totalWords: 100, tables: tables({ 1: [p('telescope', 9)] }) });
+    b.api.setVolume({ telescope: { avgMonthlySearches: 500 } });
+    b.api.renderPhrasesPanel();
+    assert.equal(section(b, 1).querySelector('.gsc-query-diff').textContent, '—');
+  });
+
+  test('the export carries raw competition and CPC, not display strings', () => {
+    // A spreadsheet wants values it can sort and total.
+    const b = boot();
+    b.api.setData({ totalWords: 100, tables: tables({ 1: [p('telescope', 9)] }) });
+    b.api.setVolume({ telescope: { avgMonthlySearches: 301000, competition: 'HIGH', lowTopOfPageBidMicros: 1000000, highTopOfPageBidMicros: 3000000 } });
+    const row = b.api.phrasesExportValues([1])[0];
+    assert.equal(row[9], 301000, 'volume should export as a number, not 301K');
+    assert.equal(row[10], 'HIGH');
+    assert.equal(row[11], '2.00', 'CPC is the midpoint of the low/high top-of-page bid');
   });
 });
 

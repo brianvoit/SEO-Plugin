@@ -152,7 +152,14 @@ async function loadPhrasesGap(queries) {
     );
     if (!res || !Array.isArray(res.present)) return;
     const present = new Set(res.present.map(t => String(t).toLowerCase()));
-    _phrasesGap = ranked.filter(q => !present.has((q.query || '').toLowerCase())).slice(0, PHRASES_GAP_MAX);
+    _phrasesGap = ranked
+      .filter(q => !present.has((q.query || '').toLowerCase()))
+      // Branded queries are dropped here unconditionally — NOT via the Brand
+      // toggle. "You rank for your own brand but never say it" is never the
+      // finding this section is for: the page not repeating its own brand name
+      // is normal, and it would crowd out the real gaps every time.
+      .filter(q => !phraseIsBranded(q.query || ''))
+      .slice(0, PHRASES_GAP_MAX);
     renderPhrasesPanel();
   } catch { /* no content script — skip the gap section entirely */ }
 }
@@ -277,7 +284,8 @@ function phrasesGapRow(q) {
 
   const impr = document.createElement('span');
   impr.className = 'phrases-gap-impr';
-  impr.textContent = `${Number(q.impressions || 0).toLocaleString()} impr`;
+  impr.textContent = `${phrasesCompactNum(q.impressions || 0)} impr`;
+  impr.title = `${Number(q.impressions || 0).toLocaleString()} impressions`;
   row.appendChild(impr);
 
   return row;
@@ -325,11 +333,43 @@ function phrasesColumns() {
   ];
   if (_phrasesGscState === 'available') {
     cols.push({ key: 'clicks',      label: 'Clicks', width: '42px' });
-    cols.push({ key: 'impressions', label: 'Impr',   width: '46px' });
+    cols.push({ key: 'impressions', label: 'Impr',   width: '44px' });
     cols.push({ key: 'position',    label: 'Pos',    width: '38px' });
   }
-  if (_phrasesVolumeState === 'available') cols.push({ key: 'volume', label: 'Vol', width: '46px' });
+  if (_phrasesVolumeState === 'available') {
+    cols.push({ key: 'volume', label: 'Vol',  width: '44px' });
+    cols.push({ key: 'comp',   label: 'Comp', width: '40px' });
+    cols.push({ key: 'cpc',    label: 'CPC',  width: '48px' });
+  }
   return cols;
+}
+
+// Competition and est. CPC come from the same Keyword Plan payload the Search
+// tab renders, so both reuse its helpers rather than re-deriving the numbers.
+// typeof-guarded per the house rule for cross-file calls — popup-gsc.js loads
+// first today, but nothing enforces that.
+function phrasesCompCell(vol) {
+  const cell = document.createElement('span');
+  cell.className = 'ranking-cell-num gsc-query-diff';
+  const comp = vol && vol.competition ? String(vol.competition).toUpperCase() : null;
+  if (!comp) { cell.textContent = '—'; return cell; }
+  cell.textContent = { LOW: 'Low', MEDIUM: 'Med', HIGH: 'High' }[comp] || '—';
+  cell.classList.add(`gsc-query-diff--${comp.toLowerCase()}`);
+  if (vol.competitionIndex != null) cell.title = `Competition index ${vol.competitionIndex}/100`;
+  return cell;
+}
+
+function phrasesCpcCell(vol) {
+  const cell = document.createElement('span');
+  cell.className = 'ranking-cell-num';
+  const micros = (typeof gscCpcMicros === 'function') ? gscCpcMicros(vol) : 0;
+  if (!micros) { cell.textContent = '—'; return cell; }
+  const currency = (typeof _adsData !== 'undefined' && _adsData) ? _adsData.currency : null;
+  cell.textContent = (typeof gscFormatCpc === 'function')
+    ? gscFormatCpc(micros, currency)
+    : `$${(micros / 1e6).toFixed(2)}`;
+  cell.title = 'Estimated top-of-page cost per click';
+  return cell;
 }
 
 function phrasesCell(text, cls) {
@@ -339,10 +379,11 @@ function phrasesCell(text, cls) {
   return el;
 }
 
-// Search volumes run to seven figures and the column is ~46px wide, so they're
-// abbreviated rather than truncated: 301,000 → 301k, 4,100,000 → 4.1M. One
-// decimal only below 10, where the difference between 4.1M and 4M is
-// meaningful; above that it's noise.
+// Volumes and impressions both run to seven figures in ~46px columns, so
+// they're abbreviated rather than truncated: 301,000 → 301K, 1,100 → 1.1K,
+// 999 → 999. Uppercase K to match gscFormatVolume, which the Search and Ads
+// tables have always used. One decimal only below 10, where the difference
+// between 4.1M and 4M is meaningful; above that it's noise.
 function phrasesCompactNum(n) {
   if (n == null || n === '') return '—';
   const num = Number(n);
@@ -350,7 +391,7 @@ function phrasesCompactNum(n) {
   const scale = (v, suffix) =>
     (v >= 10 ? String(Math.round(v)) : v.toFixed(1).replace(/\.0$/, '')) + suffix;
   if (num >= 1e6) return scale(num / 1e6, 'M');
-  if (num >= 1000) return scale(num / 1000, 'k');
+  if (num >= 1000) return scale(num / 1000, 'K');
   return String(num);
 }
 
@@ -426,12 +467,20 @@ function phrasesRow(p, cols, isPrimary) {
     if (col.key === 'density')     return row.appendChild(phrasesCell(`${(p.density * 100).toFixed(2)}%`));
     if (col.key === 'prominence')  return row.appendChild(phrasesCell(String(p.prominence)));
     if (col.key === 'clicks')      return row.appendChild(phrasesCell(gsc ? Number(gsc.clicks).toLocaleString() : '—'));
-    if (col.key === 'impressions') return row.appendChild(phrasesCell(gsc ? Number(gsc.impressions).toLocaleString() : '—'));
+    if (col.key === 'impressions') {
+      const cell = phrasesCell(gsc ? phrasesCompactNum(gsc.impressions) : '—');
+      if (gsc) cell.title = `${Number(gsc.impressions).toLocaleString()} impressions`;
+      return row.appendChild(cell);
+    }
     if (col.key === 'position')    return row.appendChild(phrasesCell(gsc ? gsc.position.toFixed(1) : '—'));
     if (col.key === 'volume') {
       const n = vol && vol.avgMonthlySearches;
-      return row.appendChild(phrasesCell(n ? phrasesCompactNum(n) : '—'));
+      const cell = phrasesCell(n ? phrasesCompactNum(n) : '—');
+      if (n) cell.title = `${Number(n).toLocaleString()} searches/mo`;
+      return row.appendChild(cell);
     }
+    if (col.key === 'comp') return row.appendChild(phrasesCompCell(vol));
+    if (col.key === 'cpc')  return row.appendChild(phrasesCpcCell(vol));
   });
 
   return row;
@@ -460,6 +509,14 @@ function phrasesTable(n, primary) {
 
   const cols = phrasesColumns();
 
+  // With GSC and volume both connected this is nine columns, which does not
+  // fit a 400px popup without crushing the phrase itself down to a couple of
+  // characters. The table scrolls sideways inside its own box instead: the
+  // phrase column keeps a readable minimum, and in the sidebar or pop-out
+  // (where there's room) nothing scrolls at all.
+  const scroll = document.createElement('div');
+  scroll.className = 'phrases-scroll';
+
   const head = document.createElement('div');
   head.className = 'ranking-row ranking-row--header phrases-row';
   head.style.gridTemplateColumns = `1fr ${cols.map(c => c.width).join(' ')}`;
@@ -472,9 +529,10 @@ function phrasesTable(n, primary) {
     el.textContent = c.label;
     head.appendChild(el);
   });
-  section.appendChild(head);
+  scroll.appendChild(head);
 
-  rows.forEach(p => section.appendChild(phrasesRow(p, cols, primary && primary.phrase === p.phrase)));
+  rows.forEach(p => scroll.appendChild(phrasesRow(p, cols, primary && primary.phrase === p.phrase)));
+  section.appendChild(scroll);
   section.appendChild(phrasesTableFoot(n, rows.length));
   return section;
 }
@@ -529,7 +587,7 @@ function phrasesTableFoot(n, shownCount) {
 // export drops it, since there each size gets its own tab.
 const PHRASES_CSV_HEADER = [
   'Words', 'Phrase', 'Count', 'Density %', 'Prominence', 'Placement',
-  'Clicks', 'Impressions', 'Position', 'Volume'
+  'Clicks', 'Impressions', 'Position', 'Volume', 'Competition', 'Est. CPC'
 ];
 
 // One phrase's cells, WITHOUT the leading size column. Exports always run
@@ -544,10 +602,15 @@ function phrasesExportRow(p) {
   if (phraseIsBranded(p.phrase)) placement.push('Brand');
   if (p.chips.includes('linked')) placement.push('Linked');
 
+  // Exports carry the raw numbers, not the K/M abbreviations — a spreadsheet
+  // wants values it can sort and total, and "1.1K" is a string.
+  const cpcMicros = (typeof gscCpcMicros === 'function') ? gscCpcMicros(vol) : 0;
   return [
     p.phrase, p.count, (p.density * 100).toFixed(2), p.prominence, placement.join(' '),
     gsc ? gsc.clicks : '', gsc ? gsc.impressions : '', gsc ? gsc.position.toFixed(1) : '',
-    (vol && vol.avgMonthlySearches) || ''
+    (vol && vol.avgMonthlySearches) || '',
+    (vol && vol.competition) || '',
+    cpcMicros ? (cpcMicros / 1e6).toFixed(2) : ''
   ];
 }
 

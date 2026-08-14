@@ -87,11 +87,40 @@ function makeDriveMock() {
     }
 
     if (u.hostname === 'sheets.googleapis.com' && u.pathname === '/v4/spreadsheets' && method === 'POST') {
+      const body = JSON.parse(opts.body || '{}');
       const id = newId();
-      files.set(id, { id, name: 'sheet', parents: [], trashed: false, mimeType: 'application/vnd.google-apps.spreadsheet' });
+      files.set(id, {
+        id, name: 'sheet', parents: [], trashed: false,
+        mimeType: 'application/vnd.google-apps.spreadsheet',
+        tabs: (body.sheets || []).map(s => s.properties.title),
+        appended: {}
+      });
       return jsonRes({ spreadsheetId: id });
     }
-    if (u.hostname === 'sheets.googleapis.com') return jsonRes({}); // header PUT / append POST
+
+    const ssMatch = /^\/v4\/spreadsheets\/([^/:]+)/.exec(u.pathname);
+    if (u.hostname === 'sheets.googleapis.com' && ssMatch) {
+      const ss = files.get(ssMatch[1]);
+      if (!ss) return notFound();
+      if (u.pathname.endsWith(':batchUpdate')) {
+        const body = JSON.parse(opts.body || '{}');
+        (body.requests || []).forEach(r => {
+          if (r.addSheet) ss.tabs.push(r.addSheet.properties.title);
+        });
+        return jsonRes({});
+      }
+      // values/…:append — record which tab got rows, so tests can assert the
+      // routing rather than just that the call succeeded.
+      const appendMatch = /\/values\/([^:]+):append/.exec(u.pathname);
+      if (appendMatch && method === 'POST') {
+        const tab = decodeURIComponent(appendMatch[1]).replace(/^'|'!A1$/g, '').replace(/'$/, '');
+        const body = JSON.parse(opts.body || '{}');
+        ss.appended[tab] = (ss.appended[tab] || []).concat(body.values || []);
+        return jsonRes({});
+      }
+      if (method === 'GET') return jsonRes({ sheets: ss.tabs.map(t => ({ properties: { title: t } })) });
+      return jsonRes({});   // header PUT
+    }
 
     return notFound();
   }
@@ -143,7 +172,7 @@ function boot({ local = {}, sync = {}, fetchImpl } = {}) {
 ;globalThis.__x = { resolveExportFolder, driveFindOrCreateFolder, driveResolveClientSubfolder,
                     sheetsGetOrCreateSpreadsheet, docsGetOrCreateFolder,
                     clientRegistrySave, clientRegistryAddDomain, clientRegistryGet,
-                    clientRegistryFindByDomain };`, ctx);
+                    clientRegistryFindByDomain, sheetsExportPhrases };`, ctx);
 
   return { ...ctx.__x, local, sync };
 }
@@ -318,6 +347,64 @@ describe('sheetsGetOrCreateSpreadsheet — re-parent, don\'t duplicate', () => {
 // and persists a "not now" via clientRegistrySave's driveFolderPromptDismissed
 // field so it doesn't nag on every subsequent export. Both pinned here since
 // neither has any other test coverage.
+// The phrases export is the only multi-tab writer in the app: each n-gram
+// size gets its own tab rather than sharing one sheet behind a "Words"
+// column. That means it has to create four tabs up front AND heal a
+// spreadsheet cached from before those tabs existed.
+describe('sheetsExportPhrases — one tab per n-gram size', () => {
+  const sheetOf = () => [...drive.files.values()].find(f => f.mimeType === 'application/vnd.google-apps.spreadsheet');
+
+  test('creates all four tabs even when exporting a single table', async () => {
+    // A later single-table export must never have to create a tab mid-flight.
+    await b.sheetsExportPhrases({ pageUrl: 'https://acme.com/p', tables: [{ size: 2, rows: [['best telescope', 4]] }] });
+    assert.deepEqual(sheetOf().tabs, ['One Word', 'Two Words', 'Three Words', 'Four Words']);
+  });
+
+  test('routes each table to its own tab', async () => {
+    await b.sheetsExportPhrases({
+      pageUrl: 'https://acme.com/p',
+      tables: [
+        { size: 1, rows: [['telescope', 9]] },
+        { size: 4, rows: [['best telescope for beginners', 5]] }
+      ]
+    });
+    const ss = sheetOf();
+    assert.deepEqual(Object.keys(ss.appended).sort(), ['Four Words', 'One Word']);
+    assert.match(ss.appended['One Word'][0].join(' '), /telescope/);
+  });
+
+  test('does not touch the tabs it was not given rows for', async () => {
+    await b.sheetsExportPhrases({ pageUrl: 'https://acme.com/p', tables: [{ size: 3, rows: [['a b c', 2]] }] });
+    const ss = sheetOf();
+    assert.deepEqual(Object.keys(ss.appended), ['Three Words'], 'an empty tab received a bare date/URL row');
+  });
+
+  test('every row is stamped with the export date and page URL', async () => {
+    await b.sheetsExportPhrases({ pageUrl: 'https://acme.com/p', tables: [{ size: 1, rows: [['telescope', 9]] }] });
+    const row = sheetOf().appended['One Word'][0];
+    assert.match(String(row[0]), /^\d{4}-\d{2}-\d{2}$/);
+    assert.equal(row[1], 'https://acme.com/p');
+    assert.equal(row[2], 'telescope');
+  });
+
+  test('adds the missing tabs to a spreadsheet that predates them', async () => {
+    // Simulates the real upgrade path: a sheet cached by an earlier build
+    // that only ever created one tab.
+    await b.sheetsExportPhrases({ pageUrl: 'https://acme.com/p', tables: [{ size: 1, rows: [['telescope', 9]] }] });
+    const ss = sheetOf();
+    ss.tabs = ['One Word'];                       // strip the other three back off
+
+    await b.sheetsExportPhrases({ pageUrl: 'https://acme.com/p', tables: [{ size: 4, rows: [['a b c d', 2]] }] });
+    assert.ok(ss.tabs.includes('Four Words'), 'the missing tab was never added');
+    assert.ok(ss.appended['Four Words'], 'rows never landed in the healed tab');
+  });
+
+  test('an export with no rows anywhere is rejected rather than creating an empty sheet', async () => {
+    const res = await b.sheetsExportPhrases({ pageUrl: 'https://acme.com/p', tables: [{ size: 1, rows: [] }] });
+    assert.equal(res.error, 'NO_ROWS');
+  });
+});
+
 describe('clientRegistryFindByDomain — backs the export-folder prompt', () => {
   test('returns the owning client for a bound domain', async () => {
     const { client } = await b.clientRegistrySave({ client: { name: 'Acme' } });

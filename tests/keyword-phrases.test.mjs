@@ -241,9 +241,12 @@ describe('the payload', () => {
   });
 
   test('each table is capped so a long page cannot flood the message', () => {
+    // The cap sits well above the ten a table shows at rest — the panel pages
+    // through these and an export writes them all — but a 5,000-word page
+    // still must not put every distinct phrase on the wire.
     const words = Array.from({ length: 300 }, (_, i) => `word${i}`).join(' ');
     const res = scan(`<p>${words}</p>`);
-    assert.ok(res.tables[1].length <= 40, `1-word table returned ${res.tables[1].length} rows`);
+    assert.equal(res.tables[1].length, 100, 'the 1-word table is not capped at PHRASE_CANDIDATE_CAP');
   });
 });
 

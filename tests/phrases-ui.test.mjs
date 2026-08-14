@@ -32,7 +32,7 @@ function boot({ scan = null, branded = {}, gsc = null, adCopy = null } = {}) {
     <span id="phrases-header-meta"></span>
     <input id="phrases-search" />
     <button id="btn-phrases-search-mode">Match</button>
-    <input type="checkbox" id="phrases-brand-toggle" checked />
+    <label><input type="checkbox" id="phrases-brand-toggle" /><span class="phrases-switch"></span></label>
     <div id="phrases-gap" class="hidden"></div>
     <div id="phrases-tables"></div>
     <button id="btn-phrases-export-csv"></button>
@@ -50,6 +50,14 @@ function boot({ scan = null, branded = {}, gsc = null, adCopy = null } = {}) {
   w.getActiveTab = () => Promise.resolve({ id: 1, url: 'https://site.test/page' });
   w.allBrandedTerms = branded;
   w.isValidRegex = (s) => { try { new RegExp(s); return true; } catch { return false; } };
+  // popup-shared.js isn't loaded here; this is its real implementation.
+  w.svgFromString = (markup) => {
+    const doc = new w.DOMParser().parseFromString(
+      /\sxmlns=/.test(markup) ? markup : markup.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"'),
+      'image/svg+xml'
+    );
+    return w.document.importNode(doc.documentElement, true);
+  };
   w.gscCsvCell = (v) => `"${String(v).replace(/"/g, '""')}"`;
   w.gscSelectedRange = 30;
   w.maybeOfferExportFolder = () => {};
@@ -60,9 +68,10 @@ function boot({ scan = null, branded = {}, gsc = null, adCopy = null } = {}) {
     if (msg.action === 'adsGetKeywordIdeas') return Promise.resolve({ error: 'NO_ACCOUNT', byKeyword: {} });
     return Promise.resolve({});
   };
+  const opened = [];
   w.browser = {
     tabs: {
-      create: () => {},
+      create: ({ url }) => { opened.push(url); },
       sendMessage: (tabId, msg) => {
         sent.push(msg);
         if (msg.action === 'getKeywordPhrases') {
@@ -77,25 +86,31 @@ function boot({ scan = null, branded = {}, gsc = null, adCopy = null } = {}) {
   w.eval(`${src}
 ;window.__p = {
   renderPhrasesEntry, renderPhrasesPanel, rescanPhrases, openPhrasesPanel,
-  visiblePhrases, phrasesPrimary, phrasesExportValues,
+  visiblePhrases, filteredPhrases, phrasesPrimary, phrasesExportValues,
+  phrasesExportTables, phrasesCompactNum,
   setData: (d) => { _phrasesData = d; },
   setUrl: (u) => { _phrasesPageUrl = u; },
   setSearch: (s, excl) => { _phrasesSearch = s; _phrasesSearchExclude = !!excl; },
   setBrand: (on) => { _phrasesShowBrand = on; },
   setGsc: (m) => { _phrasesGsc = m; _phrasesGscState = 'available'; },
+  setVolume: (m) => { _phrasesVolume = m; _phrasesVolumeState = 'available'; },
   setAdTexts: (t) => { _phrasesAdTexts = t; },
-  setGap: (g) => { _phrasesGap = g; }
+  setGap: (g, open) => { _phrasesGap = g; _phrasesGapOpen = !!open; },
+  showsBrand: () => _phrasesShowBrand
 };`);
 
   w.__p.setUrl('https://site.test/page');
-  return { w, d: w.document, sent, api: w.__p };
+  return { w, d: w.document, sent, opened, api: w.__p };
 }
 
-const rowTexts = (b, n) =>
-  [...b.d.querySelectorAll('#phrases-tables section')][n - 1]
-    .querySelectorAll('.phrases-row:not(.ranking-row--header) .ranking-keyword');
+const section = (b, n) => [...b.d.querySelectorAll('#phrases-tables section')][n - 1];
 
-const rowPhrases = (b, n) => [...rowTexts(b, n)].map(el => el.textContent);
+const rowPhrases = (b, n) =>
+  [...section(b, n).querySelectorAll('.phrases-row:not(.ranking-row--header) .ranking-keyword')]
+    .map(el => el.textContent);
+
+// A throwaway instance for the pure formatting helpers, which need no DOM state.
+const b0 = boot().api;
 
 describe('the Overview entry', () => {
   test('shows the page word count and enables the chevron', () => {
@@ -192,19 +207,26 @@ describe('the regex filter', () => {
 });
 
 describe('the Brand toggle', () => {
-  test('off removes branded phrases from the tables entirely', () => {
-    // Not merely hiding the chip: a brand name usually dominates the counts,
-    // and burying the real content words is the whole problem.
+  test('defaults to off — branded phrases are hidden until asked for', () => {
+    // A brand name is usually a page's most-repeated word by a wide margin,
+    // so leaving it in by default buries everything this screen is for.
     const b = boot({ branded: { 'site.test': 'acme' } });
+    assert.equal(b.api.showsBrand(), false);
     b.api.setData({ totalWords: 100, tables: tables({ 1: [p('acme', 20), p('telescope', 9)] }) });
-    b.api.setBrand(false);
     b.api.renderPhrasesPanel();
     assert.deepEqual(rowPhrases(b, 1), ['telescope']);
+  });
+
+  test('the checkbox starts unchecked, matching that default', () => {
+    // A switch showing "on" over a filtered table would be a straight lie.
+    const b = boot({ branded: { 'site.test': 'acme' } });
+    assert.equal(b.d.getElementById('phrases-brand-toggle').checked, false);
   });
 
   test('on keeps them, chipped as Brand', () => {
     const b = boot({ branded: { 'site.test': 'acme' } });
     b.api.setData({ totalWords: 100, tables: tables({ 1: [p('acme', 20)] }) });
+    b.api.setBrand(true);
     b.api.renderPhrasesPanel();
     assert.deepEqual(rowPhrases(b, 1), ['acme']);
     assert.match(b.d.querySelector('.phrases-chip-brand').textContent, /Brand/);
@@ -213,7 +235,6 @@ describe('the Brand toggle', () => {
   test('a domain with no branded pattern is unaffected either way', () => {
     const b = boot({ branded: {} });
     b.api.setData({ totalWords: 100, tables: tables({ 1: [p('acme', 20), p('telescope', 9)] }) });
-    b.api.setBrand(false);
     b.api.renderPhrasesPanel();
     assert.deepEqual(rowPhrases(b, 1), ['acme', 'telescope']);
   });
@@ -223,9 +244,111 @@ describe('the Brand toggle', () => {
     // make every phrase read as branded (or as un-branded-able).
     const b = boot({ branded: { 'site.test': '(unclosed' } });
     b.api.setData({ totalWords: 100, tables: tables({ 1: [p('telescope', 9)] }) });
-    b.api.setBrand(false);
     b.api.renderPhrasesPanel();
     assert.deepEqual(rowPhrases(b, 1), ['telescope']);
+  });
+});
+
+describe('Request more', () => {
+  const many = (count) => Array.from({ length: count }, (_, i) => p(`word${i}`, count - i));
+
+  test('a table starts at ten rows even when more exist', () => {
+    const b = boot();
+    b.api.setData({ totalWords: 500, tables: tables({ 1: many(25) }) });
+    b.api.renderPhrasesPanel();
+    assert.equal(rowPhrases(b, 1).length, 10);
+  });
+
+  test('clicking it reveals the next ten', () => {
+    const b = boot();
+    b.api.setData({ totalWords: 500, tables: tables({ 1: many(25) }) });
+    b.api.renderPhrasesPanel();
+    section(b, 1).querySelector('.phrases-more-btn').click();
+    assert.equal(rowPhrases(b, 1).length, 20);
+  });
+
+  test('it only grows its own table', () => {
+    const b = boot();
+    b.api.setData({ totalWords: 500, tables: tables({ 1: many(25), 2: many(25) }) });
+    b.api.renderPhrasesPanel();
+    section(b, 1).querySelector('.phrases-more-btn').click();
+    assert.equal(rowPhrases(b, 1).length, 20);
+    assert.equal(rowPhrases(b, 2).length, 10, 'a sibling table grew too');
+  });
+
+  test('it disappears once everything is shown', () => {
+    const b = boot();
+    b.api.setData({ totalWords: 500, tables: tables({ 1: many(12) }) });
+    b.api.renderPhrasesPanel();
+    section(b, 1).querySelector('.phrases-more-btn').click();
+    assert.equal(section(b, 1).querySelector('.phrases-more-btn'), null);
+  });
+
+  test('never appears on a table that already fits', () => {
+    const b = boot();
+    b.api.setData({ totalWords: 100, tables: tables({ 1: many(4) }) });
+    b.api.renderPhrasesPanel();
+    assert.equal(section(b, 1).querySelector('.phrases-more-btn'), null);
+  });
+
+  test('changing the filter collapses the tables back to ten', () => {
+    // Otherwise an expanded table silently keeps showing 30 rows of a result
+    // set the user has since narrowed to something else entirely.
+    const b = boot();
+    b.api.setData({ totalWords: 500, tables: tables({ 1: many(25) }) });
+    b.api.renderPhrasesPanel();
+    section(b, 1).querySelector('.phrases-more-btn').click();
+    assert.equal(rowPhrases(b, 1).length, 20);
+
+    const input = b.d.getElementById('phrases-search');
+    input.value = 'word';
+    input.dispatchEvent(new b.w.Event('input'));
+    assert.equal(rowPhrases(b, 1).length, 10);
+  });
+});
+
+describe('compact numbers', () => {
+  test('thousands and millions are abbreviated', () => {
+    assert.equal(b0.phrasesCompactNum(301000), '301k');
+    assert.equal(b0.phrasesCompactNum(4100000), '4.1M');
+  });
+
+  test('one decimal only below ten, where it carries information', () => {
+    assert.equal(b0.phrasesCompactNum(1500), '1.5k');
+    assert.equal(b0.phrasesCompactNum(22000), '22k');
+    assert.equal(b0.phrasesCompactNum(12400000), '12M');
+  });
+
+  test('a trailing .0 is dropped rather than shown', () => {
+    assert.equal(b0.phrasesCompactNum(2000), '2k');
+    assert.equal(b0.phrasesCompactNum(3000000), '3M');
+  });
+
+  test('values under a thousand are left alone', () => {
+    assert.equal(b0.phrasesCompactNum(880), '880');
+    assert.equal(b0.phrasesCompactNum(0), '0');
+  });
+
+  test('missing volume reads as a dash, not zero', () => {
+    assert.equal(b0.phrasesCompactNum(null), '—');
+  });
+
+  test('the Volume column renders through it', () => {
+    const b = boot();
+    b.api.setData({ totalWords: 100, tables: tables({ 1: [p('telescope', 9)] }) });
+    b.api.setVolume({ telescope: { avgMonthlySearches: 301000 } });
+    b.api.renderPhrasesPanel();
+    assert.match(section(b, 1).textContent, /301k/);
+  });
+});
+
+describe('clicking a phrase', () => {
+  test('opens a Google search for it', () => {
+    const b = boot();
+    b.api.setData({ totalWords: 100, tables: tables({ 1: [p('best telescope', 9)] }) });
+    b.api.renderPhrasesPanel();
+    section(b, 1).querySelector('.phrases-term-link').click();
+    assert.equal(b.opened[0], 'https://www.google.com/search?q=best%20telescope');
   });
 });
 
@@ -331,20 +454,51 @@ describe('the content-gap list', () => {
     assert.ok(b.d.getElementById('phrases-gap').classList.contains('hidden'));
   });
 
-  test('lists the queries the copy never says, with their impressions', () => {
+  test('starts collapsed — the heading and a count, no rows', () => {
+    // It's a useful aside, not the reason you opened this screen, and it
+    // otherwise pushes all four tables below the fold.
     const b = boot();
     b.api.setData({ totalWords: 100, tables: tables({ 1: [p('telescope', 9)] }) });
     b.api.setGap([{ query: 'cheap binoculars', impressions: 820 }]);
     b.api.renderPhrasesPanel();
+
     const gap = b.d.getElementById('phrases-gap');
-    assert.ok(!gap.classList.contains('hidden'));
+    assert.ok(!gap.classList.contains('hidden'), 'the section should still be present');
+    assert.equal(gap.querySelector('.phrases-gap-body'), null, 'rows were rendered while collapsed');
+    assert.match(gap.textContent, /Ranking for words this page never says/);
+    assert.match(gap.querySelector('.phrases-gap-count').textContent, /1/);
+  });
+
+  test('expands on click to list the queries and their impressions', () => {
+    const b = boot();
+    b.api.setData({ totalWords: 100, tables: tables({ 1: [p('telescope', 9)] }) });
+    b.api.setGap([{ query: 'cheap binoculars', impressions: 820 }]);
+    b.api.renderPhrasesPanel();
+
+    b.d.querySelector('.phrases-gap-title').click();
+    const gap = b.d.getElementById('phrases-gap');
+    assert.ok(gap.querySelector('.phrases-gap-body'));
     assert.match(gap.textContent, /cheap binoculars/);
     assert.match(gap.textContent, /820/);
+    assert.equal(b.d.querySelector('.phrases-gap-title').getAttribute('aria-expanded'), 'true');
+  });
+
+  test('collapses again on a second click', () => {
+    const b = boot();
+    b.api.setData({ totalWords: 100, tables: tables({ 1: [p('telescope', 9)] }) });
+    b.api.setGap([{ query: 'cheap binoculars', impressions: 820 }]);
+    b.api.renderPhrasesPanel();
+
+    b.d.querySelector('.phrases-gap-title').click();
+    b.d.querySelector('.phrases-gap-title').click();
+    assert.equal(b.d.querySelector('.phrases-gap-body'), null);
   });
 });
 
 describe('export', () => {
-  test('emits one row per visible phrase across all four tables', () => {
+  const many = (count) => Array.from({ length: count }, (_, i) => p(`word${i}`, count - i));
+
+  test('emits one row per phrase across all four tables', () => {
     const b = boot();
     b.api.setData({ totalWords: 100, tables: tables({
       1: [p('telescope', 9)],
@@ -357,7 +511,17 @@ describe('export', () => {
     assert.equal(rows[1][0], 2);
   });
 
-  test('respects the active filter — you export what you are looking at', () => {
+  test('exports the COMPLETE table, not the ten rows on screen', () => {
+    // The table is capped for readability; the export has no such excuse,
+    // and silently truncating it at ten would be a quiet data-loss bug.
+    const b = boot();
+    b.api.setData({ totalWords: 500, tables: tables({ 1: many(25) }) });
+    b.api.renderPhrasesPanel();
+    assert.equal(rowPhrases(b, 1).length, 10, 'precondition: the table is showing ten');
+    assert.equal(b.api.phrasesExportValues([1]).length, 25);
+  });
+
+  test('respects the active filter — you export what you filtered to', () => {
     const b = boot();
     b.api.setData({ totalWords: 100, tables: tables({ 1: [p('telescope', 9), p('binoculars', 8)] }) });
     b.api.setSearch('tele');
@@ -369,11 +533,41 @@ describe('export', () => {
   test('flattens the placement chips into one readable column', () => {
     const b = boot({ branded: { 'site.test': 'acme' } });
     b.api.setData({ totalWords: 100, tables: tables({ 1: [p('acme', 9, { chips: ['title', 'h1', 'linked'] })] }) });
+    b.api.setBrand(true);
     const placement = b.api.phrasesExportValues()[0][5];
     assert.match(placement, /Title/);
     assert.match(placement, /H1/);
     assert.match(placement, /Brand/);
     assert.match(placement, /Linked/);
+  });
+
+  test('a single-size export carries only that table', () => {
+    const b = boot();
+    b.api.setData({ totalWords: 100, tables: tables({
+      1: [p('telescope', 9)],
+      2: [p('best telescope', 4)]
+    }) });
+    const rows = b.api.phrasesExportValues([2]);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0][1], 'best telescope');
+  });
+
+  test('the Sheets payload is grouped by size, one entry per tab', () => {
+    const b = boot();
+    b.api.setData({ totalWords: 100, tables: tables({
+      1: [p('telescope', 9)],
+      3: [p('best telescope for', 4)]
+    }) });
+    const out = [...b.api.phrasesExportTables()];
+    assert.deepEqual(out.map(t => t.size), [1, 3], 'empty tables should not become empty tabs');
+    assert.equal(out[0].rows[0][0], 'telescope', 'the size column must NOT be in the per-tab rows');
+  });
+
+  test('each table gets its own pair of export buttons', () => {
+    const b = boot();
+    b.api.setData({ totalWords: 100, tables: tables({ 1: [p('telescope', 9)] }) });
+    b.api.renderPhrasesPanel();
+    assert.equal(section(b, 1).querySelectorAll('.phrases-table-actions .phrases-icon-btn').length, 2);
   });
 });
 

@@ -624,7 +624,11 @@ const PHRASE_STOPWORDS = new Set([
 // matches count (a block containing another countable block is skipped) so
 // e.g. <li><p>…</p></li> isn't double-counted.
 const PHRASE_BLOCK_SELECTOR = 'h1,h2,h3,h4,h5,h6,p,li,td,th,blockquote,dd,dt,figcaption,caption,summary';
-const PHRASE_CANDIDATE_CAP = 40;    // per n-length, before the popup's own regex/Brand filtering
+// Per n-length, before the popup's own regex/Brand filtering. Well past the
+// ten a table shows at rest — the panel's "Request more" pages through these,
+// and an export writes the whole filtered set, so the cap is a message-size
+// guard rather than the answer to "how many phrases matter".
+const PHRASE_CANDIDATE_CAP = 100;
 const PHRASE_LINKED_TEXT_CAP = 300;
 
 function phraseTokenize(text) {

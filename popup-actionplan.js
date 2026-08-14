@@ -42,7 +42,15 @@ async function gatherActionPlanData(tab) {
   if (ads && ads.connected && Array.isArray(ads.ads) && ads.ads.length) {
     adAssets = await send({ action: 'adsGetAdsDetail', pageUrl: tab.url, adIds: ads.ads.map(a => a.adId) });
   }
-  return { gsc, ads, webceo, tracked, ga, adAssets };
+
+  // What the copy actually says, as n-gram counts. Read straight from the
+  // content script rather than from the Keyword Phrases panel's state, so the
+  // plan gets this whether or not the user has ever opened that panel.
+  let phrases = null;
+  try { phrases = await browser.tabs.sendMessage(tab.id, { action: 'getKeywordPhrases' }, TOP_FRAME); }
+  catch { phrases = null; }
+
+  return { gsc, ads, webceo, tracked, ga, adAssets, phrases };
 }
 
 // GSC queries split into the two bands that drive surgical wins.
@@ -122,6 +130,24 @@ function computeIntentDistribution(gathered) {
 
 // ─── Prompt assembly ──────────────────────────────────────────────────────────
 
+// The top phrases per n-gram length, compacted to one line each. Capped hard:
+// this is supporting evidence in an already-long prompt, not the main event.
+function actionPlanPhraseLines(phrases) {
+  const tables = phrases && phrases.tables;
+  if (!tables) return [];
+  const out = [];
+  [1, 2, 3, 4].forEach(n => {
+    const top = (tables[n] || []).slice(0, 8);
+    if (!top.length) return;
+    const parts = top.map(p => {
+      const where = (p.chips || []).length ? ` [${p.chips.join(',')}]` : '';
+      return `"${p.phrase}" ×${p.count}${where}`;
+    });
+    out.push(`  ${n}-word: ${parts.join('; ')}`);
+  });
+  return out;
+}
+
 function actionPlanContext(g) {
   const lines = [];
   const pd = pageData || {};
@@ -145,6 +171,15 @@ function actionPlanContext(g) {
     lines.push(`Intent: ${g.insights.intent}; Sentiment: ${g.insights.sentiment}; Readability: ${g.insights.readability}; Audience: ${g.insights.audience}`);
   }
   if (pd.bodyTextExcerpt) lines.push(`Content excerpt: "${pd.bodyTextExcerpt}"`);
+
+  // The page's own vocabulary, counted. The excerpt above shows how the page
+  // opens; this shows what it actually dwells on across the whole body, which
+  // is what a "you rank for X but barely say it" recommendation needs.
+  const phraseLines = actionPlanPhraseLines(g.phrases);
+  if (phraseLines.length) {
+    lines.push('\nPage vocabulary (n-gram counts over body copy, nav/footer excluded; [] marks where it also appears):');
+    lines.push(...phraseLines);
+  }
 
   // Demand side — what the market is asking for
   const bands = actionPlanGscBands(g.gsc);

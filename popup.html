@@ -709,20 +709,38 @@
         Back
       </button>
       <span class="bl-header-meta" id="phrases-header-meta"></span>
-      <button id="btn-phrases-refresh" class="redirect-retrace-btn" title="Re-scan the page">Refresh</button>
+      <div class="phrases-header-actions">
+        <button id="btn-phrases-export-csv" class="phrases-icon-btn" title="Download all four tables as a CSV">
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 2v8"/><polyline points="5 7 8 10 11 7"/><path d="M3 12.5h10"/>
+          </svg>
+        </button>
+        <button id="btn-phrases-export-sheet" class="phrases-icon-btn" title="Add all four tables to Google Sheets — one tab each">
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="2" width="12" height="12" rx="1.5"/><line x1="2" y1="6.3" x2="14" y2="6.3"/>
+            <line x1="2" y1="10.7" x2="14" y2="10.7"/><line x1="6.3" y1="2" x2="6.3" y2="14"/>
+          </svg>
+        </button>
+        <button id="btn-phrases-refresh" class="phrases-icon-btn" title="Re-scan the page">
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15.3 2.7 15.3 6.7 11.3 6.7"/><polyline points="0.7 13.3 0.7 9.3 4.7 9.3"/>
+            <path d="M2.34 6a6 6 0 0 1 9.9-2.24L15.3 6.7M0.7 9.3l3.09 2.91A6 6 0 0 0 13.66 10"/>
+          </svg>
+        </button>
+      </div>
     </div>
     <div class="gsc-query-search-bar" id="phrases-search-bar">
       <input type="text" id="phrases-search" class="gsc-query-search-input"
         placeholder="Filter phrases (regex: term|term2)" autocomplete="off" spellcheck="false" />
       <button id="btn-phrases-search-mode" class="gsc-query-search-mode-btn" title="Toggle include/exclude">Match</button>
-      <label class="ranking-onpage-toggle phrases-brand-toggle"><input type="checkbox" id="phrases-brand-toggle" checked /> Brand</label>
+      <label class="phrases-brand-toggle" title="Show phrases that match this client's branded terms">
+        <input type="checkbox" id="phrases-brand-toggle" />
+        <span class="phrases-switch"></span>
+        <span>Brand</span>
+      </label>
     </div>
     <div id="phrases-gap" class="phrases-gap hidden"></div>
     <div id="phrases-tables"></div>
-    <div class="phrases-export-row">
-      <button id="btn-phrases-export-csv" class="save-key-btn">Download CSV</button>
-      <button id="btn-phrases-export-sheet" class="save-key-btn">Add to Google Sheet</button>
-    </div>
   </div>
 
   <!-- AI Action Plan detail panel -->

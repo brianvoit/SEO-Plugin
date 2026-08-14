@@ -4701,7 +4701,51 @@ function sheetsDomainFromUrl(pageUrl) {
 // trust — the user may have deleted the file in Drive since last export — and
 // silently recreated on 404/trashed, matching the same no-warning precedent
 // as docsGetOrCreateFolder above.
-async function sheetsGetOrCreateSpreadsheet(accessToken, cacheKey, { title, tabName, headerRow, pageUrl }) {
+// Writes a tab's header row. Called once per tab at creation time only —
+// never on append, so a user who renames a column keeps their rename.
+async function sheetsWriteHeader(accessToken, spreadsheetId, tabName, headerRow) {
+  const endCol = String.fromCharCode(64 + headerRow.length);   // ≤26 columns
+  await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`'${tabName}'!A1:${endCol}1`)}?valueInputOption=USER_ENTERED`,
+    {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: [headerRow] })
+    }
+  ).catch(() => {});
+}
+
+// Adds any of `tabs` the spreadsheet doesn't already carry. Needed because a
+// multi-tab export can land on a spreadsheet created by an EARLIER version of
+// that export (or by a single-table export that only ever made one tab) — the
+// cached id is still the right file, it's just missing sheets. Best-effort:
+// a failure here leaves the append to fail loudly on its own.
+async function sheetsEnsureTabs(accessToken, spreadsheetId, tabs) {
+  if (!Array.isArray(tabs) || !tabs.length) return;
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties.title`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  ).catch(() => null);
+  if (!res || !res.ok) return;
+
+  const data = await res.json();
+  const existing = new Set((data.sheets || []).map(s => s.properties && s.properties.title));
+  const missing = tabs.filter(t => !existing.has(t.name));
+  if (!missing.length) return;
+
+  const addRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests: missing.map(t => ({ addSheet: { properties: { title: t.name } } })) })
+  }).catch(() => null);
+  if (!addRes || !addRes.ok) return;
+
+  for (const t of missing) await sheetsWriteHeader(accessToken, spreadsheetId, t.name, t.headerRow);
+}
+
+// `tabs` (optional) creates a MULTI-tab spreadsheet — one per n-gram size for
+// the phrases export — instead of the single `tabName` every other caller uses.
+async function sheetsGetOrCreateSpreadsheet(accessToken, cacheKey, { title, tabName, headerRow, pageUrl, tabs }) {
   const { folderId: targetFolderId } = await resolveExportFolder(accessToken, pageUrl, DRIVE_EXPORTS_SUBDIR);
 
   const { sheetsSpreadsheetIds } = await browser.storage.local.get('sheetsSpreadsheetIds');
@@ -4726,6 +4770,7 @@ async function sheetsGetOrCreateSpreadsheet(accessToken, cacheKey, { title, tabN
             { method: 'PATCH', headers: { Authorization: `Bearer ${accessToken}` } }
           ).catch(() => {});
         }
+        await sheetsEnsureTabs(accessToken, cached.id, tabs);
         return { id: cached.id };
       }
     }
@@ -4737,7 +4782,7 @@ async function sheetsGetOrCreateSpreadsheet(accessToken, cacheKey, { title, tabN
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       properties: { title },
-      sheets: [{ properties: { title: tabName } }]
+      sheets: (tabs && tabs.length ? tabs.map(t => t.name) : [tabName]).map(t => ({ properties: { title: t } }))
     })
   });
   if (!createRes.ok) {
@@ -4761,16 +4806,12 @@ async function sheetsGetOrCreateSpreadsheet(accessToken, cacheKey, { title, tabN
     }).catch(() => {});
   }
 
-  // Header row, written once at creation time only.
-  const endCol = String.fromCharCode(64 + headerRow.length);   // ≤26 columns
-  await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`'${tabName}'!A1:${endCol}1`)}?valueInputOption=USER_ENTERED`,
-    {
-      method: 'PUT',
-      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ values: [headerRow] })
-    }
-  ).catch(() => {});
+  // Header rows, written once at creation time only.
+  if (tabs && tabs.length) {
+    for (const t of tabs) await sheetsWriteHeader(accessToken, spreadsheetId, t.name, t.headerRow);
+  } else {
+    await sheetsWriteHeader(accessToken, spreadsheetId, tabName, headerRow);
+  }
 
   cache[cacheKey] = { id: spreadsheetId, updatedAt: Date.now() };
   const keys = Object.keys(cache);
@@ -4868,37 +4909,55 @@ async function sheetsExportGscQueries({ rows, pageUrl, rangeDays }) {
 }
 
 // ─── Google Sheets: Keyword Phrases export ──────────────────────────────────
-// Same one-spreadsheet-per-domain history-log model as the exports above.
+// Same one-spreadsheet-per-domain history-log model as the exports above, but
+// with one TAB per n-gram size rather than a single sheet — a 1-word list and
+// a 4-word list are different enough that stacking them behind a "Words"
+// column makes both harder to read and to sort.
+//
 // Rows arrive fully formed from popup-phrases.js, which owns the placement
-// chips, brand matching and the GSC/volume merge.
+// chips, brand matching and the GSC/volume merge; the tab names and the
+// header row are owned here so an export of one table and an export of all
+// four land in exactly the same shape.
 
-const SHEETS_PHRASES_TAB_NAME = 'Keyword Phrases';
+const SHEETS_PHRASES_TAB_NAMES = { 1: 'One Word', 2: 'Two Words', 3: 'Three Words', 4: 'Four Words' };
 const SHEETS_PHRASES_HEADER_ROW = [
   'Date Exported', 'Page URL',
-  'Words', 'Phrase', 'Count', 'Density %', 'Prominence', 'Placement',
+  'Phrase', 'Count', 'Density %', 'Prominence', 'Placement',
   'Clicks', 'Impressions', 'Position', 'Volume'
 ];
 
-async function sheetsExportPhrases({ rows, pageUrl }) {
+async function sheetsExportPhrases({ tables, pageUrl }) {
   const token = await docsGetAccessToken();
   if (token.error) return { notConnected: true, error: token.error };
 
-  if (!Array.isArray(rows) || !rows.length) return { error: 'NO_ROWS' };
+  // Only tables that actually carry rows: exporting a single table shouldn't
+  // append a bare date/URL line to the other three.
+  const wanted = (Array.isArray(tables) ? tables : [])
+    .filter(t => t && SHEETS_PHRASES_TAB_NAMES[t.size] && Array.isArray(t.rows) && t.rows.length);
+  if (!wanted.length) return { error: 'NO_ROWS' };
 
   const domain = sheetsDomainFromUrl(pageUrl);
+  // Every size's tab is declared regardless of what's being exported now, so
+  // the spreadsheet always has the same four tabs and a later single-table
+  // export never has to create one mid-flight.
+  const allTabs = Object.values(SHEETS_PHRASES_TAB_NAMES)
+    .map(name => ({ name, headerRow: SHEETS_PHRASES_HEADER_ROW }));
+
   const sheet = await sheetsGetOrCreateSpreadsheet(token.accessToken, `phrases::${domain}`, {
     title: `Keyword Phrases — ${domain}`,
-    tabName: SHEETS_PHRASES_TAB_NAME,
+    tabName: allTabs[0].name,
     headerRow: SHEETS_PHRASES_HEADER_ROW,
-    pageUrl
+    pageUrl,
+    tabs: allTabs
   });
   if (sheet.notConnected || sheet.error) return sheet;
 
   const dateAdded = new Date().toISOString().slice(0, 10);
-  const values = rows.map(r => [dateAdded, pageUrl, ...r]);
-
-  const appendRes = await sheetsAppendRows(token.accessToken, sheet.id, SHEETS_PHRASES_TAB_NAME, values);
-  if (appendRes.notConnected || appendRes.error) return appendRes;
+  for (const t of wanted) {
+    const values = t.rows.map(r => [dateAdded, pageUrl, ...r]);
+    const appendRes = await sheetsAppendRows(token.accessToken, sheet.id, SHEETS_PHRASES_TAB_NAMES[t.size], values);
+    if (appendRes.notConnected || appendRes.error) return appendRes;
+  }
 
   return { url: `https://docs.google.com/spreadsheets/d/${sheet.id}/edit` };
 }

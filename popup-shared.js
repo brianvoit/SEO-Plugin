@@ -200,6 +200,16 @@ function claudeText(data) {
 // Build an SVG element (e.g. an icon, or a whole chart) from a markup string
 // without using innerHTML. DOMParser is not flagged by the AMO linter, and the
 // markup we pass is always numeric/escaped, so this is safe.
+// Names an icon-only button. Its SVG is aria-hidden and it has no text node,
+// so without this there is nothing for the accessibility tree to read. `title`
+// alone is only the last-resort step of the accessible-name computation and
+// several screen readers skip it, so both are set.
+function labelIconButton(btn, text) {
+  btn.title = text;
+  btn.setAttribute('aria-label', text);
+  return btn;
+}
+
 function svgFromString(markup) {
   // image/svg+xml parsing needs the SVG namespace on the root, or elements land
   // in the null namespace and won't render — inject it when absent.
@@ -207,7 +217,15 @@ function svgFromString(markup) {
     markup = markup.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
   }
   const doc = new DOMParser().parseFromString(markup, 'image/svg+xml');
-  return document.importNode(doc.documentElement, true);
+  const svg = document.importNode(doc.documentElement, true);
+  // Every icon this builds is decorative — it sits inside a button or beside
+  // text that already carries the meaning. Hiding it here rather than at each
+  // of the ~38 call sites means a new icon is accessible by default instead of
+  // by remembering. focusable="false" keeps it out of the tab order, which old
+  // engines otherwise get wrong for inline SVG.
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  return svg;
 }
 
 // Create a namespaced SVG element with attributes (+ optional text content)

@@ -84,9 +84,19 @@ function showActiveTab() {
   document.getElementById('btn-settings').classList.remove('is-active');
   // The update checker lives only on the Setup screen
   updateFooter.classList.add('hidden');
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('is-active', b.dataset.tab === activeTab));
+  // aria-current carries to a screen reader what is-active carries visually.
+  // Set/removed rather than toggled to "false", since aria-current="false"
+  // is a legitimate value meaning "explicitly not current" and reads as noise
+  // on the six tabs that simply aren't the one you're on.
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    const on = b.dataset.tab === activeTab;
+    b.classList.toggle('is-active', on);
+    if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+  });
   // The status pill doubles as the redirect-trace tab; mark it active there
   statusBadge.classList.toggle('status-badge--tab-active', activeTab === 'redirect');
+  if (activeTab === 'redirect') statusBadge.setAttribute('aria-current', 'page');
+  else statusBadge.removeAttribute('aria-current');
   tabGroup.classList.remove('hidden');
   mainContent.classList.toggle('hidden', activeTab !== 'overview');
   searchTab.classList.toggle('hidden', activeTab !== 'search');

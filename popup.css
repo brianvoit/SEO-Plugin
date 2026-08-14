@@ -3246,6 +3246,18 @@ body.settings-open #update-footer { margin-top: auto; }
   background: color-mix(in srgb, var(--hint-green) 10%, var(--bg));
 }
 
+/* Generated, not typed. Without this it is pixel-identical to the two
+   editable fields directly above it and reads as a broken input — which is
+   exactly how it was reported. Sunk background + dashed border says "output";
+   the text stays selectable so it can still be copied by hand. */
+.api-key-input--readonly {
+  background: var(--bg-section);
+  border-style: dashed;
+  color: var(--text-muted);
+  cursor: default;
+}
+.api-key-input--readonly:focus { border-color: var(--border); }
+
 /* ─── AI Action Plan ───────────────────────────────────────────────────────── */
 
 /* Nav-row star glyph (accent), sits left of the chevron */

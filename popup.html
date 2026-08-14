@@ -8,8 +8,14 @@
 </head>
 <body>
   <header>
+    <!-- Deliberately NOT role="tablist". That role promises arrow-key
+         navigation and a single tab stop, and half-implementing it is worse
+         than plain buttons: a screen-reader user would reach for arrow keys
+         that do nothing. These are real buttons that behave like buttons;
+         aria-current marks which one is active, which is the only thing the
+         markup was actually failing to convey. -->
     <div class="tab-group" id="main-tabs">
-      <button class="tab-btn is-active" data-tab="overview">Overview</button>
+      <button class="tab-btn is-active" data-tab="overview" aria-current="page">Overview</button>
       <button class="tab-btn" data-tab="search">Search</button>
       <button class="tab-btn" data-tab="ads">Ads</button>
       <button class="tab-btn" data-tab="analytics">Analytics</button>
@@ -22,10 +28,10 @@
     </div>
     <div class="header-actions">
       <div class="alt-header-control" title="Follow active tab — auto-reload when switching tabs (Sidebar and Pop Out)">
-        <button id="btn-follow-tab" class="toggle-btn" aria-pressed="true" title="Follow active tab">
+        <button id="btn-follow-tab" class="toggle-btn" aria-pressed="true" title="Follow active tab" aria-label="Follow active tab">
           <span class="toggle-track">
             <span class="toggle-thumb">
-              <svg class="toggle-icon" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <svg aria-hidden="true" focusable="false" class="toggle-icon" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M6.5 9.5a3 3 0 0 0 4.24 0l1.41-1.41a3 3 0 0 0-4.24-4.24L6.5 5.27"/>
                 <path d="M9.5 6.5a3 3 0 0 0-4.24 0L3.85 7.91a3 3 0 0 0 4.24 4.24l1.41-1.41"/>
               </svg>
@@ -34,10 +40,10 @@
         </button>
       </div>
       <div class="alt-header-control" title="Toggle alt-text overlay on the page (also flags links with no accessible text)">
-        <button id="btn-overlay" class="toggle-btn" aria-pressed="false" title="Toggle alt-text overlay on the page (also flags links with no accessible text)">
+        <button id="btn-overlay" class="toggle-btn" aria-pressed="false" title="Toggle alt-text overlay on the page (also flags links with no accessible text)" aria-label="Toggle alt-text overlay on the page (also flags links with no accessible text)">
           <span class="toggle-track">
             <span class="toggle-thumb">
-              <svg class="toggle-icon" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <svg aria-hidden="true" focusable="false" class="toggle-icon" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="1.5" y="3" width="13" height="10" rx="1.5"/>
                 <circle cx="5.5" cy="6.5" r="1.2"/>
                 <path d="M2.5 12l3.2-3 2.3 2 2.5-2.6 3 3.6"/>
@@ -47,10 +53,10 @@
         </button>
       </div>
       <div class="alt-header-control" title="Toggle link-health overlay — flag redirecting and broken links on the page">
-        <button id="btn-link-overlay" class="toggle-btn" aria-pressed="false" title="Toggle link-health overlay on the page">
+        <button id="btn-link-overlay" class="toggle-btn" aria-pressed="false" title="Toggle link-health overlay on the page" aria-label="Toggle link-health overlay on the page">
           <span class="toggle-track">
             <span class="toggle-thumb">
-              <svg class="toggle-icon" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <svg aria-hidden="true" focusable="false" class="toggle-icon" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M9 2.5h4.5V7"/>
                 <path d="M13.5 2.5L8 8"/>
                 <path d="M11.5 9v3.5a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1H7"/>
@@ -59,8 +65,8 @@
           </span>
         </button>
       </div>
-      <button id="btn-robots" class="icon-btn" title="Open robots.txt">
-        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <button id="btn-robots" class="icon-btn" title="Open robots.txt" aria-label="Open robots.txt">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="6" width="10" height="7" rx="1.5"/>
           <line x1="8" y1="6" x2="8" y2="3.6"/>
           <circle cx="8" cy="2.8" r="0.8" fill="currentColor" stroke="none"/>
@@ -69,13 +75,13 @@
           <path d="M6.2 11.2h3.6"/>
         </svg>
       </button>
-      <button id="btn-settings" class="icon-btn" title="Settings">
-        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <button id="btn-settings" class="icon-btn" title="Settings" aria-label="Settings">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
           <path d="M14.5 1.5a3.5 3.5 0 0 0-4.9 4.9L2.1 13.9a1.5 1.5 0 0 0 2.1 2.1l7.5-7.5a3.5 3.5 0 0 0 4.9-4.9l-2.1 2.1-1.6-1.6 2.1-2.1a3.5 3.5 0 0 0-.5-.5z"/>
         </svg>
       </button>
-      <button id="btn-refresh" class="icon-btn" title="Refresh data from page">
-        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <button id="btn-refresh" class="icon-btn" title="Refresh data from page" aria-label="Refresh data from page">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M13.5 8A5.5 5.5 0 1 1 8 2.5a5.5 5.5 0 0 1 3.9 1.6L13.5 5.6"/>
           <polyline points="13.5 2 13.5 5.6 9.9 5.6"/>
         </svg>
@@ -128,8 +134,8 @@
       <div class="field-header">
         <span class="field-label">CLAUDE API KEY</span>
         <div class="field-header-actions">
-          <button class="info-tip" type="button" title="Stored locally on this device only — never synced.">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <button class="info-tip" type="button" title="Stored locally on this device only — never synced." aria-label="Stored locally on this device only — never synced.">
+            <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7.5" x2="8" y2="11"/><circle cx="8" cy="5" r="0.55" fill="currentColor" stroke="none"/>
             </svg>
           </button>
@@ -145,20 +151,20 @@
           autocomplete="off"
           spellcheck="false"
         />
-        <button id="btn-toggle-key-vis" class="icon-btn" title="Show / hide key">
+        <button id="btn-toggle-key-vis" class="icon-btn" title="Show / hide key" aria-label="Show / hide key">
           <!-- Eye open (default — key is hidden) -->
-          <svg id="icon-eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <svg aria-hidden="true" focusable="false" id="icon-eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
             <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/>
             <circle cx="8" cy="8" r="2"/>
           </svg>
           <!-- Eye crossed (shown when key is visible) -->
-          <svg id="icon-eye-closed" class="hidden" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <svg aria-hidden="true" focusable="false" id="icon-eye-closed" class="hidden" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
             <path d="M13.4 13.4 2.6 2.6M10.7 10.8A4.9 4.9 0 0 1 8 11.5c-4.5 0-7-3.5-7-3.5a12 12 0 0 1 3.3-3.3M6.1 4.6A5 5 0 0 1 8 4.5c4.5 0 7 3.5 7 3.5a12 12 0 0 1-1.9 2.4"/>
             <path d="M6.3 6.4a2 2 0 0 0 2.7 2.8"/>
           </svg>
         </button>
-        <button id="btn-clear-key" class="icon-btn hidden" title="Clear key — you'll need to re-enter it to change it">
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <button id="btn-clear-key" class="icon-btn hidden" title="Clear key — you'll need to re-enter it to change it" aria-label="Clear key — you'll need to re-enter it to change it">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M2.5 4h11"/>
             <path d="M6 4V2.8a.8.8 0 0 1 .8-.8h2.4a.8.8 0 0 1 .8.8V4"/>
             <path d="M3.6 4l.6 8.5a1 1 0 0 0 1 .9h5.6a1 1 0 0 0 1-.9L12.4 4"/>
@@ -168,7 +174,7 @@
         </button>
       </div>
       <p class="key-saved-msg hidden" id="key-saved-msg">
-        <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px">
           <polyline points="2 8 6 12 14 4"/>
         </svg>
         Key saved
@@ -179,8 +185,8 @@
       <div class="field-header">
         <span class="field-label">PAGESPEED INSIGHTS API KEY</span>
         <div class="field-header-actions">
-          <button class="info-tip" type="button" title="Free key from Google Cloud Console (enable the PageSpeed Insights API). Stored locally on this device only — never synced.">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <button class="info-tip" type="button" title="Free key from Google Cloud Console (enable the PageSpeed Insights API). Stored locally on this device only — never synced." aria-label="Free key from Google Cloud Console (enable the PageSpeed Insights API). Stored locally on this device only — never synced.">
+            <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7.5" x2="8" y2="11"/><circle cx="8" cy="5" r="0.55" fill="currentColor" stroke="none"/>
             </svg>
           </button>
@@ -196,18 +202,18 @@
           autocomplete="off"
           spellcheck="false"
         />
-        <button id="btn-toggle-psi-key-vis" class="icon-btn" title="Show / hide key">
-          <svg id="psi-icon-eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <button id="btn-toggle-psi-key-vis" class="icon-btn" title="Show / hide key" aria-label="Show / hide key">
+          <svg aria-hidden="true" focusable="false" id="psi-icon-eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
             <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/>
             <circle cx="8" cy="8" r="2"/>
           </svg>
-          <svg id="psi-icon-eye-closed" class="hidden" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <svg aria-hidden="true" focusable="false" id="psi-icon-eye-closed" class="hidden" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
             <path d="M13.4 13.4 2.6 2.6M10.7 10.8A4.9 4.9 0 0 1 8 11.5c-4.5 0-7-3.5-7-3.5a12 12 0 0 1 3.3-3.3M6.1 4.6A5 5 0 0 1 8 4.5c4.5 0 7 3.5 7 3.5a12 12 0 0 1-1.9 2.4"/>
             <path d="M6.3 6.4a2 2 0 0 0 2.7 2.8"/>
           </svg>
         </button>
-        <button id="btn-clear-psi-key" class="icon-btn hidden" title="Clear key — you'll need to re-enter it to change it">
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <button id="btn-clear-psi-key" class="icon-btn hidden" title="Clear key — you'll need to re-enter it to change it" aria-label="Clear key — you'll need to re-enter it to change it">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M2.5 4h11"/>
             <path d="M6 4V2.8a.8.8 0 0 1 .8-.8h2.4a.8.8 0 0 1 .8.8V4"/>
             <path d="M3.6 4l.6 8.5a1 1 0 0 0 1 .9h5.6a1 1 0 0 0 1-.9L12.4 4"/>
@@ -217,7 +223,7 @@
         </button>
       </div>
       <p class="key-saved-msg hidden" id="psi-key-saved-msg">
-        <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px">
           <polyline points="2 8 6 12 14 4"/>
         </svg>
         Key saved
@@ -228,8 +234,8 @@
       <div class="field-header">
         <span class="field-label">GOOGLE SEARCH CONSOLE</span>
         <div class="field-header-actions">
-          <button class="info-tip hidden" id="gsc-connected-tip" type="button" title="">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <button class="info-tip hidden" id="gsc-connected-tip" type="button" title="" aria-label="Connection details">
+            <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7.5" x2="8" y2="11"/><circle cx="8" cy="5" r="0.55" fill="currentColor" stroke="none"/>
             </svg>
           </button>
@@ -283,16 +289,16 @@
           <span class="wp-field-label">Developer token</span>
           <div class="api-key-row">
             <input type="password" id="ads-dev-token" class="api-key-input" placeholder="Google Ads developer token" autocomplete="off" spellcheck="false" />
-            <button id="btn-ads-token-vis" class="icon-btn" title="Show / hide token">
-              <svg id="ads-eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <button id="btn-ads-token-vis" class="icon-btn" title="Show / hide token" aria-label="Show / hide token">
+              <svg aria-hidden="true" focusable="false" id="ads-eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2"/>
               </svg>
-              <svg id="ads-eye-closed" class="hidden" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <svg aria-hidden="true" focusable="false" id="ads-eye-closed" class="hidden" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M13.4 13.4 2.6 2.6M10.7 10.8A4.9 4.9 0 0 1 8 11.5c-4.5 0-7-3.5-7-3.5a12 12 0 0 1 3.3-3.3M6.1 4.6A5 5 0 0 1 8 4.5c4.5 0 7 3.5 7 3.5a12 12 0 0 1-1.9 2.4"/><path d="M6.3 6.4a2 2 0 0 0 2.7 2.8"/>
               </svg>
             </button>
-            <button id="btn-ads-token-clear" class="icon-btn hidden" title="Clear token — you'll need to re-enter it">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <button id="btn-ads-token-clear" class="icon-btn hidden" title="Clear token — you'll need to re-enter it" aria-label="Clear token — you'll need to re-enter it">
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M2.5 4h11"/><path d="M6 4V2.8a.8.8 0 0 1 .8-.8h2.4a.8.8 0 0 1 .8.8V4"/><path d="M3.6 4l.6 8.5a1 1 0 0 0 1 .9h5.6a1 1 0 0 0 1-.9L12.4 4"/><line x1="6.6" y1="6.4" x2="6.8" y2="11"/><line x1="9.4" y1="6.4" x2="9.2" y2="11"/>
               </svg>
             </button>
@@ -312,8 +318,8 @@
       <div class="field-header">
         <span class="field-label">GOOGLE DRIVE</span>
         <div class="field-header-actions">
-          <button class="info-tip" type="button" title="Exports (Action Plans, negatives, keyword lists, query and keyword sheets) are saved to a &quot;Marketing Plans&quot; folder in this account's Google Drive.">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <button class="info-tip" type="button" title="Exports (Action Plans, negatives, keyword lists, query and keyword sheets) are saved to a &quot;Marketing Plans&quot; folder in this account's Google Drive." aria-label="Exports (Action Plans, negatives, keyword lists, query and keyword sheets) are saved to a &quot;Marketing Plans&quot; folder in this account's Google Drive.">
+            <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7.5" x2="8" y2="11"/><circle cx="8" cy="5" r="0.55" fill="currentColor" stroke="none"/>
             </svg>
           </button>
@@ -344,16 +350,16 @@
         <span class="wp-field-label">API Key</span>
         <div class="api-key-row">
           <input type="password" id="webceo-api-key" class="api-key-input" placeholder="Web CEO API key" autocomplete="off" spellcheck="false" />
-          <button id="btn-webceo-key-vis" class="icon-btn" title="Show / hide key">
-            <svg id="webceo-eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <button id="btn-webceo-key-vis" class="icon-btn" title="Show / hide key" aria-label="Show / hide key">
+            <svg aria-hidden="true" focusable="false" id="webceo-eye-open" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
               <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2"/>
             </svg>
-            <svg id="webceo-eye-closed" class="hidden" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <svg aria-hidden="true" focusable="false" id="webceo-eye-closed" class="hidden" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
               <path d="M13.4 13.4 2.6 2.6M10.7 10.8A4.9 4.9 0 0 1 8 11.5c-4.5 0-7-3.5-7-3.5a12 12 0 0 1 3.3-3.3M6.1 4.6A5 5 0 0 1 8 4.5c4.5 0 7 3.5 7 3.5a12 12 0 0 1-1.9 2.4"/><path d="M6.3 6.4a2 2 0 0 0 2.7 2.8"/>
             </svg>
           </button>
-          <button id="btn-webceo-key-clear" class="icon-btn hidden" title="Clear key — you'll need to re-enter it">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <button id="btn-webceo-key-clear" class="icon-btn hidden" title="Clear key — you'll need to re-enter it" aria-label="Clear key — you'll need to re-enter it">
+            <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="M2.5 4h11"/><path d="M6 4V2.8a.8.8 0 0 1 .8-.8h2.4a.8.8 0 0 1 .8.8V4"/><path d="M3.6 4l.6 8.5a1 1 0 0 0 1 .9h5.6a1 1 0 0 0 1-.9L12.4 4"/><line x1="6.6" y1="6.4" x2="6.8" y2="11"/><line x1="9.4" y1="6.4" x2="9.2" y2="11"/>
             </svg>
           </button>
@@ -372,8 +378,8 @@
       <div class="field-header">
         <span class="field-label">WORDPRESS SITES</span>
         <div class="field-header-actions">
-          <button class="info-tip" type="button" title="Use a WordPress Application Password (Users → Profile → Application Passwords) — never your account password. Lets the alt-text generator save directly to that site's Media Library.">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <button class="info-tip" type="button" title="Use a WordPress Application Password (Users → Profile → Application Passwords) — never your account password. Lets the alt-text generator save directly to that site's Media Library." aria-label="Use a WordPress Application Password (Users → Profile → Application Passwords) — never your account password. Lets the alt-text generator save directly to that site's Media Library.">
+            <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7.5" x2="8" y2="11"/><circle cx="8" cy="5" r="0.55" fill="currentColor" stroke="none"/>
             </svg>
           </button>
@@ -429,7 +435,7 @@
         </div>
       </div>
       <p class="key-saved-msg hidden" id="key-saved-msg-ranges">
-        <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px">
           <polyline points="2 8 6 12 14 4"/>
         </svg>
         Ranges saved
@@ -465,15 +471,19 @@
         <input type="password" id="gsc-client-secret" class="wp-input" autocomplete="off" spellcheck="false" />
       </label>
       <label class="wp-field">
-        <span class="wp-field-label">Redirect URI — register this in Google Cloud Console</span>
+        <span class="wp-field-label">Redirect URI — generated, copy this into Google Cloud Console</span>
         <div class="api-key-row">
-          <input type="text" id="gsc-redirect-uri" class="api-key-input" readonly />
-          <button id="btn-copy-redirect-uri" class="icon-btn" title="Copy redirect URI">
-            <svg id="gsc-redirect-icon-copy" class="icon-copy" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <!-- Stays focusable on purpose: readonly still needs to be reachable
+               by keyboard so the value can be selected and copied by hand. -->
+          <input type="text" id="gsc-redirect-uri" class="api-key-input api-key-input--readonly"
+                 readonly aria-readonly="true"
+                 title="Generated from this extension's ID — it can't be changed. Copy it into your OAuth client's Authorized redirect URIs." />
+          <button id="btn-copy-redirect-uri" class="icon-btn" title="Copy redirect URI" aria-label="Copy redirect URI">
+            <svg aria-hidden="true" focusable="false" id="gsc-redirect-icon-copy" class="icon-copy" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
               <rect x="5" y="4" width="9" height="11" rx="1.5"/>
               <path d="M3 12H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1"/>
             </svg>
-            <svg id="gsc-redirect-icon-check" class="icon-check hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <svg aria-hidden="true" focusable="false" id="gsc-redirect-icon-check" class="icon-check hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="2 8 6 12 14 4"/>
             </svg>
           </button>
@@ -491,14 +501,14 @@
   <div id="client-panel" class="hidden">
     <div class="settings-header">
       <button id="btn-client-back" class="settings-back-btn">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="10 3 4 8 10 13"/>
         </svg>
         Back
       </button>
       <div class="settings-header-actions">
-        <button id="btn-client-delete" class="icon-btn hidden" title="Delete this client">
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <button id="btn-client-delete" class="icon-btn hidden" title="Delete this client" aria-label="Delete this client">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M2.5 4h11"/>
             <path d="M6 4V2.8a.8.8 0 0 1 .8-.8h2.4a.8.8 0 0 1 .8.8V4"/>
             <path d="M3.6 4l.6 8.5a1 1 0 0 0 1 .9h5.6a1 1 0 0 0 1-.9L12.4 4"/>
@@ -516,8 +526,8 @@
     <div class="modal-box drive-browser-box">
       <div class="drive-browser-header">
         <span class="drive-browser-title">Choose a Drive folder</span>
-        <button id="btn-drive-browser-close" class="icon-btn" title="Cancel">
-          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <button id="btn-drive-browser-close" class="icon-btn" title="Cancel" aria-label="Cancel">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
             <path d="M3 3l10 10M13 3L3 13"/>
           </svg>
         </button>
@@ -542,7 +552,7 @@
   <div id="schema-panel" class="hidden">
     <div class="settings-header">
       <button id="btn-schema-back" class="settings-back-btn">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="10 3 4 8 10 13"/>
         </svg>
         Back
@@ -559,7 +569,7 @@
   <div id="og-panel" class="hidden">
     <div class="settings-header">
       <button id="btn-og-back" class="settings-back-btn">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="10 3 4 8 10 13"/>
         </svg>
         Back
@@ -578,7 +588,7 @@
   <div id="tw-panel" class="hidden">
     <div class="settings-header">
       <button id="btn-tw-back" class="settings-back-btn">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="10 3 4 8 10 13"/>
         </svg>
         Back
@@ -597,7 +607,7 @@
   <div id="hreflang-panel" class="hidden">
     <div class="settings-header">
       <button id="btn-hreflang-back" class="settings-back-btn">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="10 3 4 8 10 13"/>
         </svg>
         Back
@@ -610,7 +620,7 @@
   <div id="favicon-panel" class="hidden">
     <div class="settings-header">
       <button id="btn-favicon-back" class="settings-back-btn">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="10 3 4 8 10 13"/>
         </svg>
         Back
@@ -623,7 +633,7 @@
   <div id="backlinks-panel" class="hidden">
     <div class="settings-header">
       <button id="btn-backlinks-back" class="settings-back-btn">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="10 3 4 8 10 13"/>
         </svg>
         Back
@@ -640,7 +650,7 @@
   <div id="utm-panel" class="hidden">
     <div class="settings-header">
       <button id="btn-utm-back" class="settings-back-btn">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="10 3 4 8 10 13"/>
         </svg>
         Back
@@ -653,7 +663,7 @@
   <div id="siteaudit-panel" class="hidden">
     <div class="settings-header">
       <button id="btn-siteaudit-back" class="settings-back-btn">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="10 3 4 8 10 13"/>
         </svg>
         Back
@@ -669,7 +679,7 @@
   <div id="pagespeed-panel" class="hidden">
     <div class="settings-header">
       <button id="btn-pagespeed-back" class="settings-back-btn">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="10 3 4 8 10 13"/>
         </svg>
         Back
@@ -688,7 +698,7 @@
   <div id="tags-panel" class="hidden">
     <div class="settings-header">
       <button id="btn-tags-back" class="settings-back-btn">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="10 3 4 8 10 13"/>
         </svg>
         Back
@@ -703,26 +713,26 @@
   <div id="phrases-panel" class="hidden">
     <div class="settings-header">
       <button id="btn-phrases-back" class="settings-back-btn">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="10 3 4 8 10 13"/>
         </svg>
         Back
       </button>
       <span class="bl-header-meta" id="phrases-header-meta"></span>
       <div class="phrases-header-actions">
-        <button id="btn-phrases-export-csv" class="phrases-icon-btn" title="Download all four tables as a CSV">
-          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <button id="btn-phrases-export-csv" class="phrases-icon-btn" title="Download all four tables as a CSV" aria-label="Download all four tables as a CSV">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
             <path d="M8 2v8"/><polyline points="5 7 8 10 11 7"/><path d="M3 12.5h10"/>
           </svg>
         </button>
-        <button id="btn-phrases-export-sheet" class="phrases-icon-btn" title="Add all four tables to Google Sheets — one tab each">
-          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <button id="btn-phrases-export-sheet" class="phrases-icon-btn" title="Add all four tables to Google Sheets — one tab each" aria-label="Add all four tables to Google Sheets — one tab each">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
             <rect x="2" y="2" width="12" height="12" rx="1.5"/><line x1="2" y1="6.3" x2="14" y2="6.3"/>
             <line x1="2" y1="10.7" x2="14" y2="10.7"/><line x1="6.3" y1="2" x2="6.3" y2="14"/>
           </svg>
         </button>
-        <button id="btn-phrases-refresh" class="phrases-icon-btn" title="Re-scan the page">
-          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <button id="btn-phrases-refresh" class="phrases-icon-btn" title="Re-scan the page" aria-label="Re-scan the page">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="15.3 2.7 15.3 6.7 11.3 6.7"/><polyline points="0.7 13.3 0.7 9.3 4.7 9.3"/>
             <path d="M2.34 6a6 6 0 0 1 9.9-2.24L15.3 6.7M0.7 9.3l3.09 2.91A6 6 0 0 0 13.66 10"/>
           </svg>
@@ -747,7 +757,7 @@
   <div id="actionplan-panel" class="hidden">
     <div class="settings-header">
       <button id="btn-actionplan-back" class="settings-back-btn">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="10 3 4 8 10 13"/>
         </svg>
         Back
@@ -763,7 +773,7 @@
   <div id="adcopy-panel" class="hidden">
     <div class="settings-header">
       <button id="btn-adcopy-back" class="settings-back-btn">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="10 3 4 8 10 13"/>
         </svg>
         Back
@@ -780,7 +790,7 @@
   <div id="negatives-panel" class="hidden">
     <div class="settings-header">
       <button id="btn-negatives-back" class="settings-back-btn">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="10 3 4 8 10 13"/>
         </svg>
         Back
@@ -794,8 +804,8 @@
       <div class="field-header">
         <span class="field-label">REFINE NEGATIVES</span>
         <span class="neg-header-right">
-          <button class="info-tip" type="button" title="Terms that convert, rank organically, or match this page's intent are protected and never suggested.">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <button class="info-tip" type="button" title="Terms that convert, rank organically, or match this page's intent are protected and never suggested." aria-label="Terms that convert, rank organically, or match this page's intent are protected and never suggested.">
+            <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7.5" x2="8" y2="11"/><circle cx="8" cy="5" r="0.55" fill="currentColor" stroke="none"/>
             </svg>
           </button>
@@ -816,35 +826,35 @@
   <div id="addkw-panel" class="hidden">
     <div class="settings-header">
       <button id="btn-addkw-back" class="settings-back-btn">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="10 3 4 8 10 13"/>
         </svg>
         Back
       </button>
       <div class="settings-header-actions">
-        <button id="btn-addkw-export-txt" class="addkw-icon-btn hidden" title="Download .txt of the checked keywords">
-          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <button id="btn-addkw-export-txt" class="addkw-icon-btn hidden" title="Download .txt of the checked keywords" aria-label="Download .txt of the checked keywords">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
             <path d="M8 2v8"/>
             <polyline points="4.5 7 8 10.5 11.5 7"/>
             <path d="M2.5 13.5h11"/>
           </svg>
         </button>
-        <button id="btn-addkw-export-copy" class="addkw-icon-btn hidden" title="Copy the checked keywords">
-          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <button id="btn-addkw-export-copy" class="addkw-icon-btn hidden" title="Copy the checked keywords" aria-label="Copy the checked keywords">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
             <rect x="5" y="4" width="9" height="11" rx="1.5"/>
             <path d="M3 12H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1"/>
           </svg>
         </button>
-        <button id="btn-addkw-export-doc" class="addkw-icon-btn hidden" title="Create a Google Doc of the checked keywords">
-          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <button id="btn-addkw-export-doc" class="addkw-icon-btn hidden" title="Create a Google Doc of the checked keywords" aria-label="Create a Google Doc of the checked keywords">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
             <path d="M4 1.5h5.5L12.5 4.5V14.5H4Z"/>
             <path d="M9.5 1.5V4.5H12.5"/>
             <line x1="6" y1="8" x2="10.5" y2="8"/>
             <line x1="6" y1="10.5" x2="10.5" y2="10.5"/>
           </svg>
         </button>
-        <button id="btn-addkw-regen" class="addkw-icon-btn" title="Re-run the analysis">
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <button id="btn-addkw-regen" class="addkw-icon-btn" title="Re-run the analysis" aria-label="Re-run the analysis">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M13.5 8A5.5 5.5 0 1 1 8 2.5a5.5 5.5 0 0 1 3.9 1.6L13.5 5.6"/>
             <polyline points="13.5 2 13.5 5.6 9.9 5.6"/>
           </svg>
@@ -856,8 +866,8 @@
       <div class="field-header">
         <span class="field-label">ADD KEYWORDS</span>
         <span class="neg-header-right">
-          <button class="info-tip" type="button" title="Suggestions are scored for relevance to this page. Branded terms are excluded.">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <button class="info-tip" type="button" title="Suggestions are scored for relevance to this page. Branded terms are excluded." aria-label="Suggestions are scored for relevance to this page. Branded terms are excluded.">
+            <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7.5" x2="8" y2="11"/><circle cx="8" cy="5" r="0.55" fill="currentColor" stroke="none"/>
             </svg>
           </button>
@@ -872,7 +882,7 @@
   <div id="adgroup-panel" class="hidden">
     <div class="settings-header">
       <button id="btn-adgroup-back" class="settings-back-btn">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="10 3 4 8 10 13"/>
         </svg>
         Back
@@ -981,15 +991,15 @@
         <div class="field-header">
           <span class="field-label">QUERIES</span>
           <div class="field-header-actions">
-            <button id="btn-gsc-export-csv" class="addkw-icon-btn" title="Download the visible queries as CSV (includes an Intent column)">
-              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <button id="btn-gsc-export-csv" class="addkw-icon-btn" title="Download the visible queries as CSV (includes an Intent column)" aria-label="Download the visible queries as CSV (includes an Intent column)">
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M8 2v8"/>
                 <polyline points="4.5 7 8 10.5 11.5 7"/>
                 <path d="M2.5 13.5h11"/>
               </svg>
             </button>
-            <button id="btn-gsc-export-sheet" class="addkw-icon-btn" title="Add the visible queries to this domain's Google Sheet (includes an Intent column)">
-              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <button id="btn-gsc-export-sheet" class="addkw-icon-btn" title="Add the visible queries to this domain's Google Sheet (includes an Intent column)" aria-label="Add the visible queries to this domain's Google Sheet (includes an Intent column)">
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="2" y="2" width="12" height="12" rx="1.5"/>
                 <line x1="2" y1="6.5" x2="14" y2="6.5"/>
                 <line x1="6.5" y1="6.5" x2="6.5" y2="14"/>
@@ -997,7 +1007,7 @@
             </button>
             <button class="adcopy-launch-btn" id="btn-gen-addkw-gsc" title="Find new keywords to add to Google Ads, sourced from these queries">
               Add Keywords
-              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="5" x2="8" y2="11"/><line x1="5" y1="8" x2="11" y2="8"/>
               </svg>
             </button>
@@ -1194,10 +1204,10 @@
           <span class="field-label">ACTION PLAN</span>
           <div class="field-nav-right">
             <span id="ads-actionplan-status" class="field-nav-status hidden"></span>
-            <svg class="ap-nav-star" viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true">
+            <svg focusable="false" class="ap-nav-star" viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true">
               <path d="M8 1l1.4 4.6L14 7l-4.6 1.4L8 13l-1.4-4.6L2 7l4.6-1.4z"/>
             </svg>
-            <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="6 3 11 8 6 13"/>
             </svg>
           </div>
@@ -1250,7 +1260,7 @@
           <span class="field-label">ADS POINTING HERE</span>
           <button class="adcopy-launch-btn" id="btn-gen-adcopy" title="Generate ad copy for this page with Claude">
             Ad Copy
-            <svg class="icon-generate" viewBox="0 0 16 16" width="12" height="12" fill="currentColor">
+            <svg aria-hidden="true" focusable="false" class="icon-generate" viewBox="0 0 16 16" width="12" height="12" fill="currentColor">
               <path d="M8 1l1.4 4.6L14 7l-4.6 1.4L8 13l-1.4-4.6L2 7l4.6-1.4z"/>
             </svg>
           </button>
@@ -1262,15 +1272,15 @@
         <div class="field-header">
           <span class="field-label">KEYWORDS</span>
           <div class="field-header-actions">
-            <button id="btn-ads-kw-export-csv" class="addkw-icon-btn" title="Download the visible keywords as CSV (includes an Intent column)">
-              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <button id="btn-ads-kw-export-csv" class="addkw-icon-btn" title="Download the visible keywords as CSV (includes an Intent column)" aria-label="Download the visible keywords as CSV (includes an Intent column)">
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M8 2v8"/>
                 <polyline points="4.5 7 8 10.5 11.5 7"/>
                 <path d="M2.5 13.5h11"/>
               </svg>
             </button>
-            <button id="btn-ads-kw-export-sheet" class="addkw-icon-btn" title="Add the visible keywords to this domain's Google Sheet (includes an Intent column)">
-              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <button id="btn-ads-kw-export-sheet" class="addkw-icon-btn" title="Add the visible keywords to this domain's Google Sheet (includes an Intent column)" aria-label="Add the visible keywords to this domain's Google Sheet (includes an Intent column)">
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="2" y="2" width="12" height="12" rx="1.5"/>
                 <line x1="2" y1="6.5" x2="14" y2="6.5"/>
                 <line x1="6.5" y1="6.5" x2="6.5" y2="14"/>
@@ -1292,15 +1302,15 @@
         <div class="field-header">
           <span class="field-label">SEARCH TERMS</span>
           <div class="field-header-actions">
-            <button id="btn-ads-terms-export-csv" class="addkw-icon-btn" title="Download the visible search terms as CSV (includes an Intent column)">
-              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <button id="btn-ads-terms-export-csv" class="addkw-icon-btn" title="Download the visible search terms as CSV (includes an Intent column)" aria-label="Download the visible search terms as CSV (includes an Intent column)">
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M8 2v8"/>
                 <polyline points="4.5 7 8 10.5 11.5 7"/>
                 <path d="M2.5 13.5h11"/>
               </svg>
             </button>
-            <button id="btn-ads-terms-export-sheet" class="addkw-icon-btn" title="Add the visible search terms to this domain's Google Sheet (includes an Intent column)">
-              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <button id="btn-ads-terms-export-sheet" class="addkw-icon-btn" title="Add the visible search terms to this domain's Google Sheet (includes an Intent column)" aria-label="Add the visible search terms to this domain's Google Sheet (includes an Intent column)">
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="2" y="2" width="12" height="12" rx="1.5"/>
                 <line x1="2" y1="6.5" x2="14" y2="6.5"/>
                 <line x1="6.5" y1="6.5" x2="6.5" y2="14"/>
@@ -1308,13 +1318,13 @@
             </button>
             <button class="adcopy-launch-btn" id="btn-gen-addkw" title="Find new keywords to add, sourced from search terms, with Claude">
               Add Keywords
-              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="8" cy="8" r="6.5"/><line x1="8" y1="5" x2="8" y2="11"/><line x1="5" y1="8" x2="11" y2="8"/>
               </svg>
             </button>
             <button class="adcopy-launch-btn" id="btn-gen-negatives" title="Find low-quality search terms to exclude, with Claude">
               Refine Negatives
-              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="8" cy="8" r="6.5"/><line x1="5" y1="8" x2="11" y2="8"/>
               </svg>
             </button>
@@ -1448,10 +1458,10 @@
         <span class="field-label">ACTION PLAN</span>
         <div class="field-nav-right">
           <span id="actionplan-status" class="field-nav-status hidden"></span>
-          <svg class="ap-nav-star" viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true">
+          <svg focusable="false" class="ap-nav-star" viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true">
             <path d="M8 1l1.4 4.6L14 7l-4.6 1.4L8 13l-1.4-4.6L2 7l4.6-1.4z"/>
           </svg>
-          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 3 11 8 6 13"/>
           </svg>
         </div>
@@ -1463,20 +1473,20 @@
       <div class="field-header">
         <span class="field-label">TITLE TAG</span>
         <div class="field-header-actions">
-          <button class="gen-btn" id="btn-generate-title" data-field="title" title="Generate with Claude">
-            <svg class="icon-generate" viewBox="0 0 16 16" width="13" height="13" fill="currentColor">
+          <button class="gen-btn" id="btn-generate-title" data-field="title" title="Generate with Claude" aria-label="Generate with Claude">
+            <svg aria-hidden="true" focusable="false" class="icon-generate" viewBox="0 0 16 16" width="13" height="13" fill="currentColor">
               <path d="M8 1l1.4 4.6L14 7l-4.6 1.4L8 13l-1.4-4.6L2 7l4.6-1.4z"/>
             </svg>
-            <svg class="icon-spinner hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+            <svg aria-hidden="true" focusable="false" class="icon-spinner hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
               <path d="M14 8A6 6 0 1 1 8 2"/>
             </svg>
           </button>
-          <button class="copy-btn" data-copy-target="title" title="Copy title">
-            <svg class="icon-copy" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <button class="copy-btn" data-copy-target="title" title="Copy title" aria-label="Copy title">
+            <svg aria-hidden="true" focusable="false" class="icon-copy" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
               <rect x="5" y="4" width="9" height="11" rx="1.5"/>
               <path d="M3 12H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1"/>
             </svg>
-            <svg class="icon-check hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <svg aria-hidden="true" focusable="false" class="icon-check hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="2 8 6 12 14 4"/>
             </svg>
           </button>
@@ -1490,23 +1500,23 @@
         <div class="gen-result-footer">
           <span class="gen-result-meta" id="title-gen-meta"></span>
           <div class="gen-result-actions">
-            <button class="gen-result-btn" id="title-gen-regen" data-field="title" title="Regenerate">
-              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <button class="gen-result-btn" id="title-gen-regen" data-field="title" title="Regenerate" aria-label="Regenerate">
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M13.5 8A5.5 5.5 0 1 1 8 2.5a5.5 5.5 0 0 1 3.9 1.6L13.5 5.6"/>
                 <polyline points="13.5 2 13.5 5.6 9.9 5.6"/>
               </svg>
             </button>
-            <button class="gen-result-btn" id="title-gen-copy" data-field="title" title="Copy suggestion">
-              <svg class="icon-copy" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <button class="gen-result-btn" id="title-gen-copy" data-field="title" title="Copy suggestion" aria-label="Copy suggestion">
+              <svg aria-hidden="true" focusable="false" class="icon-copy" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="5" y="4" width="9" height="11" rx="1.5"/>
                 <path d="M3 12H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1"/>
               </svg>
-              <svg class="icon-check hidden" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <svg aria-hidden="true" focusable="false" class="icon-check hidden" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="2 8 6 12 14 4"/>
               </svg>
             </button>
-            <button class="gen-result-btn" id="title-gen-dismiss" data-field="title" title="Dismiss">
-              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <button class="gen-result-btn" id="title-gen-dismiss" data-field="title" title="Dismiss" aria-label="Dismiss">
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
                 <line x1="3" y1="3" x2="13" y2="13"/>
                 <line x1="13" y1="3" x2="3" y2="13"/>
               </svg>
@@ -1521,20 +1531,20 @@
       <div class="field-header">
         <span class="field-label">META DESCRIPTION</span>
         <div class="field-header-actions">
-          <button class="gen-btn" id="btn-generate-meta" data-field="meta" title="Generate with Claude">
-            <svg class="icon-generate" viewBox="0 0 16 16" width="13" height="13" fill="currentColor">
+          <button class="gen-btn" id="btn-generate-meta" data-field="meta" title="Generate with Claude" aria-label="Generate with Claude">
+            <svg aria-hidden="true" focusable="false" class="icon-generate" viewBox="0 0 16 16" width="13" height="13" fill="currentColor">
               <path d="M8 1l1.4 4.6L14 7l-4.6 1.4L8 13l-1.4-4.6L2 7l4.6-1.4z"/>
             </svg>
-            <svg class="icon-spinner hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+            <svg aria-hidden="true" focusable="false" class="icon-spinner hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
               <path d="M14 8A6 6 0 1 1 8 2"/>
             </svg>
           </button>
-          <button class="copy-btn" data-copy-target="meta" title="Copy meta description">
-            <svg class="icon-copy" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <button class="copy-btn" data-copy-target="meta" title="Copy meta description" aria-label="Copy meta description">
+            <svg aria-hidden="true" focusable="false" class="icon-copy" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
               <rect x="5" y="4" width="9" height="11" rx="1.5"/>
               <path d="M3 12H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1"/>
             </svg>
-            <svg class="icon-check hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <svg aria-hidden="true" focusable="false" class="icon-check hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="2 8 6 12 14 4"/>
             </svg>
           </button>
@@ -1549,23 +1559,23 @@
         <div class="gen-result-footer">
           <span class="gen-result-meta" id="meta-gen-meta"></span>
           <div class="gen-result-actions">
-            <button class="gen-result-btn" id="meta-gen-regen" data-field="meta" title="Regenerate">
-              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <button class="gen-result-btn" id="meta-gen-regen" data-field="meta" title="Regenerate" aria-label="Regenerate">
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M13.5 8A5.5 5.5 0 1 1 8 2.5a5.5 5.5 0 0 1 3.9 1.6L13.5 5.6"/>
                 <polyline points="13.5 2 13.5 5.6 9.9 5.6"/>
               </svg>
             </button>
-            <button class="gen-result-btn" id="meta-gen-copy" data-field="meta" title="Copy suggestion">
-              <svg class="icon-copy" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <button class="gen-result-btn" id="meta-gen-copy" data-field="meta" title="Copy suggestion" aria-label="Copy suggestion">
+              <svg aria-hidden="true" focusable="false" class="icon-copy" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="5" y="4" width="9" height="11" rx="1.5"/>
                 <path d="M3 12H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1"/>
               </svg>
-              <svg class="icon-check hidden" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <svg aria-hidden="true" focusable="false" class="icon-check hidden" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="2 8 6 12 14 4"/>
               </svg>
             </button>
-            <button class="gen-result-btn" id="meta-gen-dismiss" data-field="meta" title="Dismiss">
-              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <button class="gen-result-btn" id="meta-gen-dismiss" data-field="meta" title="Dismiss" aria-label="Dismiss">
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
                 <line x1="3" y1="3" x2="13" y2="13"/>
                 <line x1="13" y1="3" x2="3" y2="13"/>
               </svg>
@@ -1605,10 +1615,10 @@
     <section class="field-section">
       <div class="field-header">
         <span class="field-label">HEADINGS</span>
-        <button class="field-nav-btn field-nav-btn--inline" id="btn-phrases" title="Top keyword phrases on this page" disabled>
+        <button class="field-nav-btn field-nav-btn--inline" id="btn-phrases" title="Top keyword phrases on this page" disabled aria-label="Top keyword phrases on this page">
           <div class="field-nav-right">
             <span id="phrases-summary" class="field-nav-summary"></span>
-            <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="6 3 11 8 6 13"/>
             </svg>
           </div>
@@ -1625,12 +1635,12 @@
           <span class="field-label">CANONICAL URL</span>
           <span id="canonical-chip" class="canonical-chip hidden"></span>
         </div>
-        <button class="copy-btn" data-copy-target="canonical" title="Copy canonical URL">
-          <svg class="icon-copy" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <button class="copy-btn" data-copy-target="canonical" title="Copy canonical URL" aria-label="Copy canonical URL">
+          <svg aria-hidden="true" focusable="false" class="icon-copy" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
             <rect x="5" y="4" width="9" height="11" rx="1.5"/>
             <path d="M3 12H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1"/>
           </svg>
-          <svg class="icon-check hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg aria-hidden="true" focusable="false" class="icon-check hidden" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="2 8 6 12 14 4"/>
           </svg>
         </button>
@@ -1644,7 +1654,7 @@
         <span class="field-label">CORE WEB VITALS</span>
         <div class="field-nav-right">
           <span id="pagespeed-summary" class="field-nav-summary"></span>
-          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 3 11 8 6 13"/>
           </svg>
         </div>
@@ -1657,7 +1667,7 @@
         <span class="field-label">BACKLINKS</span>
         <div class="field-nav-right">
           <span id="backlinks-summary" class="field-nav-summary"></span>
-          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 3 11 8 6 13"/>
           </svg>
         </div>
@@ -1670,7 +1680,7 @@
         <span class="field-label">SITE AUDIT</span>
         <div class="field-nav-right">
           <span id="siteaudit-summary" class="field-nav-summary"></span>
-          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 3 11 8 6 13"/>
           </svg>
         </div>
@@ -1685,7 +1695,7 @@
         <div class="field-nav-right">
           <span class="field-nav-status hidden" id="og-status"></span>
           <span id="og-summary" class="field-nav-summary"></span>
-          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 3 11 8 6 13"/>
           </svg>
         </div>
@@ -1699,7 +1709,7 @@
         <div class="field-nav-right">
           <span class="field-nav-status hidden" id="tw-status"></span>
           <span id="tw-summary" class="field-nav-summary"></span>
-          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 3 11 8 6 13"/>
           </svg>
         </div>
@@ -1713,7 +1723,7 @@
         <div class="field-nav-right">
           <span class="field-nav-status hidden" id="schema-status"></span>
           <span id="schema-summary" class="field-nav-summary"></span>
-          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 3 11 8 6 13"/>
           </svg>
         </div>
@@ -1727,7 +1737,7 @@
         <div class="field-nav-right">
           <span class="field-nav-status hidden" id="hreflang-status"></span>
           <span id="hreflang-summary" class="field-nav-summary"></span>
-          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 3 11 8 6 13"/>
           </svg>
         </div>
@@ -1741,7 +1751,7 @@
         <div class="field-nav-right">
           <span class="field-nav-status hidden" id="favicon-status"></span>
           <span id="favicon-summary" class="field-nav-summary"></span>
-          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 3 11 8 6 13"/>
           </svg>
         </div>
@@ -1754,7 +1764,7 @@
         <span class="field-label">UTM GENERATOR</span>
         <div class="field-nav-right">
           <span id="utm-summary" class="field-nav-summary"></span>
-          <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 3 11 8 6 13"/>
           </svg>
         </div>

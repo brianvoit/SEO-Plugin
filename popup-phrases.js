@@ -485,7 +485,7 @@ function phrasesIconBtn(title, svg, onClick) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'phrases-icon-btn';
-  btn.title = title;
+  labelIconButton(btn, title);
   btn.appendChild(svgFromString(svg));
   btn.addEventListener('click', () => onClick(btn));
   return btn;

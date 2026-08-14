@@ -1418,7 +1418,10 @@ async function refreshGscSettingsStatus() {
     connectedInfo.classList.remove('hidden');
     setAccountEmail('gsc-account-email', status.email);
     if (status.connectedAt) {
+      // Icon-only button: the title carries the whole message, so the label
+      // has to be set alongside it rather than hardcoded in the markup.
       connectedTip.title = `Connected since ${formatDate(new Date(status.connectedAt))}`;
+      connectedTip.setAttribute('aria-label', connectedTip.title);
       connectedTip.classList.remove('hidden');
     } else {
       connectedTip.classList.add('hidden');

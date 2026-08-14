@@ -50,7 +50,8 @@ function boot({ scan = null, branded = {}, gsc = null, adCopy = null } = {}) {
   w.getActiveTab = () => Promise.resolve({ id: 1, url: 'https://site.test/page' });
   w.allBrandedTerms = branded;
   w.isValidRegex = (s) => { try { new RegExp(s); return true; } catch { return false; } };
-  // popup-shared.js isn't loaded here; this is its real implementation.
+  // popup-shared.js isn't loaded here; these are its real implementations.
+  w.labelIconButton = (btn, text) => { btn.title = text; btn.setAttribute('aria-label', text); return btn; };
   w.svgFromString = (markup) => {
     const doc = new w.DOMParser().parseFromString(
       /\sxmlns=/.test(markup) ? markup : markup.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"'),

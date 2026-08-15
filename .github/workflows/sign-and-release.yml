@@ -17,6 +17,16 @@ jobs:
       # yet — secrets aren't readable from a step-level `if` directly.
       CWS_EXTENSION_ID: ${{ secrets.CWS_EXTENSION_ID }}
 
+      # The OAuth client baked into released builds, so connecting works
+      # without every user first creating their own Google Cloud project.
+      # scripts/build.mjs rewrites oauth-config.js from these; unset, the build
+      # ships the empty defaults and the extension falls back to
+      # bring-your-own-client exactly as before. Job-level so `npm test`'s
+      # pretest build gets them too — otherwise the artifacts uploaded below
+      # would be built from a different oauth-config.js than the one tested.
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+
     steps:
       - uses: actions/checkout@v6
         with:

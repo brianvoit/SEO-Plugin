@@ -1,6 +1,10 @@
 {
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA5jSdWxpU1vNTDagZlBYC83+w+q0CxgbG9x9qlvFIzNG2I3QEte5cbdLF9ggKKC4MfUryhFwD1vLxlx6k+396GQbKK1Rb3WZwOvWOSj5LwURUsarRcelbiXhgkMuBnhNxyOYaaw9dd6PsFwCCK/iQv2T1jjpKNssAc6nBiIq/3gN0CIDBkUB684fWp/FO7NUAOa5EFom2Kep0dPx2uAN42Tx5gWz3+CA55K+41XgFQkXskyUfcfXNogSwMHWr9EtJQfkBzT+ulOZINfCPEwDjg+4whXeqFDCh+nudBEui3IoI9fzAxvb8lqPQ8LLnn9iglF92JzRxcIXX1JpJDE0F9QIDAQAB",
   "minimum_chrome_version": "116",
-  "permissions": ["contextMenus", "sidePanel"],
+  "permissions": [
+    "contextMenus",
+    "sidePanel"
+  ],
   "background": {
     "service_worker": "sw.js"
   },

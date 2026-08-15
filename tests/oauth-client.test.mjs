@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import vm from 'node:vm';
-import { ROOT, backgroundSource } from './helpers.mjs';
+import { ROOT, DIST, readJson, backgroundSource } from './helpers.mjs';
 
 /** Boots the real background with the given stored credentials. */
 function boot({ local = {} } = {}) {
@@ -97,6 +97,32 @@ describe('choosing which OAuth client to authenticate as', () => {
   test('hasBundledOAuthClient reports what the build shipped', async () => {
     assert.equal((await bootWithBundled('some-id', 's')).hasBundledOAuthClient(), true);
     assert.equal((await bootWithBundled('', '')).hasBundledOAuthClient(), false);
+  });
+});
+
+describe('the extension id is pinned', () => {
+  // Chromium derives the extension id from this key, and the id is what the
+  // OAuth redirect URI is built from. Without it the id comes from the install
+  // path, so every user has a different redirect URI and the shared client
+  // can't work — each person would have to register their own.
+  test('manifest.chrome.json carries a key', async () => {
+    const m = await readJson(path.join(ROOT, 'manifest.chrome.json'));
+    assert.ok(m.key, 'no key — Chromium ids fall back to being per-install');
+    assert.ok(m.key.length > 300, 'key looks too short to be a 2048-bit public key');
+    assert.match(m.key, /^[A-Za-z0-9+/]+=*$/, 'key must be base64, no whitespace');
+  });
+
+  test('the built Chrome manifest keeps it', async () => {
+    const m = await readJson(path.join(DIST, 'chrome', 'manifest.json'));
+    assert.ok(m.key);
+  });
+
+  test('Firefox does NOT get it', async () => {
+    // Firefox pins its id through browser_specific_settings.gecko.id instead;
+    // a stray Chromium key in that manifest is at best noise.
+    const m = await readJson(path.join(DIST, 'firefox', 'manifest.json'));
+    assert.equal(m.key, undefined);
+    assert.ok(m.browser_specific_settings?.gecko?.id, 'Firefox still needs its own pinned id');
   });
 });
 

@@ -411,6 +411,16 @@ browser.webRequest.onBeforeRequest.addListener(details => {
   // Goes through the queue so the lookup survives a worker restart and stays
   // ordered against any still-pending work for this tab.
   withRedirectEntry(details.tabId, prev => {
+    // A server redirect fires onBeforeRequest AGAIN for the redirect target,
+    // carrying the SAME requestId. Without this guard the reset below wipes
+    // the hop onBeforeRedirect recorded moments earlier, and what survives
+    // looks like a direct navigation straight to the destination — which is
+    // how a plain 301 came to be reported as "Redirects: 0", contradicting the
+    // Link Health overlay that had flagged the very same link.
+    //
+    // Only a genuinely new navigation starts a fresh chain: a different
+    // requestId, or the same one after it has finished.
+    if (prev && !prev.done && prev.requestId === details.requestId) return;
     saveRedirect(details.tabId, {
       requestId: details.requestId,
       chain: [],

@@ -3353,6 +3353,12 @@ body.settings-open #update-footer { margin-top: auto; }
 .hl-check--warn .hl-check-icon { color: var(--hint-amber); }
 .hl-chip--err     { color: var(--hint-red);   background: color-mix(in srgb, var(--hint-red) 12%, transparent); }
 .hl-chip--pending { color: var(--text-muted); background: color-mix(in srgb, var(--text-muted) 12%, transparent); }
+.favicon-row-actions { display: flex; align-items: center; gap: 4px; }
+/* Smaller than a standalone .icon-btn — these sit inside a 12px table row and
+   a section heading, so the default hit area would dominate both. */
+.favicon-row-btn { padding: 2px; line-height: 0; }
+/* The heading's open button goes flush right, past the label. */
+.field-header > .favicon-row-btn { margin-left: auto; }
 .favicon-torch-row { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .favicon-href { cursor: pointer; }
 .favicon-href:hover { color: var(--accent); text-decoration: underline; }
@@ -3622,6 +3628,12 @@ body.settings-open #update-footer { margin-top: auto; }
 .drive-browser-crumb-sep {
   color: var(--text-muted);
   font-size: 11px;
+}
+
+.drive-browser-filter {
+  margin: 0 12px 6px;
+  width: calc(100% - 24px);
+  flex-shrink: 0;
 }
 
 .drive-browser-list {

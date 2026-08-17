@@ -26,6 +26,8 @@ const html = await readFile(path.join(ROOT, 'popup.html'), 'utf8');
 const nav = await readFile(path.join(ROOT, 'popup-nav.js'), 'utf8');
 const webceo = await readFile(path.join(ROOT, 'bg-webceo.js'), 'utf8');
 const exportSrc = await readFile(path.join(ROOT, 'bg-export.js'), 'utf8');
+const ads       = await readFile(path.join(ROOT, 'bg-ads.js'), 'utf8');
+const router    = await readFile(path.join(ROOT, 'bg-router.js'), 'utf8');
 
 /** Evaluate the prompt/const declarations without needing the DOM or MODEL_HEAVY. */
 function prompts() {
@@ -363,5 +365,105 @@ describe('a variant contract survives a prompt the model ignored', () => {
   test('it runs before the plan is cached or exported', () => {
     // Enforcing at render time would leave the cache and the exports wrong.
     assert.match(src, /const plan = applyVariantContract\(normalizeActionPlan\(/);
+  });
+});
+
+// ─── The existing-negatives read ──────────────────────────────────────────────
+
+describe('the Paid plan knows which negatives already exist', () => {
+  const fn = ads.slice(ads.indexOf('async function adsGetNegatives('), ads.indexOf('// Every enabled ad group in the resolved account'));
+
+  test('all three places a negative can live are read', () => {
+    // Reading only one resource would still produce wrong advice: a term
+    // excluded via a shared list is invisible in campaign_criterion.
+    ['campaign_criterion', 'ad_group_criterion', 'shared_criterion'].forEach(r =>
+      assert.match(fn, new RegExp(`FROM ${r}\\b`), `${r} is not queried`));
+  });
+
+  test('only negative keyword criteria are pulled, not every criterion', () => {
+    assert.match(fn, /campaign_criterion\.negative = TRUE AND campaign_criterion\.type = 'KEYWORD'/);
+    assert.match(fn, /ad_group_criterion\.negative = TRUE AND ad_group_criterion\.type = 'KEYWORD'/);
+  });
+
+  test('shared sets are resolved from the page\'s campaigns, not the whole account', () => {
+    assert.match(fn, /FROM campaign_shared_set[\s\S]*?WHERE campaign\.id IN/);
+    assert.match(fn, /shared_set\.type = 'NEGATIVE_KEYWORDS'/);
+  });
+
+  test('identity is text + match type, matching the write path', () => {
+    // The same term at a different match type is a different exclusion, so
+    // collapsing on text alone would suppress a legitimate recommendation.
+    assert.match(fn, /const key = `\$\{t\.toLowerCase\(\)\}::\$\{mt\}`/);
+    const write = ads.slice(ads.indexOf('async function adsAddNegativesForCampaign('));
+    assert.match(write.slice(0, 4000), /toLowerCase\(\)\}::\$\{/, 'the write path keys differently');
+  });
+
+  test('an account with nothing to look up costs no queries at all', () => {
+    assert.match(fn, /if \(!camps\.length && !ags\.length\) return \{ connected: true, negatives: \[\] \}/);
+  });
+
+  test('a failed sub-query degrades to fewer negatives, never a failed plan', () => {
+    // adsSearch never throws, so an unsupported field yields empty rows.
+    assert.match(fn, /if \(!setsRes\.error\)/);
+    assert.match(fn, /best-effort/i);
+  });
+
+  test('it is routed', () => {
+    assert.match(router, /case 'adsGetNegatives':\s*return adsGetNegatives\(message\)/);
+  });
+
+  test('it is only fetched when Ads actually serves this page', () => {
+    // No point spending queries on a page with no ads pointing at it.
+    const gather = src.slice(src.indexOf('let adAssets = null;'), src.indexOf('// What the copy actually says'));
+    assert.match(gather, /if \(ads && ads\.connected && Array\.isArray\(ads\.ads\) && ads\.ads\.length\)/);
+    assert.match(gather, /action: 'adsGetNegatives'/);
+  });
+
+  test('it runs in parallel with the RSA asset read, not after it', () => {
+    const gather = src.slice(src.indexOf('let adAssets = null;'), src.indexOf('// What the copy actually says'));
+    assert.match(gather, /\[adAssets, negatives\] = await Promise\.all\(/);
+  });
+
+  test('it is scoped to this page\'s campaigns and ad groups', () => {
+    const gather = src.slice(src.indexOf('let adAssets = null;'), src.indexOf('// What the copy actually says'));
+    assert.match(gather, /campaignIds: \[\.\.\.new Set\(ads\.ads\.map\(a => a\.campaignId\)/);
+    assert.match(gather, /adGroupIds:\s+\[\.\.\.new Set\(ads\.ads\.map\(a => a\.adGroupId\)/);
+  });
+
+  test('the prompt block names them and forbids duplicates', () => {
+    const ctx = src.slice(src.indexOf('const negs = (g.negatives'), src.indexOf('if (lowQs.length) {'));
+    assert.match(ctx, /ALREADY in place/);
+    assert.match(ctx, /do NOT recommend adding any of these again/);
+  });
+
+  test('"none" is stated explicitly rather than left silent', () => {
+    // Silence is indistinguishable from "could not read", and the model hedges.
+    const ctx = src.slice(src.indexOf('const negs = (g.negatives'), src.indexOf('if (lowQs.length) {'));
+    assert.match(ctx, /none\. Every negative below would be new/);
+  });
+
+  test('an unreadable negatives result says nothing at all', () => {
+    // Neither a list nor a "none" claim — the plan must not assert either way.
+    const ctx = src.slice(src.indexOf('const negs = (g.negatives'), src.indexOf('if (lowQs.length) {'));
+    assert.match(ctx, /g\.negatives\.connected && !g\.negatives\.error/);
+  });
+
+  test('the list is capped, with the overflow counted rather than dropped silently', () => {
+    const ctx = src.slice(src.indexOf('const negs = (g.negatives'), src.indexOf('if (lowQs.length) {'));
+    assert.match(ctx, /negs\.slice\(0, 60\)/);
+    assert.match(ctx, /more already excluded/);
+  });
+
+  test('the Paid prompt tells the model to check the list before proposing one', () => {
+    assert.match(P.paid, /CHECK the "Negative keywords ALREADY in place" list first/);
+  });
+
+  test('an already-excluded term that still costs money is framed as the finding', () => {
+    // Otherwise the model just goes quiet about a real problem.
+    assert.match(P.paid, /that is itself the finding/);
+  });
+
+  test('the ADS block still renders when negatives are the only Ads signal', () => {
+    assert.match(src, /weakAds\.length \|\| negCount\)/);
   });
 });

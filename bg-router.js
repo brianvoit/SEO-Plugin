@@ -43,6 +43,7 @@ function routeMessage(message) {
     case 'adsGetAllAdGroups':  return adsGetAllAdGroups(message);
     case 'adsGetAllKeywords':  return adsGetAllKeywords(message);
     case 'adsAddNegatives':    return adsAddNegatives(message);
+    case 'adsGetNegatives':    return adsGetNegatives(message);
     case 'adsGetKeywordIdeas': return adsGetKeywordIdeas(message);
     case 'adsAddKeywords':     return adsAddKeywords(message);
     case 'getRedirectInfo':    return getRedirectInfo(message);

@@ -60,8 +60,20 @@ async function gatherActionPlanData(tab) {
   // Per-ad RSA asset ratings (Low/Good/Best) — flags weak ad copy. Best-effort;
   // batched server-side into 2 queries regardless of ad count.
   let adAssets = null;
+  let negatives = null;
   if (ads && ads.connected && Array.isArray(ads.ads) && ads.ads.length) {
-    adAssets = await send({ action: 'adsGetAdsDetail', pageUrl: tab.url, adIds: ads.ads.map(a => a.adId) });
+    // The negatives read is what stops the Paid plan recommending an exclusion
+    // that is already in place. Scoped to the campaigns and ad groups actually
+    // serving this page — the same set every other Ads figure in the prompt is
+    // drawn from — so it stays one small query set rather than an account dump.
+    [adAssets, negatives] = await Promise.all([
+      send({ action: 'adsGetAdsDetail', pageUrl: tab.url, adIds: ads.ads.map(a => a.adId) }),
+      send({
+        action: 'adsGetNegatives', pageUrl: tab.url,
+        campaignIds: [...new Set(ads.ads.map(a => a.campaignId).filter(Boolean))],
+        adGroupIds:  [...new Set(ads.ads.map(a => a.adGroupId).filter(Boolean))]
+      })
+    ]);
   }
 
   // What the copy actually says, as n-gram counts. Read straight from the
@@ -82,7 +94,7 @@ async function gatherActionPlanData(tab) {
     send({ action: 'webceoGetBacklinks', pageUrl: tab.url, cacheOnly: true })
   ]);
 
-  return { gsc, ads, webceo, tracked, ga, adAssets, phrases, psi, audit, backlinks };
+  return { gsc, ads, webceo, tracked, ga, adAssets, negatives, phrases, psi, audit, backlinks };
 }
 
 // GSC queries split into the two bands that drive surgical wins.
@@ -320,7 +332,8 @@ function actionPlanContext(g) {
       if (lowH.length || lowD.length) weakAds.push({ ad: a, lowH, lowD });
     });
 
-    if (terms.length || kws.length || wasted.length || lowQs.length || isLost.length || agIsLost.length || weakAds.length) {
+    const negCount = ((g.negatives && g.negatives.negatives) || []).length;
+    if (terms.length || kws.length || wasted.length || lowQs.length || isLost.length || agIsLost.length || weakAds.length || negCount) {
       lines.push('\n## ADS (what you pay for — money-backed intent; paid fixes often also lift organic relevance and Quality Score)');
       const cur = g.ads.currency || '';
       const money = (n) => `${cur ? cur + ' ' : '$'}${Math.ceil(n || 0)}`;
@@ -335,6 +348,21 @@ function actionPlanContext(g) {
       if (wasted.length) {
         lines.push('Wasted spend — cost, zero conversions (negative-keyword / relevance candidates):');
         wasted.forEach(t => lines.push(`  "${t.text}" — ${money(t.cost)}, ${t.clicks} clicks, 0 conv`));
+      }
+      // Immediately after wasted spend, because that is the list the model is
+      // about to propose negatives from, and this is what it must check first.
+      const negs = (g.negatives && g.negatives.negatives) || [];
+      if (negs.length) {
+        lines.push(`Negative keywords ALREADY in place (${negs.length}) — do NOT recommend adding any of these again:`);
+        negs.slice(0, 60).forEach(n => {
+          const where = n.where && n.where.length ? ` — ${n.scope}: ${n.where.slice(0, 2).join(', ')}` : ` — ${n.scope}`;
+          lines.push(`  "${n.text}" [${n.matchType}]${where}`);
+        });
+        if (negs.length > 60) lines.push(`  …and ${negs.length - 60} more already excluded.`);
+      } else if (g.negatives && g.negatives.connected && !g.negatives.error) {
+        // Saying so explicitly matters: silence here would be indistinguishable
+        // from "we could not read them", and the model would hedge.
+        lines.push('Negative keywords already in place: none. Every negative below would be new.');
       }
       if (lowQs.length) {
         lines.push('Low quality-score keywords (page relevance / ad-copy gap):');
@@ -504,7 +532,7 @@ Campaign-level recommendations ARE in scope. If a campaign this page's ad groups
 Organic data is evidence you should use: a query with strong impressions but a poor organic position is a candidate to buy; a query the page already ranks #1 for organically may be wasted paid spend. Cite organic numbers to justify paid decisions.
 
 Emphasis, in order:
-- Wasted spend: search terms with real cost and zero conversions. Recommend specific negative keywords and the match type to use.
+- Wasted spend: search terms with real cost and zero conversions. Recommend specific negative keywords and the match type to use. CHECK the "Negative keywords ALREADY in place" list first and never propose one that is already there at the same match type — if a wasteful term is already excluded and still costing money, that is itself the finding, and the fix is a broader match type or a different level, not a duplicate.
 - Converting search terms not present as bid keywords — the cheapest wins available.
 - Low Quality Score keywords: name the likely cause (ad relevance, expected CTR, or landing page experience) using the page content and Core Web Vitals as evidence, and give the paid fix.
 - LOW-rated RSA headlines and descriptions — quote the weak asset and say what to replace it with.

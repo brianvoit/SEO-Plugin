@@ -718,6 +718,91 @@ async function adsGetCampaignNegLists({ pageUrl, campaignIds }) {
   return { byCampaign };
 }
 
+// Every negative keyword already in force for the campaigns and ad groups that
+// serve this page, so the Paid Action Plan cannot recommend adding an
+// exclusion that is already there.
+//
+// A negative can live in three different places and Google surfaces them
+// through three different resources — reading only one of them would still
+// produce the wrong advice, so all three are read:
+//   1. campaign_criterion   — a negative set directly on the campaign
+//   2. ad_group_criterion   — a negative set directly on the ad group
+//   3. shared_criterion     — a negative in a NEGATIVE_KEYWORDS exclusion list
+//                             attached to the campaign (what adsAddNegatives
+//                             writes into, so it is the likeliest home)
+//
+// Deduped to text::matchType, which is exactly the identity the write path
+// uses to skip duplicates — the same term at a different match type is a
+// genuinely different exclusion and is kept separately.
+async function adsGetNegatives({ pageUrl, campaignIds, adGroupIds }) {
+  const tokenResult = await adsGetAccessToken();
+  if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
+  if (tokenResult.error) return { connected: true, error: tokenResult.error };
+  const accessToken = tokenResult.accessToken;
+
+  const customerId = await adsGetAccount(gscPageHost(pageUrl));
+  if (!customerId) return { connected: true, error: 'NO_ACCOUNT' };
+
+  const camps = [...new Set((campaignIds || []).map(adsDigits).filter(Boolean))];
+  const ags   = [...new Set((adGroupIds   || []).map(adsDigits).filter(Boolean))];
+  if (!camps.length && !ags.length) return { connected: true, negatives: [] };
+
+  // The shared-set lookup needs the campaigns' attached lists first, so it is
+  // the one query that cannot go in the parallel batch below.
+  let setIds = [];
+  if (camps.length) {
+    const setsRes = await adsSearch(accessToken, customerId,
+      `SELECT shared_set.id FROM campaign_shared_set
+       WHERE campaign.id IN (${camps.join(',')})
+         AND shared_set.type = 'NEGATIVE_KEYWORDS' AND shared_set.status = 'ENABLED'`);
+    if (!setsRes.error) {
+      setIds = [...new Set((setsRes.rows || []).map(r => adsDigits(r.sharedSet?.id)).filter(Boolean))];
+    }
+  }
+
+  // Every one of these is best-effort: adsSearch never throws, so an
+  // unsupported field or a permissions gap yields empty rows and the plan
+  // simply sees fewer negatives rather than failing to generate.
+  const [campRes, agRes, setRes] = await Promise.all([
+    camps.length ? adsSearch(accessToken, customerId,
+      `SELECT campaign.id, campaign.name, campaign_criterion.keyword.text, campaign_criterion.keyword.match_type
+       FROM campaign_criterion
+       WHERE campaign.id IN (${camps.join(',')})
+         AND campaign_criterion.negative = TRUE AND campaign_criterion.type = 'KEYWORD'`) : { rows: [] },
+    ags.length ? adsSearch(accessToken, customerId,
+      `SELECT ad_group.id, ad_group.name, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type
+       FROM ad_group_criterion
+       WHERE ad_group.id IN (${ags.join(',')})
+         AND ad_group_criterion.negative = TRUE AND ad_group_criterion.type = 'KEYWORD'`) : { rows: [] },
+    setIds.length ? adsSearch(accessToken, customerId,
+      `SELECT shared_set.id, shared_set.name, shared_criterion.keyword.text, shared_criterion.keyword.match_type
+       FROM shared_criterion WHERE shared_set.id IN (${setIds.join(',')})`) : { rows: [] }
+  ]);
+
+  const byKey = new Map();
+  const add = (text, matchType, scope, where) => {
+    const t = String(text || '').trim();
+    if (!t) return;
+    const mt = String(matchType || 'BROAD').toUpperCase();
+    const key = `${t.toLowerCase()}::${mt}`;
+    const hit = byKey.get(key);
+    if (hit) { if (where && !hit.where.includes(where)) hit.where.push(where); return; }
+    byKey.set(key, { text: t, matchType: mt, scope, where: where ? [where] : [] });
+  };
+
+  (campRes.rows || []).forEach(r => add(
+    r.campaignCriterion?.keyword?.text, r.campaignCriterion?.keyword?.matchType,
+    'campaign', r.campaign?.name));
+  (agRes.rows || []).forEach(r => add(
+    r.adGroupCriterion?.keyword?.text, r.adGroupCriterion?.keyword?.matchType,
+    'ad group', r.adGroup?.name));
+  (setRes.rows || []).forEach(r => add(
+    r.sharedCriterion?.keyword?.text, r.sharedCriterion?.keyword?.matchType,
+    'list', r.sharedSet?.name));
+
+  return { connected: true, negatives: [...byKey.values()] };
+}
+
 // Every enabled ad group in the resolved account (not just ones already
 // serving ads on the current page) — lets the Add Keywords picker offer any
 // ad group as a destination, not only the ones already tied to this page.

@@ -915,6 +915,11 @@ async function fillClientBindingBox(box, domain, kind) {
 let _driveBrowserRoot = 'mydrive';     // 'mydrive' | 'shared' | 'teamdrives'
 let _driveBrowserDriveId = null;       // set once a Shared Drive has been entered
 let _driveBrowserPath = [];            // [{id, name}] — folders/drive descended into
+// The folders (or Shared Drives) currently listed, kept so the filter box can
+// narrow them without re-listing — Drive paginates heavily and a folder with
+// dozens of children costs several round trips to enumerate.
+let _driveBrowserItems = [];           // [{id, name, isDrive}]
+let _driveBrowserFilter = '';
 
 function openDriveFolderBrowser() {
   _driveBrowserRoot = 'mydrive';
@@ -1028,11 +1033,33 @@ function renderDriveBreadcrumb() {
   });
 }
 
+// Paints _driveBrowserItems through the filter box. Separated from the load so
+// keystrokes never touch the network.
+function renderDriveBrowserItems() {
+  const listEl  = document.getElementById('drive-browser-list');
+  const emptyEl = document.getElementById('drive-browser-empty');
+  listEl.replaceChildren();
+
+  const q = _driveBrowserFilter.trim().toLowerCase();
+  const shown = q ? _driveBrowserItems.filter(it => it.name.toLowerCase().includes(q)) : _driveBrowserItems;
+
+  emptyEl.textContent = !_driveBrowserItems.length ? 'No folders here.'
+    : `Nothing here matches “${_driveBrowserFilter.trim()}”.`;
+  emptyEl.classList.toggle('hidden', shown.length > 0);
+
+  shown.forEach(it => listEl.appendChild(driveBrowserRow(it.id, it.name, it.isDrive)));
+}
+
 async function driveBrowserLoad() {
   const listEl  = document.getElementById('drive-browser-list');
   const emptyEl = document.getElementById('drive-browser-empty');
   const errorEl = document.getElementById('drive-browser-error');
   listEl.replaceChildren();
+  // A filter is about the folder you're looking at, so descending clears it.
+  _driveBrowserItems = [];
+  _driveBrowserFilter = '';
+  const filterInput = document.getElementById('drive-browser-filter');
+  if (filterInput) filterInput.value = '';
   emptyEl.classList.add('hidden');
   errorEl.classList.add('hidden');
   renderDriveBreadcrumb();
@@ -1053,8 +1080,8 @@ async function driveBrowserLoad() {
       drives = drives.concat(res.drives || []);
       pageToken = res.nextPageToken || null;
     } while (pageToken && ++pages < DRIVE_BROWSER_MAX_PAGES);
-    if (!drives.length) emptyEl.classList.remove('hidden');
-    drives.forEach(d => listEl.appendChild(driveBrowserRow(d.id, d.name, true)));
+    _driveBrowserItems = drives.map(d => ({ id: d.id, name: d.name, isDrive: true }));
+    renderDriveBrowserItems();
     return;
   }
 
@@ -1072,9 +1099,14 @@ async function driveBrowserLoad() {
     folders = folders.concat(res.folders || []);
     pageToken = res.nextPageToken || null;
   } while (pageToken && ++pages < DRIVE_BROWSER_MAX_PAGES);
-  if (!folders.length) emptyEl.classList.remove('hidden');
-  folders.forEach(f => listEl.appendChild(driveBrowserRow(f.id, f.name, false)));
+  _driveBrowserItems = folders.map(f => ({ id: f.id, name: f.name, isDrive: false }));
+  renderDriveBrowserItems();
 }
+
+document.getElementById('drive-browser-filter').addEventListener('input', (e) => {
+  _driveBrowserFilter = e.target.value;
+  renderDriveBrowserItems();
+});
 
 document.querySelectorAll('.drive-browser-root').forEach(btn => {
   btn.addEventListener('click', () => {

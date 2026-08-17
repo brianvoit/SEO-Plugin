@@ -1003,6 +1003,60 @@ function buildFaviconChecks(fav, live) {
   return checks;
 }
 
+// Save a declared icon to disk. The extension has no "downloads" permission,
+// so this uses the blob + anchor route every other export here takes. The
+// fetch is same-privilege as the popup (host_permissions covers *://*/*), so
+// a cross-origin CDN icon works; a failure is reported on the button itself
+// rather than silently doing nothing.
+async function faviconDownload(href, btn) {
+  const original = btn.title;
+  btn.disabled = true;
+  try {
+    const res = await fetch(href);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    let name = 'favicon';
+    try {
+      const path = new URL(href).pathname;
+      name = decodeURIComponent(path.split('/').pop() || '') || 'favicon';
+    } catch { /* keep the default */ }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) {
+    btn.title = `Download failed: ${e.message}`;
+    setTimeout(() => { btn.title = original; }, 3000);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function faviconDownloadBtn(href) {
+  const btn = document.createElement('button');
+  btn.className = 'icon-btn favicon-row-btn';
+  labelIconButton(btn, `Download ${href}`);
+  btn.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8"/><polyline points="5 7 8 10 11 7"/><path d="M3 12.5h10"/></svg>'));
+  btn.addEventListener('click', (e) => { e.stopPropagation(); faviconDownload(href, btn); });
+  return btn;
+}
+
+// Opens a linked file (the web app manifest today) in a new tab. Lives at the
+// far right of its section header rather than in a row of its own, because the
+// file it points at is the subject of the whole section.
+function faviconOpenBtn(href, label) {
+  const btn = document.createElement('button');
+  btn.className = 'icon-btn favicon-row-btn';
+  labelIconButton(btn, `${label}: ${href}`);
+  btn.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3H3.5v9.5H13V9"/><path d="M9.5 2.5H13.5V6.5"/><path d="M13.5 2.5L8 8"/></svg>'));
+  btn.addEventListener('click', () => browser.tabs.create({ url: href }));
+  return btn;
+}
+
 function renderFaviconDetail() {
   const content = document.getElementById('favicon-detail-content');
   if (!content) return;
@@ -1067,7 +1121,12 @@ function renderFaviconDetail() {
         row.addEventListener('mouseleave', hideFaviconPreview);
       }
 
-      row.append(tag, hrefEl, faviconIconChip(live, i.href));
+      const actions = document.createElement('span');
+      actions.className = 'favicon-row-actions';
+      actions.appendChild(faviconIconChip(live, i.href));
+      if (i.href) actions.appendChild(faviconDownloadBtn(i.href));
+
+      row.append(tag, hrefEl, actions);
       tableSec.appendChild(row);
     });
   }
@@ -1089,6 +1148,11 @@ function renderFaviconDetail() {
     cl.className = 'field-label';
     cl.textContent = groupName;
     ch.appendChild(cl);
+    // The manifest section is about a file, so give the file itself a way to
+    // be opened — flush right on the heading row, glyph only.
+    if (groupName === 'WEB APP MANIFEST' && fav && fav.manifestHref) {
+      ch.appendChild(faviconOpenBtn(fav.manifestHref, 'Open the web app manifest'));
+    }
     checkSec.appendChild(ch);
 
     groupChecks.forEach(c => {

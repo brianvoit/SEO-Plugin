@@ -2170,4 +2170,56 @@ browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 });
 
+// ─── robots.txt: make the URLs clickable ──────────────────────────────────────
+//
+// Browsers render robots.txt as text/plain, wrapping the whole file in a single
+// <pre>. Plain text is not linkified, so a Sitemap: line — the one thing in a
+// robots file you most often want to follow — has to be copied and pasted by
+// hand. This rewrites those runs into real anchors.
+//
+// Scope is deliberately tight: only a document whose path is /robots.txt AND
+// whose contentType is text/plain. Both conditions matter — a normal HTML page
+// that happens to live at /robots.txt is somebody's real page and must not be
+// rewritten.
+//
+// Only ABSOLUTE http(s) URLs are linked. Allow/Disallow values look like paths
+// but are match patterns: `/*.php$`, `/*?sort=` and friends are not URLs, and
+// quietly turning a wildcard pattern into a link that 404s would be worse than
+// leaving it as text.
+const ROBOTS_URL_RE = /https?:\/\/[^\s<>"']+/g;
+
+function linkifyRobotsTxt() {
+  if (document.contentType !== 'text/plain') return;
+  if (!/\/robots\.txt$/i.test(location.pathname)) return;
+
+  const pre = document.body && document.body.querySelector('pre');
+  if (!pre || pre.dataset.seoLinkified) return;
+  pre.dataset.seoLinkified = '1';
+
+  const text = pre.textContent || '';
+  if (!ROBOTS_URL_RE.test(text)) return;
+  ROBOTS_URL_RE.lastIndex = 0;
+
+  // Built from text nodes and anchors rather than innerHTML — the file is
+  // untrusted remote content, and the AMO linter rejects innerHTML anyway.
+  const frag = document.createDocumentFragment();
+  let last = 0;
+  let m;
+  while ((m = ROBOTS_URL_RE.exec(text)) !== null) {
+    // Trailing punctuation is far more likely to be prose than part of the URL.
+    let url = m[0].replace(/[.,;:)\]]+$/, '');
+    if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+    const a = document.createElement('a');
+    a.href = url;
+    a.textContent = url;
+    a.rel = 'noopener noreferrer';
+    frag.appendChild(a);
+    last = m.index + url.length;
+  }
+  if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+  pre.replaceChildren(frag);
+}
+
+try { linkifyRobotsTxt(); } catch { /* never break a page over a convenience */ }
+
 } // end idempotency guard (window.__seoInspectorContentLoaded)

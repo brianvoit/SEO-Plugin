@@ -331,7 +331,13 @@ function attachChartHover(svg, filled, activeMetrics, built) {
     });
 
     const rowH = 12;
-    const tw = showYear ? 112 : 96;
+    // A weekly bucket must say so — showing just its first day would read as a
+    // single date and quietly overstate what the point represents.
+    const d = filled[idx];
+    const dateLabel = d.weekEnd
+      ? `${formatDateLong(d.date, showYear)} – ${formatDateLong(d.weekEnd, showYear)}`
+      : formatDateLong(d.date, showYear);
+    const tw = Math.max(showYear ? 112 : 96, dateLabel.length * 5.6 + 14);
     const th = 14 + rows.length * rowH + 5;
     let tx = x + 6;
     if (tx + tw > width) tx = x - tw - 6;
@@ -339,7 +345,7 @@ function attachChartHover(svg, filled, activeMetrics, built) {
 
     tooltip.replaceChildren();
     tooltip.appendChild(svgEl('rect', { class: 'gsc-tooltip-bg', x: 0, y: 0, width: tw, height: th, rx: 3 }));
-    tooltip.appendChild(svgEl('text', { class: 'gsc-tooltip-date', x: 6, y: 13 }, formatDateLong(filled[idx].date, showYear)));
+    tooltip.appendChild(svgEl('text', { class: 'gsc-tooltip-date', x: 6, y: 13 }, dateLabel));
     rows.forEach((r, i) => {
       const rowY = 13 + (i + 1) * rowH;
       tooltip.appendChild(svgEl('circle', { class: 'gsc-tooltip-dot', 'data-metric': r.metric, cx: 9, cy: (rowY - 3.5).toFixed(1), r: 3 }));
@@ -386,6 +392,42 @@ function gscFillTimeseries(timeseries, range, lagDays = 3, emptyDay = null) {
   return result;
 }
 
+// Long ranges get bucketed by week. At 12M/16M a daily series is 365-480 points
+// squeezed into ~320px — under one pixel each, so the line reads as noise and
+// day-to-day movement is invisible anyway. Weekly buckets are ~52-69 points,
+// which the same chart renders legibly.
+//
+// Position is impression-weighted, matching how the backend aggregates it; a
+// plain mean would let a day with three impressions count as much as a day
+// with three thousand. CTR is likewise recomputed from the summed totals
+// rather than averaged.
+const GSC_WEEKLY_MIN_RANGE = 365;
+
+function gscBucketWeekly(filled) {
+  const out = [];
+  for (let i = 0; i < filled.length; i += 7) {
+    const week = filled.slice(i, i + 7);
+    let clicks = 0, impressions = 0, pw = 0;
+    week.forEach(d => {
+      clicks += d.clicks || 0;
+      impressions += d.impressions || 0;
+      pw += (d.position || 0) * (d.impressions || 0);
+    });
+    out.push({
+      date: week[0].date,
+      // Every day this bucket covers, so annotations pinned to a midweek date
+      // still find their point (overlayChartAnnotations checks `dates` first).
+      dates: week.map(d => d.date),
+      weekEnd: week[week.length - 1].date,
+      clicks,
+      impressions,
+      ctr: impressions ? clicks / impressions : 0,
+      position: impressions ? pw / impressions : 0
+    });
+  }
+  return out;
+}
+
 function renderCombinedChart() {
   const container = document.getElementById('gsc-chart-combined');
   if (!_gscFilled.length) { container.innerHTML = ''; return; }
@@ -411,7 +453,8 @@ new ResizeObserver(() => {
 }).observe(document.getElementById('gsc-chart-combined'));
 
 function renderGscCharts(timeseries, totals, previousTotals, range) {
-  _gscFilled = gscFillTimeseries(timeseries, range);
+  const daily = gscFillTimeseries(timeseries, range);
+  _gscFilled = Number(range) >= GSC_WEEKLY_MIN_RANGE ? gscBucketWeekly(daily) : daily;
 
   document.getElementById('gsc-total-clicks').textContent = totals.clicks.toLocaleString();
   document.getElementById('gsc-total-impressions').textContent = totals.impressions.toLocaleString();
@@ -957,7 +1000,9 @@ function renderGscQueries(queries, pageUrl) {
 function showGscFilterBar(kind, value) {
   const bar = document.getElementById('gsc-query-filter-bar');
   const label = bar.querySelector('.gsc-query-filter-label');
-  if (label) label.textContent = kind === 'intent' ? 'Filtered to intent:' : 'Filtered to query:';
+  if (label) label.textContent = kind === 'intent' ? 'Filtered to intent:'
+    : kind === 'search' ? (_gscQuerySearchExclude ? 'Chart excludes:' : 'Chart matches:')
+    : 'Filtered to query:';
   document.getElementById('gsc-query-filter-text').textContent = value;
   bar.classList.remove('hidden');
 }
@@ -974,6 +1019,52 @@ async function applyGscQueryFilter(query) {
   if (_gscSelectedQuery !== query) return;
   if (!response.connected || response.error) return;
   renderGscCharts(response.timeseries, response.totals, response.previousTotals, gscSelectedRange);
+}
+
+// The queries the table is currently showing: branded filter, then the regex
+// box. Same rules as renderGscQueries applies to the rows themselves, so the
+// chart can never disagree with the list under it.
+function gscVisibleQueries() {
+  const pattern = gscBrandedPattern();
+  let visible = _gscQueries.filter(q => !(gscHideBranded && isQueryBranded(q.query, pattern)));
+  if (_gscQuerySearch) {
+    try {
+      const re = new RegExp(_gscQuerySearch, 'i');
+      visible = _gscQuerySearchExclude
+        ? visible.filter(q => !re.test(q.query))
+        : visible.filter(q =>  re.test(q.query));
+    } catch { /* invalid regex — treat as no filter, same as the table does */ }
+  }
+  if (_gscIntentFilter) visible = visible.filter(q => intentOf(q.query) === _gscIntentFilter);
+  return visible;
+}
+
+// Chart for the regex box: the same per-(date,query) aggregation the intent
+// chart uses, over whatever the search has narrowed the table to.
+//
+// Debounced, because this is a live GSC call on every keystroke otherwise, and
+// guarded by a token so a slow early response can't overwrite a later one —
+// typing "shoe" fires for "s", "sh", "sho", "shoe" and they can land in any
+// order.
+let _gscSearchChartTimer = null;
+let _gscSearchChartToken = 0;
+
+async function applyGscSearchChartFilter() {
+  const token = ++_gscSearchChartToken;
+  const list = gscVisibleQueries().map(q => q.query);
+  showGscFilterBar('search', _gscQuerySearch);
+  if (!list.length) return;
+  const res = await sendMessageWithTimeout({
+    action: 'gscGetQueriesData', pageUrl: _gscPageUrl, range: gscSelectedRange, queries: list
+  });
+  if (token !== _gscSearchChartToken || _gscSelectedQuery) return;
+  if (!res || !res.connected || res.error) return;
+  renderGscCharts(res.timeseries, res.totals, res.previousTotals, gscSelectedRange);
+}
+
+function scheduleGscSearchChart() {
+  clearTimeout(_gscSearchChartTimer);
+  _gscSearchChartTimer = setTimeout(() => refreshGscChartForState(), 400);
 }
 
 // Chart for an intent: aggregate the visible (branded-filtered) queries of that
@@ -994,9 +1085,12 @@ async function applyGscIntentChartFilter(intent) {
 }
 
 // Single source of truth for what the top chart should show, by current state:
-// a selected query > an active intent filter > the page overview (branded-aware).
+// a selected query > the regex search > an active intent filter > the page
+// overview (branded-aware). The regex sits above intent because it composes
+// with it — gscVisibleQueries applies both — so it is the narrower of the two.
 function refreshGscChartForState() {
   if (_gscSelectedQuery) { applyGscQueryFilter(_gscSelectedQuery); return; }
+  if (_gscQuerySearch && isValidRegex(_gscQuerySearch)) { applyGscSearchChartFilter(); return; }
   if (_gscIntentFilter) { applyGscIntentChartFilter(_gscIntentFilter); return; }
   hideGscQueryFilterBar();
   refreshGscChartForBranded();
@@ -1217,12 +1311,16 @@ document.getElementById('gsc-query-search').addEventListener('input', e => {
   _gscQuerySearch = e.target.value;
   e.target.classList.toggle('is-invalid', !!_gscQuerySearch && !isValidRegex(_gscQuerySearch));
   renderGscQueries(_gscQueries, _gscPageUrl);
+  // The table updates instantly; the chart follows once typing settles, since
+  // it costs a GSC call.
+  scheduleGscSearchChart();
 });
 document.getElementById('btn-gsc-query-search-mode').addEventListener('click', () => {
   _gscQuerySearchExclude = !_gscQuerySearchExclude;
   document.getElementById('btn-gsc-query-search-mode').textContent =
     _gscQuerySearchExclude ? 'Excl.' : 'Match';
   renderGscQueries(_gscQueries, _gscPageUrl);
+  refreshGscChartForState();
 });
 
 // Shared with the Ads tab's btn-ads-branded-toggle: flips the single

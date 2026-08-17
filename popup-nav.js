@@ -140,12 +140,16 @@ function showTwPanel() {
   twPanel.classList.remove('hidden');
 }
 
-function showActionPlanPanel() {
+// One panel, three variants — the nav row that opened it decides which.
+// Overview/Search/Ads each get their own plan, generated on first open and
+// cached independently; Back returns to whichever tab is active, unchanged.
+function showActionPlanPanel(variant = 'overview') {
   enterDetailPanel();
   actionPlanPanel.classList.remove('hidden');
+  if (typeof setActionPlanVariant === 'function') setActionPlanVariant(variant);
   // Render whatever we have (cached plan, or nothing), then generate on first open
   if (typeof renderActionPlanPanel === 'function') renderActionPlanPanel();
-  if (typeof loadActionPlan === 'function') loadActionPlan(false);
+  if (typeof loadActionPlan === 'function') loadActionPlan(false, variant);
 }
 
 function showHreflangPanel() {
@@ -309,8 +313,9 @@ document.getElementById('btn-og').addEventListener('click', showOgPanel);
 document.getElementById('btn-og-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-tw').addEventListener('click', showTwPanel);
 document.getElementById('btn-tw-back').addEventListener('click', hideDetailPanelToTab);
-document.getElementById('btn-actionplan').addEventListener('click', showActionPlanPanel);
-document.getElementById('btn-ads-actionplan').addEventListener('click', showActionPlanPanel);
+document.getElementById('btn-actionplan').addEventListener('click', () => showActionPlanPanel('overview'));
+document.getElementById('btn-gsc-actionplan').addEventListener('click', () => showActionPlanPanel('seo'));
+document.getElementById('btn-ads-actionplan').addEventListener('click', () => showActionPlanPanel('paid'));
 document.getElementById('btn-actionplan-back').addEventListener('click', hideDetailPanelToTab);
 document.getElementById('btn-hreflang').addEventListener('click', showHreflangPanel);
 document.getElementById('btn-hreflang-back').addEventListener('click', hideDetailPanelToTab);

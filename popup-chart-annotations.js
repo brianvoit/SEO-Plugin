@@ -47,14 +47,18 @@ function overlayChartAnnotations(container, filled, built) {
   layer.className = 'chart-annot-layer';
   let any = false;
   filled.forEach((d, i) => {
-    const anns = byDate[d.date];
+    // A weekly bucket carries every date it covers, so an annotation pinned to
+    // a midweek day still lands on its point instead of vanishing.
+    const anns = d.dates
+      ? d.dates.flatMap(dt => byDate[dt] || [])
+      : byDate[d.date];
     if (!anns || !anns.length) return;
     any = true;
     const star = document.createElement('div');
     star.className = 'chart-annot-star';
     star.style.left = built.xFor(i).toFixed(1) + 'px';
     star.textContent = '★';
-    star.addEventListener('mouseenter', () => showAnnotTip(star, d.date, anns));
+    star.addEventListener('mouseenter', () => showAnnotTip(star, d.weekEnd ? `${d.date} – ${d.weekEnd}` : d.date, anns));
     star.addEventListener('mouseleave', hideAnnotTip);
     layer.appendChild(star);
   });

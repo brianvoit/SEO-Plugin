@@ -255,8 +255,7 @@ async function gscInspectUrl(accessToken, siteUrl, pageUrl, forceRefresh) {
       referringUrls: idx.referringUrls || []
     };
     cache[pageUrl] = { fetchedAt: Date.now(), siteUrl, result };
-    await gscPruneCache(cache);
-    await browser.storage.local.set({ gscInspectionCache: cache });
+    await writeCache('gscInspectionCache', cache, GSC_CACHE_LIMIT);
     return { result };
   } catch (err) {
     return { result: cached ? cached.result : null, error: err.message };
@@ -344,8 +343,7 @@ async function gscGetPageData({ pageUrl, range, forceRefresh }) {
     previousTotals: gscAggregateTotals(prevData.rows)
   };
   cache[cacheKey] = entry;
-  await gscPruneCache(cache);
-  await browser.storage.local.set({ gscCache: cache });
+  await writeCache('gscCache', cache, GSC_CACHE_LIMIT);
 
   return await gscAttachInspection(entry, accessToken, pageUrl, false, forceRefresh);
 }
@@ -410,8 +408,7 @@ async function gscGetQueryData({ pageUrl, range, query, forceRefresh }) {
     previousTotals: gscAggregateTotals(prevData.rows)
   };
   cache[cacheKey] = entry;
-  await gscPruneCache(cache);
-  await browser.storage.local.set({ gscQueryCache: cache });
+  await writeCache('gscQueryCache', cache, GSC_CACHE_LIMIT);
 
   return { connected: true, ...entry };
 }

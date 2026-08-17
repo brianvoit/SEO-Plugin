@@ -47,12 +47,7 @@ async function getDomainAge({ host }) {
 
   const entry = { ...result, fetchedAt: Date.now() };
   cache[clean] = entry;
-  const keys = Object.keys(cache);
-  if (keys.length > 30) {
-    keys.sort((a, b) => cache[a].fetchedAt - cache[b].fetchedAt);
-    keys.slice(0, keys.length - 30).forEach(k => delete cache[k]);
-  }
-  await browser.storage.local.set({ domainAgeCache: cache });
+  await writeCache('domainAgeCache', cache, 30);
   return entry;
 }
 
@@ -88,12 +83,7 @@ async function dnsResolve({ host }) {
 
   const entry = { host: clean, records, fetchedAt: Date.now() };
   cache[clean] = entry;
-  const keys = Object.keys(cache);
-  if (keys.length > 20) {
-    keys.sort((a, b) => cache[a].fetchedAt - cache[b].fetchedAt);
-    keys.slice(0, keys.length - 20).forEach(k => delete cache[k]);
-  }
-  await browser.storage.local.set({ dnsCache: cache });
+  await writeCache('dnsCache', cache, 20);
   return entry;
 }
 
@@ -370,12 +360,7 @@ async function psiGetPageSpeed({ url, strategy = 'mobile', cacheOnly = false, fo
   };
 
   cache[key] = entry;
-  const keys = Object.keys(cache);
-  if (keys.length > 30) {
-    keys.sort((a, b) => cache[a].fetchedAt - cache[b].fetchedAt);
-    keys.slice(0, keys.length - 30).forEach(k => delete cache[k]);
-  }
-  await browser.storage.local.set({ psiCache: cache });
+  await writeCache('psiCache', cache, 30);
   return entry;
 }
 

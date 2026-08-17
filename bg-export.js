@@ -413,12 +413,7 @@ async function sheetsGetOrCreateSpreadsheet(accessToken, cacheKey, { title, tabN
   }
 
   cache[cacheKey] = { id: spreadsheetId, updatedAt: Date.now() };
-  const keys = Object.keys(cache);
-  if (keys.length > SHEETS_SPREADSHEET_CACHE_CAP) {
-    keys.sort((a, b) => (cache[a].updatedAt || 0) - (cache[b].updatedAt || 0));
-    keys.slice(0, keys.length - SHEETS_SPREADSHEET_CACHE_CAP).forEach(k => delete cache[k]);
-  }
-  await browser.storage.local.set({ sheetsSpreadsheetIds: cache });
+  await writeCache('sheetsSpreadsheetIds', cache, SHEETS_SPREADSHEET_CACHE_CAP);
   return { id: spreadsheetId };
 }
 

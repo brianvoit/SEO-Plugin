@@ -161,7 +161,7 @@ async function webceoGetRankings({ pageUrl, historyDepth = 2, forceRefresh = fal
     rows, depth
   };
   cache[cacheKey] = entry;
-  await browser.storage.local.set({ webceoCache: cache });
+  await writeCache('webceoCache', cache);
   return { connected: true, ...entry, fromCache: false };
 }
 
@@ -222,7 +222,7 @@ async function webceoGetKeywordTags({ pageUrl, forceRefresh = false }) {
     if (list.length) tags[kw.toLowerCase().trim()] = list;
   });
   cache[cacheKey] = { fetchedAt: Date.now(), tags };
-  await browser.storage.local.set({ webceoKeywordTagsCache: cache });
+  await writeCache('webceoKeywordTagsCache', cache);
   return { connected: true, tags, fetchedAt: cache[cacheKey].fetchedAt, fromCache: false };
 }
 
@@ -356,7 +356,7 @@ async function webceoGetBacklinks({ pageUrl, forceRefresh = false }) {
     rawLinks: webceoTrimBacklinks(res.data && res.data.data)
   };
   cache[cacheKey] = entry;
-  await browser.storage.local.set({ webceoBacklinksCache: cache });
+  await writeCache('webceoBacklinksCache', cache);
   return { connected: true, ...webceoBuildBacklinksView(entry, pageUrl), fromCache: false };
 }
 
@@ -413,7 +413,7 @@ async function webceoGetLostBacklinks({ pageUrl, forceRefresh = false }) {
 
   const entry = { fetchedAt: Date.now(), rawLostLinks: webceoTrimLostBacklinks(res.data && res.data.data) };
   cache[cacheKey] = entry;
-  await browser.storage.local.set({ webceoLostBacklinksCache: cache });
+  await writeCache('webceoLostBacklinksCache', cache);
   return { connected: true, ...webceoBuildLostBacklinksView(entry, pageUrl), fromCache: false };
 }
 
@@ -454,7 +454,7 @@ async function webceoGetLinkingDomains({ pageUrl, forceRefresh = false }) {
 
   const aggregate = webceoAggregateLinkingDomains(res.data && res.data.data);
   cache[cacheKey] = { fetchedAt: Date.now(), aggregate };
-  await browser.storage.local.set({ webceoLinkingDomainsCache: cache });
+  await writeCache('webceoLinkingDomainsCache', cache);
   return { connected: true, ...aggregate, fetchedAt: cache[cacheKey].fetchedAt, fromCache: false };
 }
 
@@ -501,7 +501,7 @@ async function webceoGetCompetitorMetrics({ pageUrl, forceRefresh = false }) {
   const ownDomain = (res.data && res.data.domain) || host;
   const aggregate = webceoAggregateCompetitorMetrics(res.data && res.data.data, ownDomain);
   cache[cacheKey] = { fetchedAt: Date.now(), aggregate };
-  await browser.storage.local.set({ webceoCompetitorMetricsCache: cache });
+  await writeCache('webceoCompetitorMetricsCache', cache);
   return { connected: true, ...aggregate, fetchedAt: cache[cacheKey].fetchedAt, fromCache: false };
 }
 
@@ -595,7 +595,7 @@ async function webceoGetSiteAudit({ pageUrl, forceRefresh = false }) {
     ...agg
   };
   cache[cacheKey] = entry;
-  await browser.storage.local.set({ webceoAuditCache: cache });
+  await writeCache('webceoAuditCache', cache);
   return { connected: true, ...entry, fromCache: false };
 }
 

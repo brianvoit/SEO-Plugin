@@ -673,10 +673,12 @@ function traceOnce(startUrl) {
 // ─── Shared helpers ──────────────────────────────────────────────────────────
 // These four came from the Search Console section and kept their gsc* names,
 // but they are generic and always were: gscPageHost is the app's host
-// normaliser (24 call sites outside GSC), gscFormatDate builds the date params
-// every Google API takes, and gscPruneCache caps any fetchedAt-keyed cache —
-// adsCache already borrows it. They live here so bg-ads/bg-ga/bg-webceo/
+// normaliser (24 call sites outside GSC), and gscFormatDate builds the date
+// params every Google API takes. They live here so bg-ads/bg-ga/bg-webceo/
 // bg-export don't have to reach into bg-gsc.js for them.
+//
+// GSC_CACHE_LIMIT stays as the cap those caches have always used; the pruning
+// itself now lives in writeCache below, which every cache write goes through.
 //
 // The names are deliberately left alone: renaming would touch 34 call sites for
 // no behavioural gain, and belongs to its own pass if it's ever wanted.
@@ -692,9 +694,73 @@ function gscPageHost(pageUrl) {
   catch { return null; }
 }
 
-async function gscPruneCache(cache) {
+
+// ─── Cache writes ────────────────────────────────────────────────────────────
+// Every fetch-and-cache path in the background ends the same way: stash the
+// result under a storage key, then return it. Two problems lived in that one
+// line, and both are the kind that only appear on somebody else's machine.
+//
+// 1. UNGUARDED WRITE. The set() sat between a successful API fetch and its
+//    return, unawaited by any try/catch. If storage.local rejected — quota is
+//    the realistic cause — the whole handler rejected with it, so a fetch that
+//    had actually SUCCEEDED was reported to the user as a failure. It would
+//    only start happening once an install had accumulated enough data, which
+//    makes it close to impossible to reproduce from a bug report. Losing a
+//    cache entry is the right trade: the caller still returns real data and
+//    the next call refetches.
+//
+// 2. NO SIZE BOUND on the WebCEO caches and driveExportFolderIds, so they grew
+//    for the life of the install.
+//
+// ── On the cap, and why it is set where it is ────────────────────────────────
+// CACHE_CAP_GENEROUS is deliberately far above any working set this extension
+// should ever hold. Every cache routed through here is keyed by PROJECT or
+// DOMAIN — one entry per client — so a large agency sits in the tens. The cap
+// is a backstop against a pathological case, NOT a working-set limit, and it
+// should never evict in normal use.
+//
+// That is why eviction logs. If this warning ever appears in the wild it means
+// an assumption here is wrong — most likely a cache key that turned out to be
+// more granular than "per project" (a per-URL key would blow through this) —
+// and the fix is to look at the key, not to quietly raise the number. Treat a
+// sighting as a bug report about this comment.
+//
+// KNOWN LIMITATION, recorded so a future reader doesn't mistake it for a bug:
+// eviction is FIFO by fetch time, not LRU. Entries carry `fetchedAt` (when
+// they were WRITTEN) and reading one does not refresh it, because refreshing
+// would mean a storage write on every cache HIT — more cost than the eviction
+// it avoids. The consequence is that the entry dropped is the oldest fetch,
+// not the least recently used, so a heavily-used project can be evicted for
+// being stale-by-write-time. At the cap above this is theoretical; it would
+// only start to matter if the cap were ever lowered toward a real working set.
+const CACHE_CAP_GENEROUS = 200;
+
+/**
+ * Prunes a cache to `cap` entries and persists it, surviving a failed write.
+ * Returns true if it persisted, false if the write was dropped.
+ */
+async function writeCache(storageKey, cache, cap = CACHE_CAP_GENEROUS) {
   const keys = Object.keys(cache);
-  if (keys.length <= GSC_CACHE_LIMIT) return;
-  keys.sort((a, b) => cache[a].fetchedAt - cache[b].fetchedAt);
-  for (const k of keys.slice(0, keys.length - GSC_CACHE_LIMIT)) delete cache[k];
+  if (keys.length > cap) {
+    // Most entries stamp `fetchedAt`; sheetsSpreadsheetIds uses `updatedAt`.
+    // Accepting either keeps that cache's existing eviction order rather than
+    // silently degrading it to "arbitrary" when the field is missing.
+    const stamp = (k) => (cache[k] && (cache[k].fetchedAt ?? cache[k].updatedAt)) || 0;
+    keys.sort((a, b) => stamp(a) - stamp(b));
+    const evicted = keys.slice(0, keys.length - cap);
+    evicted.forEach(k => delete cache[k]);
+    console.warn(
+      `[cache] ${storageKey} reached its ${cap}-entry cap and evicted ${evicted.length}. ` +
+      `Caches here are keyed per project/domain and should never get this large — ` +
+      `check whether the key is more granular than intended rather than raising the cap.`
+    );
+  }
+  try {
+    await browser.storage.local.set({ [storageKey]: cache });
+    return true;
+  } catch (e) {
+    // Never let a cache write fail the operation that produced the data.
+    console.warn(`[cache] ${storageKey} could not be persisted (${(e && e.message) || e}); continuing uncached.`);
+    return false;
+  }
 }

@@ -315,7 +315,7 @@ async function adsGetPageData({ pageUrl, range, forceRefresh }) {
 
   if (!ads.length) {
     const entry = { fetchedAt: Date.now(), account: customerId, range, path, ads: [], campaigns: [], keywords: [], searchTerms: [], timeseries: [], totals: null, previousTotals: null, currency: '', adGroupImpressionShare: {} };
-    cache[cacheKey] = entry; await gscPruneCache(cache); await browser.storage.local.set({ adsCache: cache });
+    cache[cacheKey] = entry; await writeCache('adsCache', cache, GSC_CACHE_LIMIT);
     return { connected: true, ...entry, fromCache: false };
   }
 
@@ -417,7 +417,7 @@ async function adsGetPageData({ pageUrl, range, forceRefresh }) {
   const searchTermsLimited = (stRes.rows || []).length >= ADS_SEARCH_TERM_LIMIT;
 
   const entry = { fetchedAt: Date.now(), account: customerId, range, path, ads, campaigns, keywords, searchTerms, searchTermsLimited, tsRows, timeseries, totals, previousTotals, currency, adGroupImpressionShare };
-  cache[cacheKey] = entry; await gscPruneCache(cache); await browser.storage.local.set({ adsCache: cache });
+  cache[cacheKey] = entry; await writeCache('adsCache', cache, GSC_CACHE_LIMIT);
   return { connected: true, ...entry, fromCache: false };
 }
 

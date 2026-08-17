@@ -543,7 +543,7 @@ async function driveResolveClientSubfolder(accessToken, clientId, rootFolderId, 
   if (!subId) return null;
 
   cache[cacheKey] = { id: subId, rootFolderId, updatedAt: Date.now() };
-  await browser.storage.local.set({ driveExportFolderIds: cache });
+  await writeCache('driveExportFolderIds', cache);
   return subId;
 }
 

@@ -526,8 +526,7 @@ async function gaGetPageData({ pageUrl, range, forceRefresh, measurementId }) {
 
   const entry = { fetchedAt: Date.now(), property, propertyName, range, path, timeseries, totals, previousTotals, channels, nextPages };
   cache[cacheKey] = entry;
-  await gscPruneCache(cache);
-  await browser.storage.local.set({ gaCache: cache });
+  await writeCache('gaCache', cache, GSC_CACHE_LIMIT);
 
   return { connected: true, ...entry, fromCache: false };
 }

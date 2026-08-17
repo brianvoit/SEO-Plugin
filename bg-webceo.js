@@ -326,7 +326,7 @@ function webceoAggregateBacklinks(links) {
 // webceoBacklinksCache; returns the aggregate (not the raw list) so the popup
 // just renders. { connected:false } / { error:'NO_PROJECT' } gate the Overview
 // entry the same way the rankings handler does.
-async function webceoGetBacklinks({ pageUrl, forceRefresh = false }) {
+async function webceoGetBacklinks({ pageUrl, forceRefresh = false, cacheOnly = false }) {
   const { apiKey } = await webceoConfig();
   if (!apiKey) return { connected: false };
   const host = gscPageHost(pageUrl);
@@ -343,6 +343,9 @@ async function webceoGetBacklinks({ pageUrl, forceRefresh = false }) {
   if (!forceRefresh && cached && cached.rawLinks && (Date.now() - cached.fetchedAt < WEBCEO_BACKLINKS_STALE_MS)) {
     return { connected: true, ...webceoBuildBacklinksView(cached, pageUrl), fromCache: true };
   }
+  // See webceoGetSiteAudit — the Action Plan reads this opportunistically and
+  // must never trigger a live fetch of its own.
+  if (cacheOnly) return { connected: true, notCached: true };
 
   const res = await webceoCall('get_backlinks', { project: project.project });
   if (res.error) return { connected: true, error: res.error, detail: res.detail };
@@ -566,7 +569,7 @@ function webceoAggregateSiteAudit(d) {
 
 // Cached 24h in webceoAuditCache; { connected:false } / NO_PROJECT gate the
 // Overview entry the same way the backlinks handler does.
-async function webceoGetSiteAudit({ pageUrl, forceRefresh = false }) {
+async function webceoGetSiteAudit({ pageUrl, forceRefresh = false, cacheOnly = false }) {
   const { apiKey } = await webceoConfig();
   if (!apiKey) return { connected: false };
   const host = gscPageHost(pageUrl);
@@ -581,6 +584,10 @@ async function webceoGetSiteAudit({ pageUrl, forceRefresh = false }) {
   if (!forceRefresh && cached && (Date.now() - cached.fetchedAt < WEBCEO_AUDIT_STALE_MS)) {
     return { connected: true, ...cached, fromCache: true };
   }
+  // The Action Plan passes cacheOnly so opening a plan never spends a Web CEO
+  // call — it enriches the prompt when the user has already looked at the audit
+  // and stays silent otherwise. Mirrors psiGetPageSpeed's flag exactly.
+  if (cacheOnly) return { connected: true, notCached: true };
 
   const res = await webceoCall('get_site_audit_data', { project: project.project });
   if (res.error) return { connected: true, error: res.error, detail: res.detail };

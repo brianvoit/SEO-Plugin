@@ -195,13 +195,17 @@ async function docsUploadHtmlDoc(accessToken, docTitle, html, folderId) {
   return { url: `https://docs.google.com/document/d/${id}/edit` };
 }
 
-async function docsExportActionPlan({ plan, pageUrl, fetchedAt }) {
+// `planTitle` names the variant ("Action Plan" / "SEO Action Plan" / "Paid
+// Action Plan"). It is in the Doc title, not just the body, so exporting two
+// variants of the same page produces two distinguishable files in Drive rather
+// than two documents with the same name. Defaulted for older callers.
+async function docsExportActionPlan({ plan, pageUrl, fetchedAt, planTitle }) {
   const token = await docsGetAccessToken();
   if (token.error) return { notConnected: true, error: token.error };
 
   const { folderId } = await resolveExportFolder(token.accessToken, pageUrl, DRIVE_PLANS_SUBDIR);
   const date = new Date().toISOString().slice(0, 10);
-  const docTitle = `${date}: Action Plan For ${docsUrlLabel(pageUrl)}`;
+  const docTitle = `${date}: ${planTitle || 'Action Plan'} For ${docsUrlLabel(pageUrl)}`;
   const html = buildActionPlanHtml(plan, docTitle, fetchedAt);
   return docsUploadHtmlDoc(token.accessToken, docTitle, html, folderId);
 }

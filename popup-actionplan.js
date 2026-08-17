@@ -1,7 +1,16 @@
 // ─── AI Action Plan: synthesize demand (GSC / Ads / Web CEO / GA4) vs. supply ──
-// (page content) into evidence-backed recommendations. Lives on the Overview as
-// a nav row that opens its own detail panel (like Open Graph / Structured Data).
-// A single, heavier Claude call — click-to-run, cached per URL with a short TTL.
+// (page content) into evidence-backed recommendations. Three variants, one per
+// tab, each its own detail panel entry and its own heavier Claude call —
+// click-to-run, cached per (variant, URL) with a short TTL.
+//
+//   overview — the master plan: organic AND paid, best of both
+//   seo      — on-page/organic only (Search tab)
+//   paid     — Google Ads only (Ads tab)
+//
+// All three receive the IDENTICAL context. Only the system prompt differs.
+// That is deliberate: organic queries inform paid targeting, and page speed is
+// a real Ads landing-page-experience factor, so no source is dead weight on any
+// variant. It also means there is exactly one context builder to maintain.
 
 // Reasoning-heavy synthesis → the most capable model, distinct from the Haiku
 // used for the lightweight page insights. Change here to trade cost for depth.
@@ -16,11 +25,23 @@ const ACTION_PLAN_TIERS = [
   { effort: 'rewrite',  key: 'heavy',  title: 'Heavy lift' }
 ];
 
-let _actionPlan = null;          // normalized { recommendations, contentGaps }
-let _actionPlanSources = null;   // { gsc, ads, webceo, ga } booleans
-let _actionPlanFetchedAt = 0;
-let _actionPlanLoading = false;
-let _actionPlanError = '';
+const ACTION_PLAN_VARIANTS = ['overview', 'seo', 'paid'];
+const ACTION_PLAN_META = {
+  overview: { title: 'Action Plan',      navId: 'actionplan-status',     slug: 'full' },
+  seo:      { title: 'SEO Action Plan',  navId: 'gsc-actionplan-status', slug: 'seo'  },
+  paid:     { title: 'Paid Action Plan', navId: 'ads-actionplan-status', slug: 'paid' }
+};
+
+// Per-variant state. Keyed by variant so opening the SEO plan can never
+// overwrite the Overview plan already on screen behind it.
+const _apState = {};
+ACTION_PLAN_VARIANTS.forEach(v => {
+  _apState[v] = { plan: null, sources: null, fetchedAt: 0, loading: false, error: '' };
+});
+
+// Which variant the shared panel is currently showing.
+let _apVariant = 'overview';
+const apCur = () => _apState[_apVariant];
 
 // ─── Data gathering (best-effort; any source may be absent) ───────────────────
 
@@ -50,7 +71,18 @@ async function gatherActionPlanData(tab) {
   try { phrases = await browser.tabs.sendMessage(tab.id, { action: 'getKeywordPhrases' }, TOP_FRAME); }
   catch { phrases = null; }
 
-  return { gsc, ads, webceo, tracked, ga, adAssets, phrases };
+  // Technical / authority signals, CACHE-ONLY on purpose. A PSI run takes many
+  // seconds and the two Web CEO calls cost quota, so generating a plan must
+  // never trigger any of them. If the user has already opened PageSpeed, Site
+  // Audit or Backlinks for this page, the plan is richer for free; if not, it
+  // simply goes without and says nothing about them.
+  const [psi, audit, backlinks] = await Promise.all([
+    send({ action: 'psiGetPageSpeed',    url: tab.url, strategy: 'mobile', cacheOnly: true }),
+    send({ action: 'webceoGetSiteAudit', pageUrl: tab.url, cacheOnly: true }),
+    send({ action: 'webceoGetBacklinks', pageUrl: tab.url, cacheOnly: true })
+  ]);
+
+  return { gsc, ads, webceo, tracked, ga, adAssets, phrases, psi, audit, backlinks };
 }
 
 // GSC queries split into the two bands that drive surgical wins.
@@ -146,6 +178,67 @@ function actionPlanPhraseLines(phrases) {
     out.push(`  ${n}-word: ${parts.join('; ')}`);
   });
   return out;
+}
+
+// Technical + authority signals, all read from cache only (see
+// gatherActionPlanData). Any of the three may legitimately be absent — the
+// block simply shrinks or disappears rather than claiming "no data", because
+// "not fetched" and "genuinely zero" are very different things and telling the
+// model the wrong one produces confident nonsense.
+function actionPlanTechLines(g) {
+  const lines = [];
+
+  const psi = g.psi;
+  if (psi && !psi.error && !psi.notCached && psi.performanceScore != null) {
+    const bits = [`Performance score: ${psi.performanceScore}/100 (mobile)`];
+    if (psi.field && psi.field.metrics) {
+      const f = Object.entries(psi.field.metrics)
+        .filter(([, m]) => m && m.category)
+        .map(([name, m]) => `${name} ${m.category}`);
+      if (f.length) bits.push(`Field (CrUX${psi.field.origin ? ', origin-level' : ''}): ${f.join(', ')}`);
+    }
+    lines.push('\n## CORE WEB VITALS (PageSpeed Insights)');
+    bits.forEach(b => lines.push(`  ${b}`));
+    (psi.opportunities || []).slice(0, 4).forEach(o => {
+      if (o.ms > 0) lines.push(`  Opportunity: ${o.title} — est. ${o.ms}ms`);
+    });
+  }
+
+  const audit = g.audit;
+  if (audit && audit.connected && !audit.error && !audit.notCached) {
+    const canonical = (pageData && pageData.canonical) || '';
+    const norm = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '').toLowerCase();
+    const page = (audit.pages || []).find(p => norm(p.url) === norm(canonical));
+    const out = [];
+    if (audit.siteOptimization != null) out.push(`  Site optimization: ${audit.siteOptimization}%`);
+    if (audit.brokenLinks) out.push(`  Broken links site-wide: ${audit.brokenLinks}`);
+    if (page) {
+      if (page.optimization != null) out.push(`  This page's optimization: ${page.optimization}%`);
+      const probs = [...(page.generalProblems || []), ...(page.landingProblems || [])];
+      if (probs.length) out.push(`  This page's flagged problems: ${probs.slice(0, 12).join(', ')}`);
+      if (page.brokenCount) out.push(`  Broken links on this page: ${page.brokenCount}`);
+    }
+    if (out.length) {
+      lines.push('\n## SITE AUDIT (Web CEO crawl — technical SEO)');
+      lines.push(...out);
+    }
+  }
+
+  const bl = g.backlinks;
+  if (bl && bl.connected && !bl.error && !bl.notCached && bl.referringDomains != null) {
+    lines.push('\n## BACKLINKS (authority)');
+    lines.push(`  Site: ${bl.referringDomains} referring domains, ${bl.total} links (${bl.nofollow} nofollow), max Trust Flow ${bl.maxTF ?? 'n/a'}`);
+    if (bl.toxic) lines.push(`  Toxic links flagged: ${bl.toxic}`);
+    const tp = bl.thisPage;
+    if (tp) {
+      lines.push(`  THIS PAGE specifically: ${tp.referringDomains} referring domains, ${tp.total} links`);
+      // A page with no links of its own is an internal-linking problem before
+      // it is an outreach problem — worth the model knowing the difference.
+      if (!tp.total) lines.push('  (this page has no inbound links of its own)');
+    }
+  }
+
+  return lines;
 }
 
 function actionPlanContext(g) {
@@ -302,6 +395,8 @@ function actionPlanContext(g) {
     if (gaSig.channels) lines.push(`  Channels: ${gaSig.channels.map(c => `${c.channel} ${c.sessions}s/${c.bounceRatePct}% bounce`).join(', ')}`);
   }
 
+  lines.push(...actionPlanTechLines(g));
+
   // Intent distribution — only present if user has run Search/Rankings/Ads tabs first
   const intentDist = computeIntentDistribution(g);
   if (intentDist) {
@@ -355,6 +450,79 @@ Respond with ONLY a compact JSON object, no prose, no code fences, exactly:
 - "intentGap": include ONLY when TRAFFIC INTENT DISTRIBUTION is present in the input. If the page's evident purpose (from its title, headings, and content) diverges significantly from the dominant traffic intent, set "divergence":true, "pageIntent" to the intent the page targets (one of: Informational, Navigational, Commercial, Transactional), "trafficIntent" to the dominant incoming intent, "summary" to one sentence explaining the mismatch and opportunity, and "suggestions" to exactly 8 diverse keyword phrases — range from head to long-tail, no brand terms — that the page should be visible for given its actual purpose. If no significant divergence exists, omit "intentGap" entirely.
 - "eeat": using the E-E-A-T SIGNALS block, assess the page's Experience/Expertise/Authoritativeness/Trustworthiness and include: "score" ("strong", "moderate", or "weak"), "signals" (array of up to 4 objects with "dimension" (one of: Experience, Expertise, Authoritativeness, Trustworthiness) and "observation" (one sentence on what you found or inferred)), and "gaps" (array of 2–4 specific actionable improvements, e.g. "Add an author bio with credentials above the fold").`;
 
+// ─── The two specialized prompts ──────────────────────────────────────────────
+//
+// ACTION_PLAN_SYSTEM above is the Overview prompt and is deliberately UNCHANGED
+// — its exact wording, schema and enum lists were arrived at by trial and error
+// and the plan it produces today is the one it should keep producing. These two
+// are siblings, not rewrites: they reuse its output contract verbatim (same
+// JSON shape, same effort/impact/channel enums, same normalizeActionPlan on the
+// way back) and vary only the strategist framing and the emphasis rules.
+//
+// Both receive the identical context the Overview plan gets. The narrowing is
+// in what they're asked to RECOMMEND, never in what they're allowed to KNOW —
+// organic queries are legitimate evidence for a paid recommendation and vice
+// versa, and cutting either side off would make both plans worse.
+
+const ACTION_PLAN_JSON_CONTRACT = `Respond with ONLY a compact JSON object, no prose, no code fences, exactly:
+{"recommendations":[{"change":"…","evidence":"…","effort":"surgical|moderate|rewrite","impact":"high|medium|low","channel":"seo|paid|both"}],"contentGaps":["…","…"]REPLACE_EXTRAS}
+- "change": the action to take (imperative, specific).
+- "evidence": the data behind it, citing the actual numbers.
+- effort is one of: "surgical" (minutes), "moderate" (an hour), "rewrite" (major restructuring).
+- impact is one of: "high", "medium", "low".
+- Return 3–8 recommendations total. Order by impact within each effort tier.
+- Every recommendation MUST cite specific evidence from the data provided. Never give generic advice.`;
+
+const ACTION_PLAN_INTENT_CLAUSE = `
+- "intentGap": include ONLY when TRAFFIC INTENT DISTRIBUTION is present in the input. If the page's evident purpose diverges significantly from the dominant traffic intent, set "divergence":true, "pageIntent" and "trafficIntent" (each one of: Informational, Navigational, Commercial, Transactional), "summary" to one sentence on the mismatch, and "suggestions" to exactly 8 diverse keyword phrases — head to long-tail, no brand terms. If no significant divergence exists, omit "intentGap" entirely.`;
+
+const ACTION_PLAN_SYSTEM_SEO = `You are an elite on-page SEO strategist. You are given a single web page's CONTENT and every demand and diagnostic signal available for it: Search Console queries, Google Ads data, Web CEO tracked rankings and site-audit findings, GA4 behaviour, Core Web Vitals, and backlink authority.
+
+Your ONLY job is organic search performance for THIS page. Every recommendation must be an on-page or organic change: content, structure, headings, internal linking, metadata, schema, technical fixes, page experience, or authority. Never recommend a bid, budget, ad-copy or negative-keyword change — those belong to a separate paid plan and must not appear here.
+
+Paid data is still evidence you should use: a search term that converts in Ads is proof of commercial demand this page should rank for organically, and a low Quality Score usually means a landing-page relevance problem that is an ORGANIC content fix. Cite paid numbers freely; just make the recommended action an organic one.
+
+Emphasis, in order:
+- The page-2 band (queries at position 5–20 with real impressions) — the highest-ROI organic fixes that exist.
+- High-impression / low-CTR queries — a title and meta description problem, not a content problem. Say which.
+- Content the market demands (queries, converting paid terms) that appears nowhere in the headings or body vocabulary. The PAGE VOCABULARY block shows what the page actually dwells on; a term with heavy impressions and a near-zero count there is a real gap, not a stylistic one.
+- Technical and experience issues from SITE AUDIT and CORE WEB VITALS when present — tie each to its measured number.
+- Authority: if BACKLINKS shows this page has few or no inbound links of its own, treat that as an internal-linking problem first.
+
+Every recommendation must use channel "seo".
+
+${ACTION_PLAN_JSON_CONTRACT.replace('REPLACE_EXTRAS', `,"intentGap":{…},"eeat":{…}`)}
+- "contentGaps": short topic labels (2–4 words) the page should cover but doesn't. 0–8 items.${ACTION_PLAN_INTENT_CLAUSE}
+- "eeat": using the E-E-A-T SIGNALS block, include "score" ("strong"|"moderate"|"weak"), "signals" (up to 4 objects with "dimension" (Experience|Expertise|Authoritativeness|Trustworthiness) and "observation"), and "gaps" (2–4 specific actionable improvements).`;
+
+const ACTION_PLAN_SYSTEM_PAID = `You are an elite Google Ads strategist. You are given a landing page's CONTENT and every signal available for it: its Google Ads campaigns, ad groups, ads, keywords and search terms, plus Search Console organic queries, Web CEO rankings, GA4 behaviour and Core Web Vitals.
+
+Your ONLY job is paid search performance for the campaigns, ad groups and ads that point at THIS page. Every recommendation must be a paid change: keywords, match types, negative keywords, ad copy and assets, bids, budgets, bid strategy, or ad group structure. Do not recommend organic content or schema changes as ends in themselves — those belong to a separate SEO plan.
+
+Campaign-level recommendations ARE in scope. If a campaign this page's ad groups sit in is losing impression share to budget or to rank, say so and recommend the budget or bid-strategy change, even though it affects more than this page. Note plainly when a recommendation reaches beyond this page.
+
+Organic data is evidence you should use: a query with strong impressions but a poor organic position is a candidate to buy; a query the page already ranks #1 for organically may be wasted paid spend. Cite organic numbers to justify paid decisions.
+
+Emphasis, in order:
+- Wasted spend: search terms with real cost and zero conversions. Recommend specific negative keywords and the match type to use.
+- Converting search terms not present as bid keywords — the cheapest wins available.
+- Low Quality Score keywords: name the likely cause (ad relevance, expected CTR, or landing page experience) using the page content and Core Web Vitals as evidence, and give the paid fix.
+- LOW-rated RSA headlines and descriptions — quote the weak asset and say what to replace it with.
+- Impression share lost to budget or rank, at ad group and campaign level.
+- Ad group structure: search terms that deserve their own tightly-themed ad group.
+
+Every recommendation must use channel "paid".
+
+${ACTION_PLAN_JSON_CONTRACT.replace('REPLACE_EXTRAS', `,"intentGap":{…}`)}
+- "contentGaps": short labels (2–4 words) for topics the paid traffic wants that this landing page never addresses — these hurt Quality Score and conversion rate. 0–8 items.${ACTION_PLAN_INTENT_CLAUSE}
+- Do NOT include an "eeat" key. E-E-A-T is an organic ranking concept and has no place in a paid plan.`;
+
+const ACTION_PLAN_SYSTEMS = {
+  overview: ACTION_PLAN_SYSTEM,
+  seo:      ACTION_PLAN_SYSTEM_SEO,
+  paid:     ACTION_PLAN_SYSTEM_PAID
+};
+
 // ─── Normalization (accept only well-formed, enum-valid recs) ─────────────────
 
 function actionPlanParse(text) {
@@ -370,6 +538,20 @@ function actionPlanParse(text) {
 const _EFFORTS = ['surgical', 'moderate', 'rewrite'];
 const _IMPACTS = ['high', 'medium', 'low'];
 const _CHANNELS = ['seo', 'paid', 'both'];
+
+// Enforce a variant's contract on the parsed result, rather than trusting the
+// prompt to have been obeyed. Models follow negative instructions ("do NOT
+// include eeat") unreliably, and both leaks are user-visible: a stray E-E-A-T
+// block appears in a paid plan, and a mislabelled channel is printed into the
+// RTF and Google Doc exports, where the tag is text rather than a hidden chip.
+// Cheap to enforce, so enforce it.
+function applyVariantContract(plan, variant) {
+  if (!plan || variant === 'overview') return plan;
+  const channel = variant === 'paid' ? 'paid' : 'seo';
+  plan.recommendations.forEach(r => { r.channel = channel; });
+  if (variant === 'paid') delete plan.eeat;
+  return plan;
+}
 
 function normalizeActionPlan(raw) {
   if (!raw || !Array.isArray(raw.recommendations)) return null;
@@ -410,33 +592,45 @@ function normalizeActionPlan(raw) {
 
 // ─── Main entry: generate (or render from cache) ──────────────────────────────
 
-async function loadActionPlan(forceRefresh = false) {
-  if (_actionPlanLoading) return;
+// Cache entries are keyed by VARIANT and URL. Entries written before the three
+// variants existed used the bare URL, so they simply never match now and are
+// regenerated — old and new keys coexist harmlessly in the same object, and
+// rolling back to a single-plan build leaves its keys still valid.
+const actionPlanCacheKey = (variant, url) => `${variant}::${(url || '').split('#')[0]}`;
 
-  if (!pageData) { _actionPlanError = 'No page data — open this on a regular web page.'; renderActionPlanPanel(); return; }
+// 3 variants × the 20 pages the old cap allowed.
+const ACTION_PLAN_CACHE_CAP = 60;
+
+async function loadActionPlan(forceRefresh = false, variant = _apVariant) {
+  const st = _apState[variant];
+  if (!st || st.loading) return;
+
+  const done = () => { if (variant === _apVariant) renderActionPlanPanel(); refreshActionPlanNav(); };
+
+  if (!pageData) { st.error = 'No page data — open this on a regular web page.'; done(); return; }
 
   const { claudeApiKey } = await browser.storage.local.get('claudeApiKey');
-  if (!claudeApiKey) { _actionPlanError = 'Add a Claude API key in Settings to generate an action plan.'; renderActionPlanPanel(); return; }
+  if (!claudeApiKey) { st.error = 'Add a Claude API key in Settings to generate an action plan.'; done(); return; }
 
   const tab = await getActiveTab();
-  const cacheKey = (tab.url || '').split('#')[0];
+  const urlKey = (tab.url || '').split('#')[0];
+  const cacheKey = actionPlanCacheKey(variant, tab.url);
 
   const { actionPlanCache } = await browser.storage.local.get('actionPlanCache');
   const cache = actionPlanCache || {};
   const cached = cache[cacheKey];
   if (!forceRefresh && cached && (Date.now() - cached.fetchedAt < ACTION_PLAN_TTL_MS)) {
-    _actionPlan = cached.plan;
-    _actionPlanSources = cached.sources;
-    _actionPlanFetchedAt = cached.fetchedAt;
-    _actionPlanError = '';
-    renderActionPlanPanel();
-    refreshActionPlanNav();
+    st.plan = cached.plan;
+    st.sources = cached.sources;
+    st.fetchedAt = cached.fetchedAt;
+    st.error = '';
+    done();
     return;
   }
 
-  _actionPlanLoading = true;
-  _actionPlanError = '';
-  renderActionPlanPanel();
+  st.loading = true;
+  st.error = '';
+  done();
 
   try {
     const gathered = await gatherActionPlanData(tab);
@@ -444,7 +638,7 @@ async function loadActionPlan(forceRefresh = false) {
     // Pull the four page insights from the same cache loadAiInsights writes to
     try {
       const { aiInsightsCache } = await browser.storage.local.get('aiInsightsCache');
-      const ins = aiInsightsCache && aiInsightsCache[cacheKey];
+      const ins = aiInsightsCache && aiInsightsCache[urlKey];
       if (ins && ins.intent) gathered.insights = ins;
     } catch { /* insights are optional */ }
 
@@ -462,49 +656,67 @@ async function loadActionPlan(forceRefresh = false) {
       body: JSON.stringify({
         model: ACTION_PLAN_MODEL,
         max_tokens: 4096,
-        system: [{ type: 'text', text: ACTION_PLAN_SYSTEM, cache_control: { type: 'ephemeral' } }],
+        system: [{ type: 'text', text: ACTION_PLAN_SYSTEMS[variant] || ACTION_PLAN_SYSTEM, cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: context }]
       })
     });
-    const plan = normalizeActionPlan(actionPlanParse(claudeText(data)));
+    const plan = applyVariantContract(normalizeActionPlan(actionPlanParse(claudeText(data))), variant);
     if (!plan) throw new Error('Could not parse a plan from the response.');
 
-    _actionPlan = plan;
-    _actionPlanSources = sources;
-    _actionPlanFetchedAt = Date.now();
+    st.plan = plan;
+    st.sources = sources;
+    st.fetchedAt = Date.now();
 
-    cache[cacheKey] = { plan, sources, fetchedAt: _actionPlanFetchedAt };
-    const keys = Object.keys(cache);
-    if (keys.length > 20) {
-      keys.sort((a, b) => cache[a].fetchedAt - cache[b].fetchedAt);
-      keys.slice(0, keys.length - 20).forEach(k => delete cache[k]);
+    // Re-read rather than reusing the copy from above: a sibling variant may
+    // have finished writing while this call was in flight, and clobbering it
+    // would silently throw away a plan the user just paid for.
+    const { actionPlanCache: fresh } = await browser.storage.local.get('actionPlanCache');
+    const out = fresh || {};
+    out[cacheKey] = { plan, sources, fetchedAt: st.fetchedAt };
+    const keys = Object.keys(out);
+    if (keys.length > ACTION_PLAN_CACHE_CAP) {
+      keys.sort((a, b) => out[a].fetchedAt - out[b].fetchedAt);
+      keys.slice(0, keys.length - ACTION_PLAN_CACHE_CAP).forEach(k => delete out[k]);
     }
-    browser.storage.local.set({ actionPlanCache: cache });
+    browser.storage.local.set({ actionPlanCache: out });
   } catch (err) {
-    _actionPlanError = err.message;
+    st.error = err.message;
   } finally {
-    _actionPlanLoading = false;
-    renderActionPlanPanel();
-    refreshActionPlanNav();
+    st.loading = false;
+    done();
   }
 }
 
-// Hydrate the nav-row status from cache without generating (called on page load).
+// Hydrate every variant's nav-row status from cache without generating
+// (called on page load). Each row reflects only its own plan.
 async function hydrateActionPlanNav() {
   try {
     const tab = await getActiveTab();
-    const cacheKey = (tab.url || '').split('#')[0];
     const { actionPlanCache } = await browser.storage.local.get('actionPlanCache');
-    const cached = actionPlanCache && actionPlanCache[cacheKey];
-    if (cached && (Date.now() - cached.fetchedAt < ACTION_PLAN_TTL_MS)) {
-      _actionPlan = cached.plan;
-      _actionPlanSources = cached.sources;
-      _actionPlanFetchedAt = cached.fetchedAt;
-    } else {
-      _actionPlan = null;
-    }
-  } catch { _actionPlan = null; }
+    const cache = actionPlanCache || {};
+    ACTION_PLAN_VARIANTS.forEach(v => {
+      const st = _apState[v];
+      const cached = cache[actionPlanCacheKey(v, tab.url)];
+      if (cached && (Date.now() - cached.fetchedAt < ACTION_PLAN_TTL_MS)) {
+        st.plan = cached.plan;
+        st.sources = cached.sources;
+        st.fetchedAt = cached.fetchedAt;
+      } else {
+        st.plan = null;
+      }
+    });
+  } catch {
+    ACTION_PLAN_VARIANTS.forEach(v => { _apState[v].plan = null; });
+  }
   refreshActionPlanNav();
+}
+
+// Point the shared panel at a variant, then generate/restore that variant's
+// plan. popup-nav.js calls this from all three nav rows.
+function setActionPlanVariant(variant) {
+  _apVariant = ACTION_PLAN_VARIANTS.includes(variant) ? variant : 'overview';
+  const heading = document.getElementById('actionplan-title');
+  if (heading) heading.textContent = ACTION_PLAN_META[_apVariant].title;
 }
 
 // ─── Rendering ────────────────────────────────────────────────────────────────
@@ -520,7 +732,9 @@ function actionPlanAgo(ts) {
   return `${Math.round(hrs / 24)}d ago`;
 }
 
-function actionPlanRecCard(rec) {
+// `showChannel` is false on the SEO and Paid plans: every card there carries
+// the same channel, so the tag conveys nothing and just crowds the row.
+function actionPlanRecCard(rec, showChannel = true) {
   const card = document.createElement('div');
   card.className = `ap-rec ap-rec--${rec.effort}`;
 
@@ -533,11 +747,13 @@ function actionPlanRecCard(rec) {
 
   const tags = document.createElement('div');
   tags.className = 'ap-rec-tags';
-  const channel = rec.channel || 'seo';
-  const chTag = document.createElement('span');
-  chTag.className = `ap-tag ap-channel--${channel}`;
-  chTag.textContent = channel === 'both' ? 'SEO + Paid' : channel === 'paid' ? 'Paid' : 'SEO';
-  tags.appendChild(chTag);
+  if (showChannel) {
+    const channel = rec.channel || 'seo';
+    const chTag = document.createElement('span');
+    chTag.className = `ap-tag ap-channel--${channel}`;
+    chTag.textContent = channel === 'both' ? 'SEO + Paid' : channel === 'paid' ? 'Paid' : 'SEO';
+    tags.appendChild(chTag);
+  }
   const effortTag = document.createElement('span');
   effortTag.className = `ap-tag ap-tag--${rec.effort}`;
   effortTag.textContent = rec.effort;
@@ -563,8 +779,13 @@ function renderActionPlanPanel() {
   if (!root) return;
   root.replaceChildren();
 
+  const st = apCur();
+  const _actionPlan = st.plan;
+  const _actionPlanSources = st.sources;
+  const _actionPlanFetchedAt = st.fetchedAt;
+
   // Loading
-  if (_actionPlanLoading) {
+  if (st.loading) {
     const sec = document.createElement('section');
     sec.className = 'field-section ap-center';
     sec.appendChild(svgFromString('<svg class="ap-spinner" viewBox="0 0 16 16" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M14 8A6 6 0 1 1 8 2"/></svg>'));
@@ -573,14 +794,14 @@ function renderActionPlanPanel() {
   }
 
   // Error
-  if (_actionPlanError) {
+  if (st.error) {
     const sec = document.createElement('section');
     sec.className = 'field-section';
     const msg = document.createElement('div');
     msg.className = 'field-hint hint-red';
-    msg.textContent = _actionPlanError;
+    msg.textContent = st.error;
     sec.appendChild(msg);
-    if (/Claude API key/.test(_actionPlanError)) {
+    if (/Claude API key/.test(st.error)) {
       const btn = document.createElement('button');
       btn.className = 'save-key-btn';
       btn.style.marginTop = '8px';
@@ -616,7 +837,7 @@ function renderActionPlanPanel() {
   refresh.className = 'icon-btn';
   refresh.title = 'Regenerate the plan';
   refresh.appendChild(svgFromString('<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 8A5.5 5.5 0 1 1 8 2.5a5.5 5.5 0 0 1 3.9 1.6L13.5 5.6"/><polyline points="13.5 2 13.5 5.6 9.9 5.6"/></svg>'));
-  refresh.addEventListener('click', () => loadActionPlan(true));
+  refresh.addEventListener('click', () => loadActionPlan(true, _apVariant));
   right.appendChild(refresh);
 
   // Export the recommendations to an RTF file
@@ -665,7 +886,7 @@ function renderActionPlanPanel() {
     sec.appendChild(h);
     const list = document.createElement('div');
     list.className = 'ap-rec-list';
-    recs.forEach(r => list.appendChild(actionPlanRecCard(r)));
+    recs.forEach(r => list.appendChild(actionPlanRecCard(r, _apVariant === 'overview')));
     sec.appendChild(list);
     root.appendChild(sec);
   });
@@ -823,6 +1044,8 @@ function rtfEscape(s) {
 }
 
 async function exportToGoogleDocs(btn) {
+  const _actionPlan = apCur().plan;
+  const _actionPlanFetchedAt = apCur().fetchedAt;
   if (!_actionPlan) return;
   let pageUrl = '';
   try { pageUrl = (pageData && pageData.canonical) || (await getActiveTab()).url; } catch { /* keep default */ }
@@ -836,7 +1059,8 @@ async function exportToGoogleDocs(btn) {
       action: 'docsExportActionPlan',
       plan: _actionPlan,
       pageUrl,
-      fetchedAt: _actionPlanFetchedAt
+      fetchedAt: _actionPlanFetchedAt,
+      planTitle: ACTION_PLAN_META[_apVariant].title
     });
   }
 
@@ -873,13 +1097,16 @@ async function exportToGoogleDocs(btn) {
 }
 
 async function exportActionPlanRtf() {
+  const _actionPlan = apCur().plan;
+  const _actionPlanFetchedAt = apCur().fetchedAt;
   if (!_actionPlan) return;
+  const meta = ACTION_PLAN_META[_apVariant];
 
   let host = 'page';
   try { host = new URL((pageData && pageData.canonical) || (await getActiveTab()).url).hostname.replace(/^www\./, ''); } catch { /* keep default */ }
 
   const parts = [];
-  parts.push(`{\\b\\fs32 Action Plan}\\par {\\fs18 ${rtfEscape(host)} \\u8212? generated ${rtfEscape(new Date(_actionPlanFetchedAt || Date.now()).toLocaleString())}}\\par\\par`);
+  parts.push(`{\\b\\fs32 ${rtfEscape(meta.title)}}\\par {\\fs18 ${rtfEscape(host)} \\u8212? generated ${rtfEscape(new Date(_actionPlanFetchedAt || Date.now()).toLocaleString())}}\\par\\par`);
 
   ACTION_PLAN_TIERS.forEach(tier => {
     const recs = _actionPlan.recommendations.filter(r => r.effort === tier.effort);
@@ -924,19 +1151,21 @@ async function exportActionPlanRtf() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `action-plan-${host}.rtf`;
+  a.download = `action-plan-${meta.slug}-${host}.rtf`;
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// Set the nav-row state on the Overview + Ads tabs ("N recs" once generated)
+// Each tab's nav row shows the count for ITS OWN plan — the Search row must
+// never light up because the Overview plan happens to be cached.
 function refreshActionPlanNav() {
-  const n = (_actionPlan && _actionPlan.recommendations.length) || 0;
-  ['actionplan-status', 'ads-actionplan-status'].forEach(id => {
-    const status = document.getElementById(id);
+  ACTION_PLAN_VARIANTS.forEach(v => {
+    const status = document.getElementById(ACTION_PLAN_META[v].navId);
     if (!status) return;
+    const plan = _apState[v].plan;
+    const n = (plan && plan.recommendations.length) || 0;
     status.textContent = n ? `${n} recs` : '';
     status.classList.toggle('hidden', !n);
   });

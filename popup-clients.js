@@ -239,6 +239,18 @@ function renderClientPanelContent() {
   renderBrandedTermsField(brandedSection, client);
   root.appendChild(brandedSection);
 
+  // Competitors — client-level, and the thing that turns on the Backlinks
+  // panel's "VS. COMPETITORS" section, which is otherwise dark on any project
+  // whose competitors were never configured in Web CEO's own UI.
+  const competitorsSection = document.createElement('section');
+  competitorsSection.className = 'field-section';
+  const competitorsHeader = document.createElement('div');
+  competitorsHeader.className = 'field-label';
+  competitorsHeader.textContent = 'COMPETITORS';
+  competitorsSection.appendChild(competitorsHeader);
+  renderCompetitorsSection(competitorsSection, client);
+  root.appendChild(competitorsSection);
+
   // Content generation settings — client-level, like branded terms above.
   // Applies uniformly to every AI-generated text field (Title, Meta, OG,
   // Twitter, and the WP Media Library image generators) — none of it is
@@ -284,6 +296,142 @@ function renderClientPanelContent() {
     hint.textContent = 'Add a domain above to bind Search Console, Analytics, Ads, and Web CEO for it.';
     root.appendChild(hint);
   }
+}
+
+// Competitor domains for this client, plus the explicit push to Web CEO.
+//
+// The list lives on the Client (synced, useful even where there is no Web CEO
+// project). Syncing is a deliberate button rather than an on-save side effect:
+// it is a remote write against the user's Web CEO quota, and it targets the
+// project bound to each domain, so firing it automatically as someone types
+// would be both surprising and wasteful.
+function renderCompetitorsSection(container, client) {
+  const saveList = async (next) => {
+    const id = await ensureClientPersisted();
+    const res = await sendMessageWithTimeout({ action: 'clientRegistrySetCompetitors', id, competitors: next });
+    if (res && res.client) { _editingClient = res.client; patchClientInList(_editingClient); renderClientPanelContent(); }
+  };
+
+  const current = client.competitors || [];
+
+  const list = document.createElement('div');
+  list.className = 'client-domain-chips';
+  current.forEach(domain => {
+    const chip = document.createElement('span');
+    chip.className = 'client-domain-chip';
+    const text = document.createElement('span');
+    text.textContent = domain;
+    chip.appendChild(text);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'client-domain-chip-remove';
+    labelIconButton(remove, `Remove ${domain}`);
+    remove.textContent = '\u00d7';
+    remove.addEventListener('click', () => saveList(current.filter(c => c !== domain)));
+    chip.appendChild(remove);
+    list.appendChild(chip);
+  });
+  container.appendChild(list);
+
+  if (!current.length) {
+    const hint = document.createElement('div');
+    hint.className = 'field-hint hint-muted';
+    hint.textContent = 'Add competitor domains to turn on the Backlinks panel\u2019s VS. COMPETITORS comparison.';
+    container.appendChild(hint);
+  }
+
+  const addRow = document.createElement('div');
+  addRow.className = 'client-domain-add-row';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'wp-input';
+  input.placeholder = 'competitor.com';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  const addBtn = document.createElement('button');
+  addBtn.className = 'save-key-btn';
+  addBtn.textContent = '+ Competitor';
+  const doAdd = () => {
+    const domain = input.value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+    if (!domain || current.includes(domain)) { input.value = ''; return; }
+    input.value = '';
+    saveList([...current, domain]);
+  };
+  addBtn.addEventListener('click', doAdd);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doAdd(); } });
+  addRow.append(input, addBtn);
+  container.appendChild(addRow);
+
+  // Sync is only meaningful for a domain that actually has a Web CEO project.
+  const bound = (client.domains || []).filter(d => d.webceoProject);
+  if (!bound.length) return;
+
+  const syncRow = document.createElement('div');
+  syncRow.className = 'client-competitor-sync';
+  const status = document.createElement('span');
+  status.className = 'field-hint hint-muted';
+
+  // With nothing to push, offer the other direction instead. A project whose
+  // competitors were configured in Web CEO's own UI already has a list, and
+  // pushing an empty one at it would WIPE that — so an empty list must never
+  // be a Sync button.
+  if (!current.length) {
+    const importBtn = document.createElement('button');
+    importBtn.className = 'save-key-btn';
+    importBtn.textContent = 'Import from Web CEO';
+    importBtn.addEventListener('click', async () => {
+      importBtn.disabled = true;
+      status.className = 'field-hint hint-muted';
+      status.textContent = 'Reading…';
+      const found = [];
+      const failures = [];
+      for (const d of bound) {
+        const res = await sendMessageWithTimeout({
+          action: 'webceoGetCompetitors', pageUrl: `https://${d.domain}/`
+        }).catch(() => null);
+        if (res && Array.isArray(res.competitors)) found.push(...res.competitors);
+        else failures.push(`${d.domain}: ${(res && (res.detail || res.error)) || 'no response'}`);
+      }
+      importBtn.disabled = false;
+      if (found.length) { saveList([...new Set(found)]); return; }   // re-renders
+      status.className = failures.length ? 'field-hint hint-red' : 'field-hint hint-muted';
+      status.textContent = failures.length ? failures.join(' · ') : 'Web CEO has no competitors for this project either.';
+    });
+    syncRow.append(importBtn, status);
+    container.appendChild(syncRow);
+    return;
+  }
+
+  const syncBtn = document.createElement('button');
+  syncBtn.className = 'save-key-btn';
+  syncBtn.textContent = bound.length > 1 ? `Sync to Web CEO (${bound.length} projects)` : 'Sync to Web CEO';
+
+  syncBtn.addEventListener('click', async () => {
+    syncBtn.disabled = true;
+    status.className = 'field-hint hint-muted';
+    status.textContent = 'Syncing\u2026';
+    const failures = [];
+    for (const d of bound) {
+      const res = await sendMessageWithTimeout({
+        action: 'webceoSetCompetitors', pageUrl: `https://${d.domain}/`, competitors: current
+      }).catch(() => null);
+      if (!res || !res.ok) failures.push(`${d.domain}: ${(res && (res.detail || res.error)) || 'no response'}`);
+    }
+    syncBtn.disabled = false;
+    if (!failures.length) {
+      status.className = 'field-hint hint-green';
+      status.textContent = `Synced to ${bound.length} project${bound.length === 1 ? '' : 's'}.`;
+    } else {
+      // Deliberately verbose: the likeliest failure is that Web CEO names the
+      // write parameter something this build does not try yet, and the detail
+      // string says exactly which names were attempted.
+      status.className = 'field-hint hint-red';
+      status.textContent = failures.join(' · ');
+    }
+  });
+
+  syncRow.append(syncBtn, status);
+  container.appendChild(syncRow);
 }
 
 function renderDomainsSection(container, client) {

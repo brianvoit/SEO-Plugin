@@ -3481,6 +3481,17 @@ body.settings-open #update-footer { margin-top: auto; }
 }
 .client-domain-add-row .wp-input { flex: 1; }
 
+/* The status text can carry a whole failure list from Web CEO, so it wraps
+   under the button rather than squeezing it. */
+.client-competitor-sync {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.client-competitor-sync .field-hint { flex: 1 1 100%; margin: 0; }
+
 .client-drive-row {
   display: flex;
   align-items: center;

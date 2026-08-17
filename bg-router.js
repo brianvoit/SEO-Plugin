@@ -69,6 +69,8 @@ function routeMessage(message) {
     case 'webceoGetLostBacklinks':      return webceoGetLostBacklinks(message);
     case 'webceoGetLinkingDomains':     return webceoGetLinkingDomains(message);
     case 'webceoGetCompetitorMetrics':  return webceoGetCompetitorMetrics(message);
+    case 'webceoGetCompetitors':        return webceoGetCompetitors(message);
+    case 'webceoSetCompetitors':        return webceoSetCompetitors(message);
     case 'webceoGetSiteAudit':   return webceoGetSiteAudit(message);
     case 'webceoAddEvent':       return webceoAddEvent(message);
     case 'gaConnectEdit':        return gaConnectEdit();
@@ -94,6 +96,7 @@ function routeMessage(message) {
     case 'clientRegistrySetBrandedTerms': return clientRegistrySetBrandedTerms(message);
     case 'clientRegistryAddBrandedTerm':  return clientRegistryAddBrandedTerm(message);
     case 'clientRegistrySetImageSeo': return clientRegistrySetImageSeo(message);
+    case 'clientRegistrySetCompetitors': return clientRegistrySetCompetitors(message);
     case 'driveConnectBrowse':   return driveConnectBrowse();
     case 'driveListFolders':     return driveListFolders(message);
     case 'driveListSharedDrives': return driveListSharedDrives(message);

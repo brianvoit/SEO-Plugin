@@ -50,7 +50,7 @@ function clientRegistryId() {
 function clientRegistryNew(name) {
   const now = Date.now();
   return {
-    id: clientRegistryId(), name: name || 'New Client', domains: [], brandedTerms: '', keywords: [],
+    id: clientRegistryId(), name: name || 'New Client', domains: [], brandedTerms: '', keywords: [], competitors: [],
     imageSeo: null, driveFolderId: null, driveFolderName: null, createdAt: now, updatedAt: now
   };
 }
@@ -358,6 +358,26 @@ async function clientRegistryAddBrandedTerm({ host, term }) {
   }
   await bgSaveBrandedTerms(map);
   return { ok: true, pattern, client };
+}
+
+// Competitor domains, client-level like branded terms — a brand's competitors
+// are its competitors across every domain it owns.
+//
+// Stored here rather than only in Web CEO because the Client Registry is this
+// app's source of truth for per-client config, and because the list stays
+// useful on a domain with no Web CEO project at all. Pushing it TO Web CEO is
+// a separate, explicit action (webceoSetCompetitors) rather than a side effect
+// of saving: it is a remote write against the user's quota, and silently
+// firing one on every keystroke would be surprising.
+async function clientRegistrySetCompetitors({ id, competitors }) {
+  await ensureClientRegistryMigrated();
+  const client = await clientRegistryGetRaw(id);
+  if (!client) return { ok: false, error: 'NOT_FOUND' };
+  client.competitors = [...new Set((Array.isArray(competitors) ? competitors : [])
+    .map(c => String(c || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, ''))
+    .filter(Boolean))];
+  await clientRegistrySaveRaw(client);
+  return { ok: true, client };
 }
 
 // Image SEO prompt guidance for the WP Media Library generators — same

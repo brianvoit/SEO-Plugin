@@ -694,3 +694,81 @@ function webceoDisconnect() {
   return browser.storage.local.remove(['webceoApiKey', 'webceoProjects', 'webceoCache', 'webceoBacklinksCache', 'webceoAuditCache', 'webceoLostBacklinksCache', 'webceoLinkingDomainsCache', 'webceoCompetitorMetricsCache', 'webceoKeywordTagsCache', 'webceoProjectOverrides'])
     .then(() => ({ ok: true }));
 }
+
+// ─── Competitors (get_competitors / set_competitors) ─────────────────────────
+// The "VS. COMPETITORS" section in the Backlinks panel reads whatever
+// competitors a Web CEO project has configured, and until now those could only
+// be set in Web CEO's own UI — so for most installs that section was simply
+// absent. These two handlers make it configurable from the Client panel, which
+// is what turns an already-built feature on.
+//
+// ── An honesty note about the request shape ──────────────────────────────────
+// Every other method in this file follows one rigid convention: the payload is
+// `{ project: <id>, ...extras }`. That makes the READ a safe inference. The
+// WRITE has exactly one genuine unknown — what Web CEO calls the parameter
+// holding the list. Nothing in the API probe recorded it, and guessing wrong
+// would look identical to success: the call returns 200 and silently changes
+// nothing.
+//
+// So the write does not trust itself. It tries the plausible parameter names in
+// turn and RE-READS after each attempt, returning only once the value it sent
+// is actually there. If none of them take, it reports SHAPE_UNKNOWN with what
+// it tried, rather than telling the user their competitors were saved. When the
+// real name is confirmed, collapse SET_PARAM_CANDIDATES to that one entry.
+const SET_PARAM_CANDIDATES = ['competitors', 'competitor_domains', 'domains', 'sites'];
+
+// Web CEO could return the list as bare strings or as objects; normalise both
+// and drop anything that isn't a usable domain.
+function webceoNormalizeCompetitors(raw) {
+  const arr = Array.isArray(raw) ? raw
+    : (raw && (raw.competitors || raw.domains || raw.data)) || [];
+  if (!Array.isArray(arr)) return [];
+  return [...new Set(arr
+    .map(c => (typeof c === 'string' ? c : (c && (c.domain || c.url || c.site || c.name))) || '')
+    .map(s => String(s).trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, ''))
+    .filter(Boolean))];
+}
+
+async function webceoGetCompetitors({ pageUrl }) {
+  const { apiKey } = await webceoConfig();
+  if (!apiKey) return { connected: false };
+  const project = await webceoResolveProject({ pageUrl });
+  if (project.error) return { connected: true, error: project.error, detail: project.detail };
+  if (!project.project) return { connected: true, error: 'NO_PROJECT', host: gscPageHost(pageUrl) };
+
+  const res = await webceoCall('get_competitors', { project: project.project });
+  if (res.error) return { connected: true, error: res.error, detail: res.detail };
+  return { connected: true, competitors: webceoNormalizeCompetitors(res.data) };
+}
+
+async function webceoSetCompetitors({ pageUrl, competitors }) {
+  const { apiKey } = await webceoConfig();
+  if (!apiKey) return { connected: false };
+  const project = await webceoResolveProject({ pageUrl });
+  if (project.error) return { connected: true, error: project.error, detail: project.detail };
+  if (!project.project) return { connected: true, error: 'NO_PROJECT', host: gscPageHost(pageUrl) };
+
+  const wanted = webceoNormalizeCompetitors(competitors);
+
+  let lastError = null;
+  for (const param of SET_PARAM_CANDIDATES) {
+    const res = await webceoCall('set_competitors', { project: project.project, [param]: wanted });
+    if (res.error) { lastError = res; continue; }
+
+    // Verify rather than believe. A 200 with the wrong parameter name is
+    // indistinguishable from a successful write until you look.
+    const check = await webceoCall('get_competitors', { project: project.project });
+    if (check.error) return { connected: true, error: check.error, detail: check.detail };
+    const now = webceoNormalizeCompetitors(check.data);
+    const took = wanted.every(w => now.includes(w)) && now.length === wanted.length;
+    if (took) return { connected: true, ok: true, competitors: now, param };
+  }
+
+  return {
+    connected: true,
+    error: 'SHAPE_UNKNOWN',
+    detail: `set_competitors accepted none of: ${SET_PARAM_CANDIDATES.join(', ')}` +
+            (lastError ? ` (last API error: ${lastError.error}${lastError.detail ? ' — ' + lastError.detail : ''})` : ''),
+    tried: SET_PARAM_CANDIDATES
+  };
+}

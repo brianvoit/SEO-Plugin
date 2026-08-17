@@ -233,16 +233,59 @@ function activeChain() {
   return (_activeTrace && _activeTrace.hops) ? _activeTrace.hops.map(h => ({ ...h })) : [];
 }
 
-// What export / the export filename use: prefer the richer active trace
+// What the export FILENAME uses. The export body itself emits both chains —
+// see buildRedirectExportText — because picking one silently was the bug this
+// replaced: on any page reached by clicking a link, the active chain is a
+// single hop on the destination, and exporting only that dropped the very
+// redirect the user opened the panel to see.
 function displayChain() {
   const a = activeChain();
   return a.length ? a : tracedChain();
+}
+
+// The URL the active trace should re-request.
+//
+// Tracing tab.url is wrong whenever the browser followed a redirect to get
+// here: tab.url is the DESTINATION, which by definition has no redirects, so
+// the trace reported "0 redirects" for a link the Link Health overlay had
+// just flagged — the overlay probes the href as written on the linking page,
+// which is the URL that actually redirects. Two panels, two different
+// questions, contradictory-looking answers.
+//
+// Seeding from the passive chain's first hop makes both answer the same
+// question: what happens when you request the URL that was linked.
+// The URL the browser was originally asked for this session, if a redirect
+// brought us here. Null when the navigation went straight through.
+function passiveStartUrl() {
+  const passive = tracedChain();
+  const start = passive.length ? passive[0].url : null;
+  return (start && /^https?:/i.test(start)) ? start : null;
+}
+
+// The page currently in the tab, as the panel last saw it.
+function currentTabUrl() { return _activeTraceUrl; }
+
+// Compares URLs the way a reader would — a trailing slash is not a redirect.
+function sameUrl(a, b) {
+  const norm = (u) => String(u || '').replace(/#.*$/, '').replace(/\/$/, '');
+  return norm(a) === norm(b);
+}
+
+function activeTraceSeedUrl(tabUrl) {
+  const passive = tracedChain();
+  const start = passive.length ? passive[0].url : null;
+  return (start && /^https?:/i.test(start)) ? start : tabUrl;
 }
 
 // ─── Active trace lifecycle ──────────────────────────────────────────────────
 
 let _activeTrace = null;        // { startUrl, hops, finalUrl, error } | null
 let _activeTraceUrl = null;     // page URL the active trace was run for
+// Identity of the last trace: tab URL AND the seed it resolved to. The passive
+// chain arrives from the background asynchronously, so the seed can change
+// after a first render — keying on the tab URL alone would leave the panel
+// showing a trace of the destination forever.
+let _activeTraceKey = null;
 let _activeTraceLoading = false;
 
 async function ensureActiveTrace(force = false) {
@@ -251,20 +294,27 @@ async function ensureActiveTrace(force = false) {
   const url = tab && tab.url;
 
   if (!url || !/^https?:/i.test(url)) {
-    if (_activeTrace || _activeTraceUrl) { _activeTrace = null; _activeTraceUrl = null; _activeTraceLoading = false; renderRedirectPanel(); }
+    if (_activeTrace || _activeTraceUrl) {
+      _activeTrace = null; _activeTraceUrl = null; _activeTraceKey = null; _activeTraceLoading = false;
+      renderRedirectPanel();
+    }
     return;
   }
-  if (!force && _activeTraceUrl === url) return;   // already traced / in flight
+
+  const seed = activeTraceSeedUrl(url);
+  const key = `${url}::${seed}`;
+  if (!force && _activeTraceKey === key) return;   // already traced / in flight
 
   _activeTraceUrl = url;
+  _activeTraceKey = key;
   _activeTrace = null;
   _activeTraceLoading = true;
   renderRedirectPanel();
 
   let res;
-  try { res = await sendMessageWithTimeout({ action: 'traceUrl', pageUrl: url }); }
+  try { res = await sendMessageWithTimeout({ action: 'traceUrl', pageUrl: seed }); }
   catch { res = { error: 'TRACE_FAILED', hops: [] }; }
-  if (_activeTraceUrl !== url) return;              // navigated away while tracing
+  if (_activeTraceKey !== key) return;              // navigated away while tracing
 
   _activeTrace = res;
   _activeTraceLoading = false;
@@ -292,6 +342,14 @@ function renderRedirectPanel() {
     const chain = activeChain();
     renderHopChain(chainEl, chain, 'Could not trace this URL.' + (_activeTrace.error ? ` (${_activeTrace.error})` : ''));
     renderChainInsights(insightsEl, chain, { totalMs: chain.length ? chain.reduce((s, h) => s + (h.ms || 0), 0) : null });
+    // The trace may have started somewhere other than the page you're looking
+    // at. Without saying so, a chain that opens on a different host reads as a
+    // bug rather than as the answer to "what does that link do".
+    const arrivedFrom = passiveStartUrl();
+    if (arrivedFrom && !sameUrl(arrivedFrom, currentTabUrl())) {
+      appendIndexRow(insightsEl, 'ok',
+        `You arrived here via a redirect from ${arrivedFrom} — this trace starts there, not at the page you're on.`);
+    }
   } else {
     bar.classList.add('hidden');
     insightsEl.replaceChildren();
@@ -321,18 +379,17 @@ document.getElementById('btn-redirect-retrace').addEventListener('click', () => 
 
 function pad2(n) { return String(n).padStart(2, '0'); }
 
-function buildRedirectExportText() {
-  const chain = displayChain();
-  const now = new Date();
-  const stamp = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
+// One chain, rendered as the summary + numbered path the export has always
+// used. Pulled out so both chains can be written with identical formatting.
+function exportChainLines(chain, { totalMs } = {}) {
   const lines = [];
-  lines.push('Redirect Inspector — Redirect Trace');
-  lines.push(`Date: ${stamp}`);
   if (chain.length) {
     lines.push(`Start URL: ${chain[0].url}`);
     lines.push(`Final URL: ${chain[chain.length - 1].url}`);
     lines.push(`Final Status: ${chain[chain.length - 1].status}`);
     lines.push(`Redirects: ${countRedirects(chain)}`);
+  } else {
+    lines.push('(nothing recorded)');
   }
   lines.push('');
   lines.push('Redirect Path:');
@@ -348,8 +405,48 @@ function buildRedirectExportText() {
     if (extras.length) lines.push(`     ${extras.join(' · ')}`);
     if (hop.cookies && hop.cookies.length) lines.push(`     Cookies: ${hop.cookies.join(', ')}`);
   });
-  const total = _redirectInfo && _redirectInfo.totalMs;
-  if (total != null) { lines.push(''); lines.push(`Total time: ${total} ms`); }
+  if (totalMs != null) { lines.push(''); lines.push(`Total time: ${totalMs} ms`); }
+  return lines;
+}
+
+// Both chains, always, whenever both exist — never a silent pick between them.
+//
+// The export used to emit displayChain() alone, which prefers the active
+// trace. On any page reached by clicking a link that meant exporting a
+// single-hop trace of the DESTINATION and dropping the passively-recorded
+// chain that held the actual redirect. The file then read "Redirects: 0" for a
+// link that had just been flagged as a redirect, with no way to tell why.
+function buildRedirectExportText() {
+  const now = new Date();
+  const stamp = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
+  const active = activeChain();
+  const passive = tracedChain();
+
+  const lines = [];
+  lines.push('Redirect Inspector — Redirect Trace');
+  lines.push(`Date: ${stamp}`);
+  if (_activeTraceUrl) lines.push(`Page: ${_activeTraceUrl}`);
+  const arrivedFrom = passiveStartUrl();
+  if (arrivedFrom && !sameUrl(arrivedFrom, _activeTraceUrl)) {
+    lines.push(`Arrived via a redirect from: ${arrivedFrom}`);
+  }
+
+  if (active.length) {
+    lines.push('');
+    lines.push('=== LIVE TRACE (re-requested now) ===');
+    lines.push(...exportChainLines(active, { totalMs: active.reduce((t, h) => t + (h.ms || 0), 0) || null }));
+  }
+
+  if (passive.length) {
+    lines.push('');
+    lines.push('=== THIS SESSION (what the browser actually did) ===');
+    lines.push(...exportChainLines(passive, { totalMs: _redirectInfo && _redirectInfo.totalMs }));
+  }
+
+  if (!active.length && !passive.length) {
+    lines.push('');
+    lines.push('No redirect data for this page.');
+  }
   return lines.join('\n') + '\n';
 }
 

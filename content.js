@@ -1169,12 +1169,19 @@ const IS_TOP_FRAME = (() => {
   try { return window.top === window; } catch { return false; }   // cross-origin parent
 })();
 
-if (IS_TOP_FRAME) {
-  browser.storage.local.get(['altOverlayActive', 'linkOverlayActive']).then(({ altOverlayActive, linkOverlayActive }) => {
-    if (altOverlayActive) applyOverlay();
-    if (linkOverlayActive) applyLinkOverlay();
-  });
-}
+// The overlays are deliberately NOT restored on load.
+//
+// They used to be: both were global storage.local flags, and every top-frame
+// content script on every site read them at load and re-applied. Turning the
+// link overlay on once left it on everywhere, permanently — and because
+// applyLinkOverlay probes up to 300 URLs per page, that meant silently firing
+// hundreds of requests at third-party links on every page the user opened. It
+// only *looked* intermittent because outlines are drawn solely for links that
+// redirect or break, so a page of clean links showed nothing.
+//
+// State now lives in the two module variables below, which die with the
+// document. The overlay applies to the page it was switched on for and to
+// nothing else.
 
 // ─── Alt text generator ──────────────────────────────────────────────────────
 
@@ -2033,24 +2040,35 @@ wpsInit();
 // Each flips the persisted flag and applies/removes the on-page chips, then
 // resolves with the new state.
 
+// Per-document, per-tab, and gone on navigation — see the note above the
+// removed restore block for why these are not persisted.
+let _altOverlayOn = false;
+let _linkOverlayOn = false;
+
+// The panel's header buttons and the toolbar's right-click menu both need to
+// reflect a toggle they didn't initiate — the keyboard shortcuts and the menu
+// can flip these while the sidebar sits open. Storage used to carry that news;
+// now the content script announces it.
+function announceOverlayState() {
+  browser.runtime.sendMessage({
+    action: 'overlayStateChanged',
+    altOverlayActive: _altOverlayOn,
+    linkOverlayActive: _linkOverlayOn
+  }).catch(() => { /* nothing listening — the panel is closed */ });
+}
+
 function toggleAltOverlayState() {
-  return browser.storage.local.get('altOverlayActive').then(({ altOverlayActive }) => {
-    const next = !altOverlayActive;
-    return browser.storage.local.set({ altOverlayActive: next }).then(() => {
-      if (next) applyOverlay(); else removeOverlay();
-      return next;
-    });
-  });
+  _altOverlayOn = !_altOverlayOn;
+  if (_altOverlayOn) applyOverlay(); else removeOverlay();
+  announceOverlayState();
+  return Promise.resolve(_altOverlayOn);
 }
 
 function toggleLinkOverlayState() {
-  return browser.storage.local.get('linkOverlayActive').then(({ linkOverlayActive }) => {
-    const next = !linkOverlayActive;
-    return browser.storage.local.set({ linkOverlayActive: next }).then(() => {
-      if (next) applyLinkOverlay(); else removeLinkOverlay();
-      return next;
-    });
-  });
+  _linkOverlayOn = !_linkOverlayOn;
+  if (_linkOverlayOn) applyLinkOverlay(); else removeLinkOverlay();
+  announceOverlayState();
+  return Promise.resolve(_linkOverlayOn);
 }
 
 function toggleFollowActiveTabState() {
@@ -2107,15 +2125,11 @@ browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // Always respond, even if a single field-reader throws — a page-specific
     // DOM quirk in one helper must not reject the whole read and strand the
     // popup on "Cannot read this page".
-    browser.storage.local.get(['altOverlayActive', 'linkOverlayActive']).then(({ altOverlayActive, linkOverlayActive }) => {
-      let data;
-      try { data = getPageData(); } catch (e) { data = { _readError: String((e && e.message) || e) }; }
-      sendResponse({ ...data, altOverlayActive: !!altOverlayActive, linkOverlayActive: !!linkOverlayActive });
-    }).catch(() => {
-      let data;
-      try { data = getPageData(); } catch (e) { data = { _readError: String((e && e.message) || e) }; }
-      sendResponse(data);
-    });
+    // No storage read here any more: the overlay state is this document's own,
+    // so it is answered synchronously from the module variables.
+    let data;
+    try { data = getPageData(); } catch (e) { data = { _readError: String((e && e.message) || e) }; }
+    sendResponse({ ...data, altOverlayActive: _altOverlayOn, linkOverlayActive: _linkOverlayOn });
     return true;
   }
 
@@ -2152,6 +2166,13 @@ browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     try { res = phrasesPresence(message.terms); }
     catch { res = { present: [] }; }
     sendResponse(res);
+    return true;
+  }
+
+  // Read-only peek at this page's overlay state, for the toolbar menu's
+  // checkmarks. Synchronous — it is just the two module variables.
+  if (message.action === 'getOverlayState') {
+    sendResponse({ altOverlayActive: _altOverlayOn, linkOverlayActive: _linkOverlayOn });
     return true;
   }
 

@@ -36,6 +36,10 @@
     "popup-redirects.js::onMessage-promise-return": {
       "status": "intentional",
       "reason": "False positive. popup-redirects.js:377 is a fire-and-forget listener for the redirectUpdated broadcast — it never needs to reply, so having no sendResponse is correct on both browsers."
+    },
+    "popup-inspector.js::onMessage-promise-return": {
+      "status": "intentional",
+      "reason": "False positive, same shape as popup-redirects.js. The overlayStateChanged listener exists only to repaint the two header toggle buttons when an overlay is flipped from the page side (Alt+I / Alt+L, or the toolbar menu). It never replies, so having no sendResponse is correct on both browsers."
     }
   }
 }

@@ -13,13 +13,18 @@
 // page, so the script re-runs whenever the background wakes, and removeAll →
 // create is self-healing if the item ever goes missing. onInstalled alone fires
 // only on install/update.
-// Right-clicking the toolbar button exposes the three global toggles, so they
-// can be flipped without opening the panel. All three are plain storage.local
-// flags, which is what lets the menu, the popup and the content script stay in
-// agreement (each observes storage rather than owning the state).
+// Right-clicking the toolbar button exposes three toggles so they can be
+// flipped without opening the panel.
+//
+// They are NOT all the same kind of state. `followActiveTab` is a genuine
+// global preference and lives in storage.local. The two overlays are per-page
+// and are owned by the content script — they used to be storage flags too, and
+// that is exactly what made the link overlay reappear on every site forever
+// once it had been switched on anywhere. So their checkmarks are read from the
+// tab, not from storage, and an unreachable tab means "off".
 const SEO_TOGGLE_MENUS = [
-  { id: 'seo-toggle-alt',    title: 'Alt Text Overlay',    key: 'altOverlayActive',  fallback: false },
-  { id: 'seo-toggle-links',  title: 'Link Health Overlay', key: 'linkOverlayActive', fallback: false },
+  { id: 'seo-toggle-alt',    title: 'Alt Text Overlay',    key: 'altOverlayActive',  fallback: false, perPage: true },
+  { id: 'seo-toggle-links',  title: 'Link Health Overlay', key: 'linkOverlayActive', fallback: false, perPage: true },
   { id: 'seo-toggle-follow', title: 'Follow Active Tab',   key: 'followActiveTab',   fallback: true }
 ];
 
@@ -28,6 +33,20 @@ const SEO_TOGGLE_MENUS = [
 function seoToggleChecked(item, stored) {
   const value = stored[item.key];
   return value === undefined ? item.fallback : !!value;
+}
+
+// Ask the active tab which overlays it currently has on. A page with no
+// content script (about:, the PDF viewer, AMO) answers nothing, which is
+// correct — it can't have an overlay.
+async function activeTabOverlayState() {
+  try {
+    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+    if (!tab) return {};
+    const res = await browser.tabs.sendMessage(tab.id, { action: 'getOverlayState' }, { frameId: 0 });
+    return res || {};
+  } catch {
+    return {};
+  }
 }
 
 // Firefox's richer `menus` namespace where available (it alone has onShown /
@@ -56,14 +75,26 @@ function registerSeoMenus() {
 registerSeoMenus();
 browser.runtime.onInstalled.addListener(registerSeoMenus);
 
+// One-time cleanup for installs that predate per-page overlays. Nothing reads
+// these keys any more, but an install that had the link overlay switched on
+// would otherwise carry a stale `true` around forever, and the next person to
+// read storage would reasonably assume it still meant something.
+browser.runtime.onInstalled.addListener(() => {
+  browser.storage.local.remove(['altOverlayActive', 'linkOverlayActive']).catch(() => {});
+});
+
 // Push current storage state onto the checkmarks. Safe to call at any time —
 // menus.update on a missing id just rejects, which is why it's swallowed.
 async function syncToggleCheckmarks() {
   if (!menus) return;
-  const stored = await browser.storage.local.get(SEO_TOGGLE_MENUS.map(m => m.key));
-  await Promise.all(SEO_TOGGLE_MENUS.map(item =>
-    Promise.resolve(menus.update(item.id, { checked: seoToggleChecked(item, stored) })).catch(() => {})
-  ));
+  const [stored, live] = await Promise.all([
+    browser.storage.local.get(SEO_TOGGLE_MENUS.filter(m => !m.perPage).map(m => m.key)),
+    activeTabOverlayState()
+  ]);
+  await Promise.all(SEO_TOGGLE_MENUS.map(item => {
+    const checked = item.perPage ? !!live[item.key] : seoToggleChecked(item, stored);
+    return Promise.resolve(menus.update(item.id, { checked })).catch(() => {});
+  }));
 }
 
 if (menus && menus.onShown) {
@@ -76,13 +107,19 @@ if (menus && menus.onShown) {
   });
 } else if (menus) {
   // Chrome has neither onShown nor refresh, so the lazy approach is impossible
-  // — the checkmarks have to be pushed eagerly instead. All three toggles are
-  // storage.local flags written by four different places (this menu, the
-  // content script, the panel's header button, and the Alt+I/L/F shortcuts),
-  // so observing storage catches every one of them.
+  // — the checkmarks have to be pushed eagerly instead. followActiveTab is a
+  // storage flag, so watching storage catches it; the two per-page overlays
+  // are pushed by the handlers below.
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
-    if (SEO_TOGGLE_MENUS.some(m => m.key in changes)) syncToggleCheckmarks();
+    if (SEO_TOGGLE_MENUS.some(m => !m.perPage && m.key in changes)) syncToggleCheckmarks();
+  });
+  // The per-page overlays never touch storage, so their checkmarks follow the
+  // content script's announcement — and the active tab itself, since switching
+  // or reloading a tab changes the answer without anything being toggled.
+  browser.tabs.onActivated.addListener(() => syncToggleCheckmarks());
+  browser.tabs.onUpdated.addListener((_id, info, tab) => {
+    if (info.status === 'complete' && tab.active) syncToggleCheckmarks();
   });
   syncToggleCheckmarks();   // and once on wake, since the worker restarts often
 }
@@ -109,14 +146,14 @@ menus.onClicked.addListener(async (info, tab) => {
     return;
   }
 
-  // The overlays are owned by the content script — it flips storage AND
-  // applies/removes the on-page chips. Top frame only, matching every other
+  // The overlays are owned by the content script — it holds the per-page state
+  // AND applies/removes the on-page chips. Top frame only, matching every other
   // page read (see TOP_FRAME in popup-shared.js).
   const action = item.key === 'altOverlayActive' ? 'toggleAltOverlay' : 'toggleLinkOverlay';
   try {
     await browser.tabs.sendMessage(tab.id, { action }, { frameId: 0 });
   } catch {
-    // No content script here (about:, PDF viewer, AMO), so storage was never
+    // No content script here (about:, PDF viewer, AMO), so nothing was
     // flipped — but the browser has already ticked the checkbox optimistically.
     // Firefox self-corrects via onShown on next open; Chrome has no such hook,
     // so put the checkmark back explicitly or it stays wrong indefinitely.

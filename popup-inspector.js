@@ -1779,13 +1779,17 @@ function renderLinkOverlayToggle(active) {
   document.getElementById('btn-link-overlay').setAttribute('aria-pressed', String(active));
 }
 
-// The overlays can also be toggled from the toolbar button's right-click menu,
-// so mirror storage back into the header buttons — otherwise an open panel
-// would keep showing the pre-toggle state.
-browser.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'local') return;
-  if (changes.altOverlayActive)  renderOverlayToggle(!!changes.altOverlayActive.newValue);
-  if (changes.linkOverlayActive) renderLinkOverlayToggle(!!changes.linkOverlayActive.newValue);
+// The overlays can also be flipped from the toolbar button's right-click menu
+// or the Alt+I/Alt+L shortcuts, so the header buttons have to reflect a change
+// this panel didn't initiate — visibly so in sidebar mode, where the panel
+// stays open the whole time.
+//
+// This used to watch storage. The overlay state is per-page now and lives in
+// the content script, so the content script announces it instead.
+browser.runtime.onMessage.addListener((msg) => {
+  if (!msg || msg.action !== 'overlayStateChanged') return;
+  renderOverlayToggle(!!msg.altOverlayActive);
+  renderLinkOverlayToggle(!!msg.linkOverlayActive);
 });
 
 // ─── Render: all ────────────────────────────────────────────────────────────

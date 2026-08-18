@@ -55,6 +55,10 @@ function routeMessage(message) {
     case 'dnsResolve':         return dnsResolve(message);
     case 'psiGetPageSpeed':    return psiGetPageSpeed(message);
     case 'checkLinks':         return checkLinkStatuses(message);
+    // Announced by the content script when an overlay is toggled from the page
+    // side (keyboard shortcut, or the toolbar menu). Chrome has no onShown, so
+    // its checkmarks only stay right if something pushes them.
+    case 'overlayStateChanged': syncToggleCheckmarks(); return { ok: true };
     case 'validateFavicon':    return validateFavicon(message);
     case 'clearFaviconCache':  return clearFaviconCache(message);
     case 'webceoGetStatus':      return webceoGetStatus();

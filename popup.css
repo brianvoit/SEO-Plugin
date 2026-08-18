@@ -1178,6 +1178,23 @@ body.settings-open #update-footer { margin-top: auto; }
   border: 1px solid var(--border);
 }
 .redirect-tag--final { color: var(--hint-green); border-color: var(--hint-green); }
+/* Sits left of Initial/Final. Muted on purpose — it is a note about how the
+   hop was served, not a verdict on the hop. */
+.redirect-tag--cached { color: var(--text-muted); border-color: var(--text-muted); }
+
+/* Inline hop timing, immediately right of the status pill. Fixed width so the
+   URLs beneath each other still line up when one hop reports 45 ms and the
+   next reports 1204 ms. */
+.redirect-ms {
+  flex-shrink: 0;
+  /* Fits "1204 ms" and no more — this column is taken straight out of the
+     URL's width, and the URL is the thing people are reading. */
+  min-width: 44px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: right;
+}
 
 /* Active-trace header bar (traced-from + re-trace) */
 .redirect-trace-bar {

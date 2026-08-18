@@ -121,10 +121,22 @@ function hopLevel(hop, isFinal) {
   return redirectStatusClass(hop.status);
 }
 
+// Everything about a hop, for the export — which is plain text and has no row
+// to inline anything into.
 function hopExtras(hop) {
   const parts = [];
   if (hop.ms != null) parts.push(`${hop.ms} ms`);
   if (hop.fromCache) parts.push('cached');
+  if (hop.cookies && hop.cookies.length) parts.push(`${hop.cookies.length} cookie${hop.cookies.length !== 1 ? 's' : ''}`);
+  if (hop.xRobots) parts.push(`X-Robots: ${hop.xRobots}`);
+  return parts;
+}
+
+// The subset that still needs a line of its own on screen. Timing and the
+// cache flag are rendered inline in the row, so only the wordy ones remain —
+// and a hop with neither gets no second line at all.
+function hopExtrasBelow(hop) {
+  const parts = [];
   if (hop.cookies && hop.cookies.length) parts.push(`${hop.cookies.length} cookie${hop.cookies.length !== 1 ? 's' : ''}`);
   if (hop.xRobots) parts.push(`X-Robots: ${hop.xRobots}`);
   return parts;
@@ -141,6 +153,13 @@ function buildHopRow(hop, isFinal, isFirst) {
   status.className = `redirect-status redirect-status--${hopLevel(hop, isFinal)}`;
   status.textContent = hop.status;
   row.appendChild(status);
+
+  if (hop.ms != null) {
+    const ms = document.createElement('span');
+    ms.className = 'redirect-ms';
+    ms.textContent = `${hop.ms} ms`;
+    row.appendChild(ms);
+  }
 
   const type = document.createElement('span');
   type.className = 'redirect-type';
@@ -159,6 +178,14 @@ function buildHopRow(hop, isFinal, isFirst) {
   }
   row.appendChild(url);
 
+  if (hop.fromCache) {
+    const cached = document.createElement('span');
+    cached.className = 'redirect-tag redirect-tag--cached';
+    cached.textContent = 'Cached';
+    cached.title = 'Served from the browser cache, not refetched';
+    row.appendChild(cached);
+  }
+
   if (isFirst || isFinal) {
     const tag = document.createElement('span');
     tag.className = 'redirect-tag' + (isFinal ? ' redirect-tag--final' : '');
@@ -168,7 +195,7 @@ function buildHopRow(hop, isFinal, isFirst) {
 
   wrap.appendChild(row);
 
-  const extras = hopExtras(hop);
+  const extras = hopExtrasBelow(hop);
   if (extras.length) {
     const meta = document.createElement('div');
     meta.className = 'redirect-hop-meta';
@@ -213,7 +240,7 @@ function renderChainInsights(insightsEl, chain, { totalMs = null, meta = null } 
     appendIndexRow(insightsEl, 'warning', `Meta-refresh redirect → ${meta.url}${meta.delay != null ? ` after ${meta.delay}s` : ''} — a server 301 is better for SEO.`);
   }
 
-  if (totalMs != null) {
+  if (totalMs != null && redirectCount >= 1) {
     appendIndexRow(insightsEl, totalMs > 1500 ? 'warning' : 'ok', `Total redirect+load time: ${totalMs} ms.`);
   }
 }

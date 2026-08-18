@@ -541,10 +541,13 @@ function appendOGRow(container, key, value, insights = null) {
   body.appendChild(detailEl);
 
   if (OG_GENERABLE_KEYS.has(key)) {
-    // Show intent/sentiment chips on existing value rows (only when a value is present)
+    // Intent/sentiment ride along on the detail line rather than claiming a
+    // row of their own — they describe the same value the character count
+    // does, and a third line per field pushed the four generable rows well
+    // past a screenful. Only when a value is actually present.
     if (present && insights && typeof buildInsightChips === 'function') {
       const chips = buildInsightChips(insights);
-      if (chips) body.appendChild(chips);
+      if (chips) detailEl.appendChild(chips);
     }
     const resultEl = document.createElement('div');
     resultEl.className = 'gen-result hidden';

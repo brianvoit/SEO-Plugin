@@ -1315,7 +1315,18 @@ body.settings-open #update-footer { margin-top: auto; }
 .og-value--link { color: var(--accent); cursor: pointer; }
 .og-value--link:hover { text-decoration: underline; }
 
-.og-detail { font-size: 11px; margin-top: 1px; }
+/* The character count and the intent/sentiment chips share this line, so it
+   is a flex row. It wraps rather than squeezing the count when a narrow popup
+   can't fit both. */
+.og-detail {
+  font-size: 11px;
+  margin-top: 1px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.og-detail .og-insight-chips { margin-top: 0; }
 .og-row--ok      .og-detail { color: var(--text-muted); }
 .og-row--warning .og-detail { color: var(--hint-amber); }
 .og-row--error   .og-detail { color: var(--hint-red); }

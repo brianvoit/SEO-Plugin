@@ -213,3 +213,53 @@ describe('the filename still resolves', () => {
     );
   });
 });
+
+// ─── Auto-opening the session chain ───────────────────────────────────────────
+
+describe('the session chain opens itself when it disagrees', () => {
+  const fns = new Function(`
+    ${src.slice(src.indexOf('function chainSignature('), src.indexOf('// The URL the browser was originally asked for'))}
+    return { chainSignature, chainsDiffer };
+  `)();
+
+  const ACTIVE_REDIRECT = [{ url: WWW, status: 301 }, { url: PMC, status: 200 }];
+  const DIRECT = [{ url: PMC, status: 200 }];
+
+  test('a live trace with a redirect against a session record without one differs', () => {
+    // The exact case that hid the bug: the two panels told different stories
+    // and the one holding the evidence was folded shut.
+    assert.equal(fns.chainsDiffer(ACTIVE_REDIRECT, DIRECT), true);
+  });
+
+  test('identical chains do not differ, so it stays collapsed', () => {
+    assert.equal(fns.chainsDiffer(ACTIVE_REDIRECT, [...ACTIVE_REDIRECT]), false);
+  });
+
+  test('a status change alone counts as different', () => {
+    assert.equal(fns.chainsDiffer([{ url: PMC, status: 200 }], [{ url: PMC, status: 500 }]), true);
+  });
+
+  test('a trailing slash or fragment is not a difference', () => {
+    assert.equal(fns.chainsDiffer(
+      [{ url: 'https://a.com/x/', status: 200 }],
+      [{ url: 'https://a.com/x#top', status: 200 }]
+    ), false);
+  });
+
+  test('an empty live trace is not a disagreement', () => {
+    // Still loading, or the trace failed — there is nothing to disagree with,
+    // and popping the section open mid-load would be noise.
+    assert.equal(fns.chainsDiffer([], DIRECT), false);
+    assert.equal(fns.chainsDiffer(ACTIVE_REDIRECT, []), false);
+  });
+
+  test('the decision is keyed, so a manual collapse survives a re-render', () => {
+    assert.match(src, /if \(_passiveAutoOpenKey !== key\) \{/);
+    assert.match(src, /passive\.open = chainsDiffer\(activeChain\(\), pChain\)/);
+  });
+
+  test('the key resets when the section goes away', () => {
+    const block = src.slice(src.indexOf("passive.classList.add('hidden')"));
+    assert.match(block.slice(0, 120), /_passiveAutoOpenKey = null/);
+  });
+});

@@ -281,6 +281,27 @@ function displayChain() {
 //
 // Seeding from the passive chain's first hop makes both answer the same
 // question: what happens when you request the URL that was linked.
+// Identity of a chain for comparison: its hops' URLs and statuses. Trailing
+// slashes and fragments are normalised the same way sameUrl does, so a chain
+// is never called "different" over punctuation.
+function chainSignature(chain) {
+  return (chain || [])
+    .map(h => `${String(h.url || '').replace(/#.*$/, '').replace(/\/$/, '')}|${h.status}`)
+    .join(' > ');
+}
+
+// Do the live trace and the session record tell different stories? An empty
+// live trace (still loading, or it failed) is not a disagreement — there is
+// nothing yet to disagree with.
+function chainsDiffer(active, passive) {
+  if (!active.length || !passive.length) return false;
+  return chainSignature(active) !== chainSignature(passive);
+}
+
+// Remembers which comparison the auto-open decision was made for, so a manual
+// collapse is not undone by the next render.
+let _passiveAutoOpenKey = null;
+
 // The URL the browser was originally asked for this session, if a redirect
 // brought us here. Null when the navigation went straight through.
 function passiveStartUrl() {
@@ -392,8 +413,22 @@ function renderRedirectPanel() {
     renderHopChain(document.getElementById('redirect-passive-chain'), pChain, '');
     renderChainInsights(document.getElementById('redirect-passive-insights'), pChain,
       { totalMs: _redirectInfo && _redirectInfo.totalMs, meta: _redirectMeta });
+
+    // Open it on its own when it disagrees with the live trace — that is the
+    // case worth reading, and leaving it folded away is what hid the missing
+    // redirect in the first place. When the two agree it stays collapsed,
+    // since expanding it would just show the same chain twice.
+    //
+    // Only applied when the comparison itself changes, so a manual collapse
+    // survives the re-renders that arrive as the trace and the tab update.
+    const key = `${chainSignature(activeChain())}||${chainSignature(pChain)}`;
+    if (_passiveAutoOpenKey !== key) {
+      _passiveAutoOpenKey = key;
+      passive.open = chainsDiffer(activeChain(), pChain);
+    }
   } else {
     passive.classList.add('hidden');
+    _passiveAutoOpenKey = null;
   }
 
   // Kick off (or refresh) the active trace for the current page

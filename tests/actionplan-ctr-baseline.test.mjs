@@ -115,12 +115,14 @@ describe('the other corrections to the context', () => {
     assert.doesNotMatch(src, /Toxic links flagged/);
   });
 
-  test('the E-E-A-T block states the real schema list, not just authorship', () => {
-    // "Author schema present: no" alone was being generalised into "the page
-    // has no schema", contradicting the plan's own Trustworthiness note.
-    assert.match(src, /- Structured data on the page: \$\{schemaTypes\.length/);
-    assert.match(src, /Author\/Person schema present/);
-    assert.match(src, /this is about authorship only, not whether the page has schema/);
+  test('the model is no longer asked to reason about schema for trust at all', () => {
+    // The schema contradiction ("schema is absent" beside a Trustworthiness
+    // note saying LocalBusiness was present) is now structurally impossible:
+    // the E-E-A-T SIGNALS block is gone, and schema completeness is decided by
+    // the rule engine's hasOrganizationSchema / hasOrganizationSameAs.
+    assert.doesNotMatch(src, /## E-E-A-T SIGNALS \(from page structure\)/);
+    assert.doesNotMatch(src, /Author\/Person schema present/);
+    assert.match(src, /## PAGE ROLE & FRESHNESS/);
   });
 
   test('a homepage is identified as one', () => {

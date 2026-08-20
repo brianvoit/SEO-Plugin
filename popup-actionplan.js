@@ -94,7 +94,27 @@ async function gatherActionPlanData(tab) {
     send({ action: 'webceoGetBacklinks', pageUrl: tab.url, cacheOnly: true })
   ]);
 
-  return { gsc, ads, webceo, tracked, ga, adAssets, negatives, phrases, psi, audit, backlinks };
+  // Trust signals + the client's gating profile, run through the E-E-A-T rule
+  // engine here rather than in the prompt: the engine decides what is
+  // actionable, and the model only phrases what it allowed.
+  let trustSignals = null;
+  try { trustSignals = await browser.tabs.sendMessage(tab.id, { action: 'getTrustSignals' }, TOP_FRAME); }
+  catch { trustSignals = null; }
+
+  let trustClient = null;
+  try {
+    const host = new URL(tab.url).hostname.replace(/^www\./, '').toLowerCase();
+    const found = await send({ action: 'clientRegistryFindByDomain', domain: host });
+    trustClient = (found && found.client) || null;
+  } catch { trustClient = null; }
+
+  // No signals means no engine run — a page we could not read must produce no
+  // trust findings at all rather than a set derived from nothing.
+  const trust = (trustSignals && !trustSignals._readError && typeof evaluateTrustRules === 'function')
+    ? evaluateTrustRules(trustSignals, trustClient)
+    : null;
+
+  return { gsc, ads, webceo, tracked, ga, adAssets, negatives, phrases, psi, audit, backlinks, trust };
 }
 
 // GSC queries split into the two bands that drive surgical wins.
@@ -467,21 +487,10 @@ function actionPlanContext(g) {
     });
   }
 
-  // E-E-A-T signals derived from page structure (always included)
-  const hasAuthorSchema = (pd.structuredData || []).some(s => {
-    const types = [].concat(s['@type'] || []);
-    if (types.some(t => ['Person','Author'].includes(t))) return true;
-    if (s.author && (s.author.name || [].concat(s.author['@type'] || []).some(t => t === 'Person'))) return true;
-    return false;
-  });
-  lines.push('\n## E-E-A-T SIGNALS (from page structure)');
-  // The schema list is repeated here on purpose. It appears in the PAGE block
-  // forty lines earlier, and a bare "Author schema present: no" sitting alone
-  // in this section was being generalised into "the page has no schema" —
-  // producing a recommendation that flatly contradicted the same plan's own
-  // Trustworthiness note. Both readings now come from one line.
-  lines.push(`- Structured data on the page: ${schemaTypes.length ? schemaTypes.join(', ') : 'none'}`);
-  lines.push(`- Author/Person schema present: ${hasAuthorSchema ? 'yes' : 'no'} (this is about authorship only, not whether the page has schema)`);
+  // Page role and freshness. Trust assessment used to live here as a set of
+  // raw structural facts the model graded for itself; that is now the rule
+  // engine's job, and what remains is evidence other recommendations use.
+  lines.push('\n## PAGE ROLE & FRESHNESS');
   lines.push(`- Published date: ${pd.dates?.published || 'not found'}`);
   lines.push(`- Modified date: ${pd.dates?.modified || 'not found'}`);
   if (pd.externalLinkCount != null) lines.push(`- External links in body: ${pd.externalLinkCount}`);
@@ -498,6 +507,12 @@ function actionPlanContext(g) {
     : urlPath.includes('/contact') ? 'contact'
     : 'general';
   lines.push(`- URL pattern: ${pathType}`);
+
+  // The rule engine's decisions. Everything organic-trust related is decided
+  // before the model sees the prompt — see popup-trust.js for why.
+  if (g.trust && typeof trustRulesPromptBlock === 'function') {
+    lines.push(...trustRulesPromptBlock(g.trust));
+  }
 
   return lines.join('\n');
 }
@@ -531,12 +546,12 @@ Rules:
 - Return 3–8 recommendations total. Order by impact within each effort tier.${ACTION_PLAN_CRAFT_RULES}
 
 Respond with ONLY a compact JSON object, no prose, no code fences, exactly:
-{"recommendations":[{"change":"…","evidence":"…","effort":"surgical|moderate|rewrite","impact":"high|medium|low","channel":"seo|paid|both"}],"contentGaps":["…","…"],"intentGap":{"pageIntent":"…","trafficIntent":"…","divergence":true,"summary":"…","suggestions":["…","…","…","…","…","…","…","…"]}}
+{"recommendations":[{"change":"…","evidence":"…","effort":"surgical|moderate|rewrite","impact":"high|medium|low","channel":"seo|paid|both"}],"contentGaps":["…","…"],"intentGap":{"pageIntent":"…","trafficIntent":"…","divergence":true,"summary":"…","suggestions":["…","…","…","…","…","…","…","…"]},"trust":{"recommendations":[{"ruleId":"…","change":"…","evidence":"…"}]}}
 - "change": the action to take (imperative, specific).
 - "evidence": the data behind it, citing the actual numbers.
 - "contentGaps": short topic labels (2–4 words) the page should cover but doesn't. 0–8 items.
 - "intentGap": include ONLY when TRAFFIC INTENT DISTRIBUTION is present in the input. If the page's evident purpose (from its title, headings, and content) diverges significantly from the dominant traffic intent, set "divergence":true, "pageIntent" to the intent the page targets (one of: Informational, Navigational, Commercial, Transactional), "trafficIntent" to the dominant incoming intent, "summary" to one sentence explaining the mismatch and opportunity, and "suggestions" to exactly 8 diverse keyword phrases — range from head to long-tail, no brand terms — that the page should be visible for given its actual purpose. If no significant divergence exists, omit "intentGap" entirely.
-- "eeat": using the E-E-A-T SIGNALS block, assess the page's Experience/Expertise/Authoritativeness/Trustworthiness and include: "score" ("strong", "moderate", or "weak"), "signals" (array of up to 4 objects with "dimension" (one of: Experience, Expertise, Authoritativeness, Trustworthiness) and "observation" (one sentence on what you found or inferred)), and "gaps" (array of 2–4 specific actionable improvements, e.g. "Add an author bio with credentials above the fold").`;
+- "trust": phrasing for the E-E-A-T RULES block, and nothing else. One entry per FIRED rule, each with "ruleId" (copied exactly), "change" (that rule's recommendation rewritten against THIS page's actual copy — quote the real sentence or heading you mean) and "evidence" (what on the page triggered it). Do NOT invent a ruleId, do NOT include a suppressed rule, and do NOT assign an impact, effort or score — those are decided already. Omit "trust" entirely if no rule fired.`;
 
 // ─── The two specialized prompts ──────────────────────────────────────────────
 //
@@ -579,9 +594,9 @@ Emphasis, in order:
 
 Every recommendation must use channel "seo".
 
-${ACTION_PLAN_JSON_CONTRACT.replace('REPLACE_EXTRAS', `,"intentGap":{…},"eeat":{…}`)}
+${ACTION_PLAN_JSON_CONTRACT.replace('REPLACE_EXTRAS', `,"intentGap":{…},"trust":{…}`)}
 - "contentGaps": short topic labels (2–4 words) the page should cover but doesn't. 0–8 items.${ACTION_PLAN_INTENT_CLAUSE}
-- "eeat": using the E-E-A-T SIGNALS block, include "score" ("strong"|"moderate"|"weak"), "signals" (up to 4 objects with "dimension" (Experience|Expertise|Authoritativeness|Trustworthiness) and "observation"), and "gaps" (2–4 specific actionable improvements).
+- "trust": phrasing for the E-E-A-T RULES block, and nothing else. One entry per FIRED rule, each with "ruleId" (copied exactly), "change" (that rule's recommendation rewritten against THIS page's actual copy — quote the real sentence or heading you mean) and "evidence" (what on the page triggered it). Do NOT invent a ruleId, do NOT include a suppressed rule, and do NOT assign an impact, effort or score — those are decided already. Omit "trust" entirely if no rule fired.
 ${ACTION_PLAN_CRAFT_RULES}`;
 
 const ACTION_PLAN_SYSTEM_PAID = `You are an elite Google Ads strategist. You are given a landing page's CONTENT and every signal available for it: its Google Ads campaigns, ad groups, ads, keywords and search terms, plus Search Console organic queries, Web CEO rankings, GA4 behaviour and Core Web Vitals.
@@ -604,7 +619,7 @@ Every recommendation must use channel "paid".
 
 ${ACTION_PLAN_JSON_CONTRACT.replace('REPLACE_EXTRAS', `,"intentGap":{…}`)}
 - "contentGaps": short labels (2–4 words) for topics the paid traffic wants that this landing page never addresses — these hurt Quality Score and conversion rate. 0–8 items.${ACTION_PLAN_INTENT_CLAUSE}
-- Do NOT include an "eeat" key. E-E-A-T is an organic ranking concept and has no place in a paid plan.`;
+- Do NOT include a "trust" key. E-E-A-T is an organic concept and has no place in a paid plan.`;
 
 const ACTION_PLAN_SYSTEMS = {
   overview: ACTION_PLAN_SYSTEM,
@@ -630,7 +645,7 @@ const _CHANNELS = ['seo', 'paid', 'both'];
 
 // Enforce a variant's contract on the parsed result, rather than trusting the
 // prompt to have been obeyed. Models follow negative instructions ("do NOT
-// include eeat") unreliably, and both leaks are user-visible: a stray E-E-A-T
+// include trust") unreliably, and both leaks are user-visible: a stray trust
 // block appears in a paid plan, and a mislabelled channel is printed into the
 // RTF and Google Doc exports, where the tag is text rather than a hidden chip.
 // Cheap to enforce, so enforce it.
@@ -638,7 +653,9 @@ function applyVariantContract(plan, variant) {
   if (!plan || variant === 'overview') return plan;
   const channel = variant === 'paid' ? 'paid' : 'seo';
   plan.recommendations.forEach(r => { r.channel = channel; });
-  if (variant === 'paid') delete plan.eeat;
+  // `eeat` is gone from the contract; the delete remains for a plan restored
+  // from a cache entry written by the previous build, whose TTL has not expired.
+  if (variant === 'paid') { delete plan.eeat; delete plan.trust; }
   return plan;
 }
 
@@ -665,18 +682,48 @@ function normalizeActionPlan(raw) {
       suggestions:   raw.intentGap.suggestions.slice(0, 8).map(s => String(s || '').trim()).filter(Boolean)
     };
   }
-  if (raw.eeat && raw.eeat.score) {
-    const EEAT_SCORES = ['strong', 'moderate', 'weak'];
-    out.eeat = {
-      score:   EEAT_SCORES.includes(String(raw.eeat.score).toLowerCase()) ? String(raw.eeat.score).toLowerCase() : 'moderate',
-      signals: (Array.isArray(raw.eeat.signals) ? raw.eeat.signals : []).slice(0, 4).map(s => ({
-        dimension:   String(s.dimension   || '').trim(),
-        observation: String(s.observation || '').trim()
-      })).filter(s => s.dimension && s.observation),
-      gaps: (Array.isArray(raw.eeat.gaps) ? raw.eeat.gaps : []).slice(0, 4).map(s => String(s || '').trim()).filter(Boolean)
-    };
-  }
   return out;
+}
+
+/**
+ * Merge the model's phrasing onto the engine's decisions.
+ *
+ * The engine is authoritative about WHICH rules fired and what they are worth;
+ * the model contributes only wording. So a ruleId the model invented is
+ * dropped, and a fired rule the model skipped still ships, using the engine's
+ * own text. Nothing the model returns can add, remove, or re-grade a rule —
+ * which is what makes the output comparable across clients and defensible in
+ * front of one.
+ */
+function mergeTrustPhrasing(raw, trust) {
+  if (!trust) return null;
+  const phrased = new Map();
+  const list = raw && raw.trust && Array.isArray(raw.trust.recommendations) ? raw.trust.recommendations : [];
+  list.forEach(r => {
+    const id = String((r && r.ruleId) || '').trim();
+    if (id) phrased.set(id, { change: String(r.change || '').trim(), evidence: String(r.evidence || '').trim() });
+  });
+
+  const recommendations = trust.fired.map(f => {
+    const p = phrased.get(f.ruleId) || {};
+    return {
+      ruleId: f.ruleId,
+      tier: f.tier,
+      change: p.change || f.recommendation,       // engine text is the fallback, never a gap
+      evidence: p.evidence || f.trigger,
+      trigger: f.trigger,                          // always the engine's, so it can be defended
+      impact: f.impact,
+      effort: f.effort,
+      ...(f.ceiling ? { ceiling: f.ceiling } : {})
+    };
+  });
+
+  return {
+    checklist: trust.checklist,
+    recommendations,
+    findings: trust.findings,
+    caveat: trust.caveat
+  };
 }
 
 // ─── Main entry: generate (or render from cache) ──────────────────────────────
@@ -749,8 +796,15 @@ async function loadActionPlan(forceRefresh = false, variant = _apVariant) {
         messages: [{ role: 'user', content: context }]
       })
     });
-    const plan = applyVariantContract(normalizeActionPlan(actionPlanParse(claudeText(data))), variant);
+    const parsed = actionPlanParse(claudeText(data));
+    const plan = applyVariantContract(normalizeActionPlan(parsed), variant);
     if (!plan) throw new Error('Could not parse a plan from the response.');
+    // Attached after the variant contract, which strips trust from the Paid
+    // plan — an organic concept has no place there.
+    if (variant !== 'paid') {
+      const merged = mergeTrustPhrasing(parsed, gathered.trust);
+      if (merged && (merged.recommendations.length || merged.checklist.length)) plan.trust = merged;
+    }
 
     st.plan = plan;
     st.sources = sources;
@@ -1060,54 +1114,106 @@ function renderActionPlanPanel() {
     root.appendChild(sec);
   }
 
-  // E-E-A-T signals
-  const eeat = _actionPlan.eeat;
-  if (eeat && eeat.score) {
+  // Trust signals — the rule engine's checklist and whatever fired, with the
+  // model's phrasing merged on. Deliberately not a grade: the old
+  // strong/moderate/weak badge implied a score Google does not assign and was
+  // not comparable between two clients.
+  const trust = _actionPlan.trust;
+  if (trust && (trust.checklist.length || trust.recommendations.length)) {
     const sec = document.createElement('section');
     sec.className = 'field-section';
     const h = document.createElement('div');
     h.className = 'field-header';
     const lbl = document.createElement('span');
     lbl.className = 'field-label';
-    lbl.textContent = 'E-E-A-T SIGNALS';
-    const scoreBadge = document.createElement('span');
-    scoreBadge.className = `ap-eeat-score ap-eeat-score--${eeat.score}`;
-    scoreBadge.textContent = eeat.score.charAt(0).toUpperCase() + eeat.score.slice(1);
+    lbl.textContent = 'TRUST SIGNALS';
     h.appendChild(lbl);
-    h.appendChild(scoreBadge);
     sec.appendChild(h);
 
-    if (eeat.signals && eeat.signals.length) {
-      const grid = document.createElement('div');
-      grid.className = 'ap-eeat-signals';
-      eeat.signals.forEach(s => {
+    if (trust.checklist.length) {
+      const list = document.createElement('div');
+      list.className = 'ap-trust-checklist';
+      trust.checklist.forEach(c => {
         const row = document.createElement('div');
-        row.className = 'ap-eeat-signal-row';
-        const dim = document.createElement('span');
-        dim.className = 'ap-eeat-dimension';
-        dim.textContent = s.dimension;
-        const obs = document.createElement('span');
-        obs.className = 'ap-eeat-observation';
-        obs.textContent = s.observation;
-        row.append(dim, obs);
-        grid.appendChild(row);
+        row.className = `ap-trust-row ap-trust-row--${c.state}`;
+        const box = document.createElement('span');
+        box.className = 'ap-trust-box';
+        box.textContent = c.state === 'met' ? '✓' : c.state === 'na' ? '–' : '✗';
+        const label = document.createElement('span');
+        label.className = 'ap-trust-label';
+        label.textContent = c.label;
+        row.append(box, label);
+        if (c.state === 'na') {
+          // The reason is the whole point of n/a: it separates "does not apply
+          // to this client" from "missing", so the gating is visible.
+          const why = document.createElement('span');
+          why.className = 'ap-trust-na';
+          why.textContent = c.reason || 'not applicable';
+          why.title = c.reason || '';
+          row.appendChild(why);
+        }
+        list.appendChild(row);
       });
-      sec.appendChild(grid);
+      sec.appendChild(list);
     }
 
-    if (eeat.gaps && eeat.gaps.length) {
-      const gapsHeader = document.createElement('div');
-      gapsHeader.className = 'ap-eeat-gaps-label';
-      gapsHeader.textContent = 'Improvements';
-      sec.appendChild(gapsHeader);
-      const gapsList = document.createElement('ul');
-      gapsList.className = 'ap-eeat-gaps';
-      eeat.gaps.forEach(g => {
-        const li = document.createElement('li');
-        li.textContent = g;
-        gapsList.appendChild(li);
-      });
-      sec.appendChild(gapsList);
+    trust.recommendations.forEach(r => {
+      const card = document.createElement('div');
+      card.className = 'ap-rec ap-rec--moderate ap-trust-rec';
+
+      const top = document.createElement('div');
+      top.className = 'ap-rec-top';
+      const change = document.createElement('div');
+      change.className = 'ap-rec-change';
+      change.textContent = r.change;
+      top.appendChild(change);
+
+      const tags = document.createElement('div');
+      tags.className = 'ap-rec-tags';
+      const idTag = document.createElement('span');
+      idTag.className = 'ap-tag ap-trust-rule';
+      idTag.textContent = r.ruleId;
+      idTag.title = `Triggered by: ${r.trigger}`;
+      tags.appendChild(idTag);
+      const eff = document.createElement('span');
+      eff.className = `ap-tag ap-tag--${r.effort}`;
+      eff.textContent = r.effort;
+      tags.appendChild(eff);
+      const imp = document.createElement('span');
+      imp.className = `ap-tag ap-tag-impact--${r.impact}`;
+      imp.textContent = r.impact;
+      tags.appendChild(imp);
+      top.appendChild(tags);
+      card.appendChild(top);
+
+      const ev = document.createElement('div');
+      ev.className = 'ap-rec-evidence';
+      ev.textContent = r.evidence;
+      card.appendChild(ev);
+
+      if (r.ceiling) {
+        // What the recommendation cannot achieve. Stated so nobody spends a
+        // sprint chasing a rich result the entity type cannot produce.
+        const c = document.createElement('div');
+        c.className = 'ap-trust-ceiling';
+        c.textContent = r.ceiling;
+        card.appendChild(c);
+      }
+      sec.appendChild(card);
+    });
+
+    (trust.findings || []).forEach(f => {
+      const el = document.createElement('div');
+      el.className = 'field-hint hint-muted ap-trust-finding';
+      el.textContent = f.text;
+      sec.appendChild(el);
+    });
+
+    if (trust.caveat) {
+      const cav = document.createElement('div');
+      cav.className = 'field-hint hint-muted ap-trust-caveat';
+      cav.textContent = trust.caveat;
+      sec.appendChild(cav);
     }
 
     root.appendChild(sec);
@@ -1222,17 +1328,22 @@ async function exportActionPlanRtf() {
     parts.push(`\\par Phrase suggestions:\\par ${rtfEscape(gap.suggestions.join(' / '))}\\par`);
   }
 
-  const eeat = _actionPlan.eeat;
-  if (eeat && eeat.score) {
-    parts.push(`\\par{\\b\\fs26 E-E-A-T Signals}\\par`);
-    parts.push(`Score: ${rtfEscape(eeat.score.charAt(0).toUpperCase() + eeat.score.slice(1))}\\par`);
-    (eeat.signals || []).forEach(s => {
-      parts.push(`{\\b ${rtfEscape(s.dimension)}:} ${rtfEscape(s.observation)}\\par`);
+  const trust = _actionPlan.trust;
+  if (trust && (trust.checklist.length || trust.recommendations.length)) {
+    parts.push(`\\par{\\b\\fs26 Trust Signals}\\par`);
+    trust.checklist.forEach(c => {
+      const mark = c.state === 'met' ? '[x]' : c.state === 'na' ? '[n/a]' : '[ ]';
+      parts.push(`${rtfEscape(mark)} ${rtfEscape(c.label)}${c.state === 'na' && c.reason ? ` \\u8212? ${rtfEscape(c.reason)}` : ''}\\par`);
     });
-    if (eeat.gaps && eeat.gaps.length) {
-      parts.push(`\\par Improvements:\\par`);
-      eeat.gaps.forEach(g => parts.push(`\\u8226? ${rtfEscape(g)}\\par`));
-    }
+    if (trust.recommendations.length) parts.push('\\par');
+    trust.recommendations.forEach(r => {
+      parts.push(`{\\b ${rtfEscape(r.change)}}  {\\i [${rtfEscape(r.ruleId)} \\u183? ${rtfEscape(r.effort)} \\u183? ${rtfEscape(r.impact)} impact]}\\par`);
+      parts.push(`${rtfEscape(r.evidence)}\\par`);
+      if (r.ceiling) parts.push(`{\\i ${rtfEscape(r.ceiling)}}\\par`);
+      parts.push('\\par');
+    });
+    (trust.findings || []).forEach(f => parts.push(`${rtfEscape(f.text)}\\par`));
+    if (trust.caveat) parts.push(`\\par{\\i ${rtfEscape(trust.caveat)}}\\par`);
   }
 
   const rtf = `{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Helvetica;}}\\f0\\fs22 ${parts.join('')}}`;

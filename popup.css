@@ -3469,6 +3469,32 @@ body.settings-open #update-footer { margin-top: auto; }
 }
 .ap-suggestion-chip:hover { background: var(--heading-tag-bg); border-color: var(--accent); color: var(--accent); }
 
+/* ── Action Plan: trust signals ───────────────────────────────────────────── */
+.ap-trust-checklist { display: flex; flex-direction: column; gap: 3px; margin: 6px 0 10px; }
+.ap-trust-row { display: flex; align-items: baseline; gap: 7px; font-size: 12px; }
+.ap-trust-box { flex-shrink: 0; width: 12px; text-align: center; font-weight: 700; }
+.ap-trust-row--met   .ap-trust-box { color: var(--hint-green); }
+.ap-trust-row--unmet .ap-trust-box { color: var(--hint-amber); }
+/* n/a is muted throughout: it is not a failure, and must not read as one. */
+.ap-trust-row--na    .ap-trust-box,
+.ap-trust-row--na    .ap-trust-label { color: var(--text-muted); }
+.ap-trust-label { color: var(--text); }
+.ap-trust-na { color: var(--text-muted); font-size: 11px; font-style: italic; }
+.ap-trust-rule { color: var(--accent); border: 1px solid var(--accent); background: none; cursor: help; font-family: ui-monospace, "SF Mono", Menlo, monospace; text-transform: none; }
+/* Trust cards stack: a rule id like R-REVIEW-DISPLAY-NOSTARS is far wider than
+   an effort chip, and side-by-side it crushed the recommendation into a
+   four-line column. The text is the part being read. */
+.ap-trust-rec .ap-rec-top { flex-direction: column; align-items: flex-start; gap: 6px; }
+.ap-trust-rec .ap-rec-tags { flex-wrap: wrap; }
+.ap-trust-ceiling {
+  margin-top: 5px;
+  padding-left: 8px;
+  border-left: 2px solid var(--hint-amber);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.ap-trust-finding, .ap-trust-caveat { margin-top: 8px; font-style: italic; }
+
 /* ── Client Registry ─────────────────────────────────────────────────────── */
 
 .client-trust-select { width: 100%; margin-top: 3px; }

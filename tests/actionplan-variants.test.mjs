@@ -68,7 +68,13 @@ describe('the original prompt is intact', () => {
     ['the 3-8 recommendation cap',     /Return 3–8 recommendations total/],
     ['the intentGap contract',         /"intentGap": include ONLY when TRAFFIC INTENT DISTRIBUTION is present/],
     ['the exactly-8-suggestions rule', /exactly 8 diverse keyword phrases/],
-    ['the eeat contract',              /"eeat": using the E-E-A-T SIGNALS block/]
+    // Phase 3 of the E-E-A-T module spec replaced the model-authored eeat
+    // assessment with a deterministic rule engine, so this pin moved with it.
+    // The prompt no longer asks the model to grade anything — only to phrase
+    // the rules the engine already decided should fire.
+    ['the trust-phrasing contract',    /"trust": phrasing for the E-E-A-T RULES block, and nothing else/],
+    ['the no-inventing-rules rule',    /Do NOT invent a ruleId, do NOT include a suppressed rule/],
+    ['the no-self-grading rule',       /do NOT assign an impact, effort or score/]
   ];
   invariants.forEach(([what, re]) => {
     test(`still contains ${what}`, () => {
@@ -133,15 +139,24 @@ describe('every variant still sees every source', () => {
 // ─── Extras contract per variant ──────────────────────────────────────────────
 
 describe('which extras each variant asks for', () => {
-  test('the SEO plan asks for content gaps, intent gap and E-E-A-T', () => {
+  test('the SEO plan asks for content gaps, intent gap and trust phrasing', () => {
     assert.match(P.seo, /"contentGaps"/);
     assert.match(P.seo, /"intentGap"/);
-    assert.match(P.seo, /"eeat"/);
+    assert.match(P.seo, /"trust": phrasing/);
   });
 
-  test('the Paid plan asks for intent gap but explicitly refuses E-E-A-T', () => {
+  test('the Paid plan asks for intent gap but explicitly refuses trust', () => {
     assert.match(P.paid, /"intentGap"/);
-    assert.match(P.paid, /Do NOT include an "eeat" key/);
+    assert.match(P.paid, /Do NOT include a "trust" key/);
+  });
+
+  test('no prompt asks the model to grade E-E-A-T any more', () => {
+    // The grade implied a score Google does not assign, and was not comparable
+    // between two clients. The engine emits an observable checklist instead.
+    [P.overview, P.seo, P.paid].forEach(t => {
+      assert.doesNotMatch(t, /"score" \("strong"/);
+      assert.doesNotMatch(t, /Authoritativeness/);
+    });
   });
 
   test('the Paid plan frames content gaps as a Quality Score problem, not an organic one', () => {

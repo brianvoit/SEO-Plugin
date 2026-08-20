@@ -131,18 +131,31 @@ function buildActionPlanHtml(plan, docTitle, fetchedAt) {
     }
   }
 
-  const eeat = plan.eeat;
-  if (eeat && eeat.score) {
-    out.push('<h2>E-E-A-T Signals</h2>');
-    const scoreLabel = eeat.score.charAt(0).toUpperCase() + eeat.score.slice(1);
-    out.push(`<p><b>Score: ${htmlEsc(scoreLabel)}</b></p>`);
-    (eeat.signals || []).forEach(s => {
-      out.push(`<p><b>${htmlEsc(s.dimension)}:</b> ${htmlEsc(s.observation)}</p>`);
-    });
-    if (eeat.gaps && eeat.gaps.length) {
-      out.push('<p><b>Improvements:</b></p>');
-      out.push('<ul>' + eeat.gaps.map(g => `<li>${htmlEsc(g)}</li>`).join('') + '</ul>');
+  // Trust signals. No score: the old strong/moderate/weak grade implied a
+  // value Google does not assign and was not comparable between two clients.
+  // A checklist of observable signals is both.
+  const trust = plan.trust;
+  if (trust && ((trust.checklist || []).length || (trust.recommendations || []).length)) {
+    out.push('<h2>Trust Signals</h2>');
+
+    if ((trust.checklist || []).length) {
+      out.push('<ul>' + trust.checklist.map(c => {
+        const mark = c.state === 'met' ? '&#10004;' : c.state === 'na' ? '&ndash;' : '&#10007;';
+        // n/a carries its reason, so a reader can tell "does not apply to this
+        // client" from "missing" instead of the gating being invisible.
+        const why = (c.state === 'na' && c.reason) ? ` <i>(${htmlEsc(c.reason)})</i>` : '';
+        return `<li>${mark} ${htmlEsc(c.label)}${why}</li>`;
+      }).join('') + '</ul>');
     }
+
+    (trust.recommendations || []).forEach(r => {
+      out.push(`<p><b>${htmlEsc(r.change)}</b> <i>[${htmlEsc(r.ruleId)} &middot; ${htmlEsc(r.effort)} &middot; ${htmlEsc(r.impact)} impact]</i></p>`);
+      out.push(`<p>${htmlEsc(r.evidence)}</p>`);
+      if (r.ceiling) out.push(`<p style="color:${GRAY}"><i>${htmlEsc(r.ceiling)}</i></p>`);
+    });
+
+    (trust.findings || []).forEach(f => out.push(`<p style="color:${GRAY}">${htmlEsc(f.text)}</p>`));
+    if (trust.caveat) out.push(`<p style="color:${GRAY};font-size:10pt"><i>${htmlEsc(trust.caveat)}</i></p>`);
   }
 
   return `<html><head><meta charset="utf-8"></head><body>${out.join('')}</body></html>`;

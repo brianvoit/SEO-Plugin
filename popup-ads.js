@@ -2862,7 +2862,12 @@ function adsFriendlyType(t) {
 }
 
 const ADS_PERF_LABELS = { BEST: 'Best', GOOD: 'Good', LOW: 'Low', LEARNING: 'Learning', PENDING: 'Pending' };
-function adsPerfLabel(l) { return ADS_PERF_LABELS[l] || (l ? l.toLowerCase().replace(/^\w/, c => c.toUpperCase()) : ''); }
+// Only the five known ratings get a chip. The background already nulls out the
+// enums that mean "no rating" (NOT_APPLICABLE and friends); this is the second
+// line of defence, so a value Google adds later shows nothing rather than a
+// raw enum dressed up as a verdict — which is exactly how NOT_APPLICABLE came
+// to sit on every row.
+function adsPerfLabel(l) { return ADS_PERF_LABELS[l] || ''; }
 function adsPerfClass(l) {
   if (l === 'BEST') return 'best';
   if (l === 'GOOD') return 'good';
@@ -3110,10 +3115,11 @@ function makeAssetRow(item, max, onGenerate, matchCount) {
   const cached = _adAssetInsights[(item.text || '').toLowerCase()];
   if (cached) { const c = buildInsightChips(cached); if (c) chips.appendChild(c); }
   badges.appendChild(chips);
-  if (item.label) {
+  const perf = adsPerfLabel(item.label);
+  if (perf) {
     const b = document.createElement('span');
     b.className = 'asset-perf asset-perf--' + adsPerfClass(item.label);
-    b.textContent = adsPerfLabel(item.label);
+    b.textContent = perf;
     badges.appendChild(b);
   }
   const pin = adsPinLabel(item.pinned);

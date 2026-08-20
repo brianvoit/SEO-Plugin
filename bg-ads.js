@@ -504,6 +504,17 @@ async function adsGetChartData({ pageUrl, range, scope }) {
 // each text asset's performance rating. Google does not expose per-asset
 // impressions/clicks for RSAs — the performance_label (LOW/GOOD/BEST/LEARNING/
 // PENDING) is the signal. Returns { ads: { [adId]: {type,name,headlines,descriptions} } }.
+// Enum values that mean "Google has no performance rating for this asset",
+// as opposed to a rating. They are the API's way of saying null, and rendering
+// them verbatim put a NOT_APPLICABLE chip on every row that read like a
+// verdict. PENDING and LEARNING are deliberately NOT here — those are real
+// states worth showing ("rated soon" / "still gathering data").
+const ADS_NO_PERF_LABEL = new Set(['NOT_APPLICABLE', 'UNSPECIFIED', 'UNKNOWN']);
+function adsPerfLabelOrNull(label) {
+  const v = String(label || '').toUpperCase();
+  return (!v || ADS_NO_PERF_LABEL.has(v)) ? null : label;
+}
+
 async function adsGetAdsDetail({ pageUrl, adIds }) {
   const tokenResult = await adsGetAccessToken();
   if (tokenResult.error) return { error: tokenResult.error };
@@ -528,7 +539,8 @@ async function adsGetAdsDetail({ pageUrl, adIds }) {
   if (creativeRes.error) return { error: creativeRes.error, detail: creativeRes.detail };
 
   // Performance label / enabled, keyed adId → (fieldType::text). asset_view is
-  // the only place the rating lives; missing labels just render as no badge.
+  // the only place the rating lives; an absent or non-rating label is stored as
+  // null here so every consumer sees one representation of "not rated".
   const labelMap = new Map();
   (assetRes.rows || []).forEach(r => {
     const adId = String(r.adGroupAd?.ad?.id || '');
@@ -536,7 +548,7 @@ async function adsGetAdsDetail({ pageUrl, adIds }) {
     const text = r.asset?.textAsset?.text;
     if (!adId || !v || text == null) return;
     if (!labelMap.has(adId)) labelMap.set(adId, new Map());
-    labelMap.get(adId).set(`${v.fieldType}::${text}`, { label: v.performanceLabel || null, enabled: v.enabled !== false });
+    labelMap.get(adId).set(`${v.fieldType}::${text}`, { label: adsPerfLabelOrNull(v.performanceLabel), enabled: v.enabled !== false });
   });
 
   const ads = {};

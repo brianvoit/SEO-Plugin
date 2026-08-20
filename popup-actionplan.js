@@ -98,6 +98,26 @@ async function gatherActionPlanData(tab) {
 }
 
 // GSC queries split into the two bands that drive surgical wins.
+// What CTR a position should earn, from the same curve the Web CEO visibility
+// score uses. Two things matter here:
+//   * GSC positions are fractional averages (6.9) and the curve is integer
+//     indexed, so an unrounded lookup silently returns undefined.
+//   * typeof-guarded, per the house rule for calling across popup files.
+function actionPlanExpectedCtr(position) {
+  if (typeof webceoCtrForPosition !== 'function') return 0;
+  if (position == null || position <= 0) return 0;
+  return webceoCtrForPosition(Math.round(position)) || 0;
+}
+
+// A query is a snippet problem only if it earns materially less than its
+// POSITION would predict. A flat threshold cannot tell those apart: at
+// position 7 a 0.4% CTR is a tenth of par and genuinely broken, while at
+// position 13 a 1.2% CTR is slightly ABOVE par and has nothing wrong with its
+// snippet at all — it has a ranking problem. The old `ctr < 0.02` rule flagged
+// both, so every page-two keyword read as a title/meta failure.
+const LOW_CTR_PAR_RATIO = 0.5;      // "less than half the clicks its position should earn"
+const LOW_CTR_MAX_POS = 20;         // past page two, CTR is too small to reason about
+
 function actionPlanGscBands(gsc) {
   const queries = (gsc && gsc.connected && Array.isArray(gsc.queries)) ? gsc.queries : [];
   // Page-2 trap: already relevant (position 5–20) but stranded — sorted by reach
@@ -105,9 +125,15 @@ function actionPlanGscBands(gsc) {
     .filter(q => q.position >= 5 && q.position <= 20 && q.impressions >= 50)
     .sort((a, b) => b.impressions - a.impressions)
     .slice(0, 12);
-  // Title/meta problem: lots of impressions, poor click-through
+  // Genuine snippet problem: enough impressions to be meaningful, and well
+  // under the CTR its position predicts. The expectation travels with the row
+  // so the prompt can state the gap instead of the model inferring one.
   const lowCtr = queries
-    .filter(q => q.impressions >= 200 && q.ctr < 0.02 && q.position <= 15)
+    .map(q => ({ ...q, expectedCtr: actionPlanExpectedCtr(q.position) }))
+    .filter(q => q.impressions >= 200
+      && q.position <= LOW_CTR_MAX_POS
+      && q.expectedCtr > 0
+      && q.ctr < q.expectedCtr * LOW_CTR_PAR_RATIO)
     .sort((a, b) => b.impressions - a.impressions)
     .slice(0, 8);
   return { pageTwo, lowCtr, count: queries.length };
@@ -240,7 +266,11 @@ function actionPlanTechLines(g) {
   if (bl && bl.connected && !bl.error && !bl.notCached && bl.referringDomains != null) {
     lines.push('\n## BACKLINKS (authority)');
     lines.push(`  Site: ${bl.referringDomains} referring domains, ${bl.total} links (${bl.nofollow} nofollow), max Trust Flow ${bl.maxTF ?? 'n/a'}`);
-    if (bl.toxic) lines.push(`  Toxic links flagged: ${bl.toxic}`);
+    // Toxic-link counts are deliberately NOT passed. Google states it ignores
+    // the overwhelming majority of spam links, disavow-first advice is long out
+    // of date, and pruning them is expensive work — so a count in the prompt
+    // reliably bought a confident "disavow 876 links" recommendation that was
+    // not worth anyone's time. The Backlinks panel still shows the number.
     const tp = bl.thisPage;
     if (tp) {
       lines.push(`  THIS PAGE specifically: ${tp.referringDomains} referring domains, ${tp.total} links`);
@@ -295,8 +325,11 @@ function actionPlanContext(g) {
       bands.pageTwo.forEach(q => lines.push(`  "${q.query}" — ${q.impressions} impr/period, position ${q.position.toFixed(1)}, CTR ${(q.ctr * 100).toFixed(1)}%`));
     }
     if (bands.lowCtr.length) {
-      lines.push('High-impressions / low-CTR (title or meta problem, not content):');
-      bands.lowCtr.forEach(q => lines.push(`  "${q.query}" — ${q.impressions} impr, position ${q.position.toFixed(1)}, CTR ${(q.ctr * 100).toFixed(1)}%`));
+      lines.push('Underperforming the CTR their POSITION predicts (a snippet problem — title/meta, not content).');
+      lines.push('Every row here is already position-adjusted: a query is only listed if it earns less than half what its position should.');
+      bands.lowCtr.forEach(q => lines.push(
+        `  "${q.query}" — ${q.impressions} impr, position ${q.position.toFixed(1)}, ` +
+        `CTR ${(q.ctr * 100).toFixed(1)}% vs ~${(q.expectedCtr * 100).toFixed(1)}% typical at that position`));
     }
   }
 
@@ -442,12 +475,24 @@ function actionPlanContext(g) {
     return false;
   });
   lines.push('\n## E-E-A-T SIGNALS (from page structure)');
-  lines.push(`- Author schema present: ${hasAuthorSchema ? 'yes' : 'no'}`);
+  // The schema list is repeated here on purpose. It appears in the PAGE block
+  // forty lines earlier, and a bare "Author schema present: no" sitting alone
+  // in this section was being generalised into "the page has no schema" —
+  // producing a recommendation that flatly contradicted the same plan's own
+  // Trustworthiness note. Both readings now come from one line.
+  lines.push(`- Structured data on the page: ${schemaTypes.length ? schemaTypes.join(', ') : 'none'}`);
+  lines.push(`- Author/Person schema present: ${hasAuthorSchema ? 'yes' : 'no'} (this is about authorship only, not whether the page has schema)`);
   lines.push(`- Published date: ${pd.dates?.published || 'not found'}`);
   lines.push(`- Modified date: ${pd.dates?.modified || 'not found'}`);
   if (pd.externalLinkCount != null) lines.push(`- External links in body: ${pd.externalLinkCount}`);
   const urlPath = (pd.canonical || '').toLowerCase();
-  const pathType = urlPath.includes('/blog/') || urlPath.includes('/article') ? 'blog/article'
+  // Homepage detection is its own case: without it every homepage classified as
+  // "general", and the model happily recommended absorbing four separate
+  // services into it. A homepage's job is its primary term plus links down.
+  let pathname = '';
+  try { pathname = new URL(pd.canonical).pathname; } catch { pathname = ''; }
+  const pathType = (pathname === '/' || pathname === '') ? 'homepage'
+    : urlPath.includes('/blog/') || urlPath.includes('/article') ? 'blog/article'
     : urlPath.includes('/product') ? 'product'
     : urlPath.includes('/about')   ? 'about'
     : urlPath.includes('/contact') ? 'contact'
@@ -456,6 +501,20 @@ function actionPlanContext(g) {
 
   return lines.join('\n');
 }
+
+// Craft rules shared by the Overview and SEO prompts. Written once because
+// they are corrections to real, observed output — duplicating them across two
+// prompts would guarantee they drift.
+//
+// Every line here exists because a shipped plan got it wrong:
+//   * it recommended putting a keyword in the meta description "for ranking";
+//   * it pushed near-me phrasing into a snippet a human reads;
+//   * it proposed absorbing four separate services into a homepage.
+const ACTION_PLAN_CRAFT_RULES = `
+- The meta description is NOT a ranking input. Never recommend adding a keyword to it in order to rank. It is a click-through lever only: recommend meta changes to win the click, and put keyword placement for RANKING in the title tag, an H1/H2, or body copy.
+- Prefer a real city or place name over "near me" phrasing in anything a searcher reads. "Minneapolis" converts better in a snippet or headline than "near me"; if proximity phrasing is genuinely wanted, "near you" reads correctly to a human, "near me" does not.
+- Respect the page's role, given by URL pattern in the E-E-A-T block. A homepage should target its primary term and LINK DOWN to service pages; do not recommend absorbing several distinct services into it. Distinct services deserve their own pages, and recommending one page cover them all is a worse plan than recommending the pages be built.
+- A low CTR is only a snippet problem when it is below what the position predicts, and the GSC block has already done that comparison for you. Never infer a title/meta problem from a raw CTR number, and never call a page-two ranking a CTR failure — at position 13 a 1% CTR is normal, and the fix is rank, not the snippet.`;
 
 const ACTION_PLAN_SYSTEM = `You are an elite SEO and answer-engine-optimization strategist. You are given a single web page's CONTENT (supply) and its DEMAND data (Google Search Console queries, Google Ads search terms/keywords, Web CEO tracked rankings, GA4 behavior). Your job is to find the gap between what the market asks for and what the page actually says, and return surgical, evidence-backed recommendations.
 
@@ -468,7 +527,7 @@ Rules:
 - effort is one of: "surgical" (minutes — tweak a title/heading/sentence), "moderate" (an hour — add a section/FAQ/schema), "rewrite" (major — reposition intent or restructure the page).
 - impact is one of: "high", "medium", "low".
 - channel is one of: "seo" (organic-only change), "paid" (a bid, negative-keyword, or ad-copy change), "both" (one change that helps organic relevance AND paid Quality Score — e.g. adding page content the converting paid terms demand). Prefer "both" when a single page change does double duty.
-- Return 3–8 recommendations total. Order by impact within each effort tier.
+- Return 3–8 recommendations total. Order by impact within each effort tier.${ACTION_PLAN_CRAFT_RULES}
 
 Respond with ONLY a compact JSON object, no prose, no code fences, exactly:
 {"recommendations":[{"change":"…","evidence":"…","effort":"surgical|moderate|rewrite","impact":"high|medium|low","channel":"seo|paid|both"}],"contentGaps":["…","…"],"intentGap":{"pageIntent":"…","trafficIntent":"…","divergence":true,"summary":"…","suggestions":["…","…","…","…","…","…","…","…"]}}
@@ -521,7 +580,8 @@ Every recommendation must use channel "seo".
 
 ${ACTION_PLAN_JSON_CONTRACT.replace('REPLACE_EXTRAS', `,"intentGap":{…},"eeat":{…}`)}
 - "contentGaps": short topic labels (2–4 words) the page should cover but doesn't. 0–8 items.${ACTION_PLAN_INTENT_CLAUSE}
-- "eeat": using the E-E-A-T SIGNALS block, include "score" ("strong"|"moderate"|"weak"), "signals" (up to 4 objects with "dimension" (Experience|Expertise|Authoritativeness|Trustworthiness) and "observation"), and "gaps" (2–4 specific actionable improvements).`;
+- "eeat": using the E-E-A-T SIGNALS block, include "score" ("strong"|"moderate"|"weak"), "signals" (up to 4 objects with "dimension" (Experience|Expertise|Authoritativeness|Trustworthiness) and "observation"), and "gaps" (2–4 specific actionable improvements).
+${ACTION_PLAN_CRAFT_RULES}`;
 
 const ACTION_PLAN_SYSTEM_PAID = `You are an elite Google Ads strategist. You are given a landing page's CONTENT and every signal available for it: its Google Ads campaigns, ad groups, ads, keywords and search terms, plus Search Console organic queries, Web CEO rankings, GA4 behaviour and Core Web Vitals.
 

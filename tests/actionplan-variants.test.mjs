@@ -41,6 +41,7 @@ function prompts() {
   const decls = [
     grab('ACTION_PLAN_JSON_CONTRACT'),
     grab('ACTION_PLAN_INTENT_CLAUSE'),
+    grab('ACTION_PLAN_CRAFT_RULES'),
     grab('ACTION_PLAN_SYSTEM'),
     grab('ACTION_PLAN_SYSTEM_SEO'),
     grab('ACTION_PLAN_SYSTEM_PAID')
@@ -465,5 +466,59 @@ describe('the Paid plan knows which negatives already exist', () => {
 
   test('the ADS block still renders when negatives are the only Ads signal', () => {
     assert.match(src, /weakAds\.length \|\| negCount\)/);
+  });
+});
+
+// ─── Craft rules, from real output review ─────────────────────────────────────
+
+describe('corrections drawn from a reviewed plan', () => {
+  test('the meta description is stated not to be a ranking input', () => {
+    // A shipped plan recommended putting "residential architects near me" in
+    // the meta description to rank. It is a click-through lever only.
+    [P.overview, P.seo].forEach(p => {
+      assert.match(p, /meta description is NOT a ranking input/);
+      assert.match(p, /keyword placement for RANKING in the title tag, an H1\/H2, or body copy/);
+    });
+  });
+
+  test('city names are preferred over near-me phrasing in reader-facing text', () => {
+    [P.overview, P.seo].forEach(p => assert.match(p, /Prefer a real city or place name over "near me"/));
+  });
+
+  test('"near you" is named as the correct form if proximity phrasing is used', () => {
+    [P.overview, P.seo].forEach(p => assert.match(p, /"near you" reads correctly to a human/));
+  });
+
+  test('a homepage is told to link down rather than absorb services', () => {
+    // The reviewed plan proposed covering basement finishing, sunrooms, ADUs
+    // and extensions all on one homepage.
+    [P.overview, P.seo].forEach(p => {
+      assert.match(p, /A homepage should target its primary term and LINK DOWN to service pages/);
+      assert.match(p, /Distinct services deserve their own pages/);
+    });
+  });
+
+  test('the model is told the CTR comparison is already done for it', () => {
+    [P.overview, P.seo].forEach(p => {
+      assert.match(p, /Never infer a title\/meta problem from a raw CTR number/);
+      assert.match(p, /at position 13 a 1% CTR is normal/);
+    });
+  });
+
+  test('they are scoped to Overview and SEO, not Paid', () => {
+    // Paid recommends ad copy, not snippets; these are organic craft rules.
+    assert.doesNotMatch(P.paid, /meta description is NOT a ranking input/);
+    assert.doesNotMatch(P.paid, /LINK DOWN to service pages/);
+  });
+
+  test('they live in one place, so the two prompts cannot drift', () => {
+    assert.match(src, /const ACTION_PLAN_CRAFT_RULES = /);
+    assert.equal((src.match(/\$\{ACTION_PLAN_CRAFT_RULES\}/g) || []).length, 2);
+  });
+
+  test('the shared JSON contract does not carry them', () => {
+    // It is shared with the Paid prompt, and is declared before the rules.
+    const jc = src.slice(src.indexOf('const ACTION_PLAN_JSON_CONTRACT = '));
+    assert.doesNotMatch(jc.slice(0, 900), /ACTION_PLAN_CRAFT_RULES/);
   });
 });

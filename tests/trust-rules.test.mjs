@@ -171,6 +171,33 @@ describe('client gating', () => {
     assert.ok(firedIds(s, client({ businessModel: 'ecommerce', hasGbp: true })).includes('R-ADDRESS'));
   });
 
+  test('third-party verification follows the GBP too, for mixed clients', () => {
+    // A mixed ecommerce/lead-gen client is filed under one business_model, so
+    // gating on that alone silently denied this rule to the lead-gen half.
+    // R-ADDRESS and the review rule were already covered; this one was the
+    // remaining gap.
+    const s = clean({ hasThirdPartyProof: false });
+    assert.ok(!firedIds(s, client({ businessModel: 'ecommerce', hasGbp: false })).includes('R-THIRDPARTY'));
+    assert.ok(firedIds(s, client({ businessModel: 'ecommerce', hasGbp: true })).includes('R-THIRDPARTY'));
+  });
+
+  test('a publisher still never sees it', () => {
+    // The gate has to keep excluding somebody, or it is not a gate.
+    const s = clean({ hasThirdPartyProof: false });
+    assert.ok(suppressedIds(s, client({ businessModel: 'publisher', hasGbp: false })).includes('R-THIRDPARTY'));
+  });
+
+  test('the two GBP-aware gates agree with each other', () => {
+    // R-ADDRESS and R-THIRDPARTY answer the same question — "does this client
+    // have a real-world footprint" — and must not diverge.
+    const s = clean({ hasVisibleAddress: false, hasThirdPartyProof: false });
+    [['ecommerce', true], ['ecommerce', false], ['b2b_technical', false], ['publisher', true]].forEach(([bm, gbp]) => {
+      const fired = firedIds(s, client({ businessModel: bm, hasGbp: gbp }));
+      if (bm === 'b2b_technical') return;   // third-party only, by design
+      assert.equal(fired.includes('R-ADDRESS'), fired.includes('R-THIRDPARTY'), `${bm}/${gbp}`);
+    });
+  });
+
   test('suppression states its reason', () => {
     const [x] = evaluateTrustRules(clean(), client({ ymyl: 'none' })).suppressed.filter(r => r.ruleId === 'R-CREDENTIALS');
     assert.match(x.reason, /not a YMYL or regulated vertical/);

@@ -124,7 +124,13 @@ const TRUST_RULES = [
   },
   {
     id: 'R-THIRDPARTY', tier: 2, impact: 'medium', effort: 'surgical', check: 'thirdparty',
-    suppressed: (s, p) => !['local_service', 'multi_location', 'b2b_technical'].includes(p.businessModel)
+    // A Google Business Profile counts here for the same reason it does in
+    // R-ADDRESS: a mixed ecommerce/lead-gen client is filed under a single
+    // business_model, so gating on that alone silently denied independent
+    // verification to the half of the business that most needs it. Proven by
+    // running a GBP-carrying ecommerce client through the engine — it drew
+    // R-ADDRESS and the review rule but never this one.
+    suppressed: (s, p) => !(p.hasGbp || ['local_service', 'multi_location', 'b2b_technical'].includes(p.businessModel))
       && 'independent verification is not a lever for this business model',
     fires: (s) => !s.hasThirdPartyProof,
     trigger: () => 'no outbound links to independent verification',

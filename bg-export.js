@@ -111,6 +111,7 @@ function buildActionPlanHtml(plan, docTitle, fetchedAt) {
       const ch = rec.channel === 'both' ? 'SEO + Paid' : rec.channel === 'paid' ? 'Paid' : 'SEO';
       const impactStr = (rec.impact ? `${tier.title} · ${rec.impact} impact` : tier.title) + ` · ${ch}`;
       out.push(`<p style="color:${color};font-size:10pt">${htmlEsc(impactStr)}</p>`);
+      if (rec.detail) out.push(`<p>${htmlEsc(rec.detail)}</p>`);
       if (rec.evidence) out.push(`<p style="color:${GRAY}"><i>${htmlEsc(rec.evidence)}</i></p>`);
     });
   });
@@ -149,8 +150,12 @@ function buildActionPlanHtml(plan, docTitle, fetchedAt) {
     }
 
     (trust.recommendations || []).forEach(r => {
-      out.push(`<p><b>${htmlEsc(r.change)}</b> <i>[${htmlEsc(r.ruleId)} &middot; ${htmlEsc(r.effort)} &middot; ${htmlEsc(r.impact)} impact]</i></p>`);
-      out.push(`<p>${htmlEsc(r.evidence)}</p>`);
+      // "R-" is internal taxonomy — it separates rules from hard blocks in the
+      // spec and means nothing to a reader.
+      const label = String(r.ruleId || '').replace(/^R-/, '');
+      out.push(`<p><b>${htmlEsc(r.change)}</b> <i>[${htmlEsc(label)} &middot; ${htmlEsc(r.effort)} &middot; ${htmlEsc(r.impact)} impact]</i></p>`);
+      if (r.detail) out.push(`<p>${htmlEsc(r.detail)}</p>`);
+      out.push(`<p style="color:${GRAY}">${htmlEsc(r.evidence)}</p>`);
       if (r.ceiling) out.push(`<p style="color:${GRAY}"><i>${htmlEsc(r.ceiling)}</i></p>`);
     });
 

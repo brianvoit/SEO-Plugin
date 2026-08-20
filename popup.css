@@ -3351,6 +3351,10 @@ body.settings-open #update-footer { margin-top: auto; }
   font-size: 11.5px; color: var(--text-muted); line-height: 1.45;
   margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border);
 }
+/* The brief, at exactly the evidence's size — the title is the task, and
+   everything below it is supporting text. Body colour rather than muted,
+   because this is what to DO; the evidence beneath is why. */
+.ap-rec-detail { color: var(--text); border-top: none; margin-top: 6px; padding-top: 0; }
 
 /* Content-gap chips (inert) */
 .ap-gaps { display: flex; flex-wrap: wrap; gap: 5px; }
@@ -3480,12 +3484,22 @@ body.settings-open #update-footer { margin-top: auto; }
 .ap-trust-row--na    .ap-trust-label { color: var(--text-muted); }
 .ap-trust-label { color: var(--text); }
 .ap-trust-na { color: var(--text-muted); font-size: 11px; font-style: italic; }
-.ap-trust-rule { color: var(--accent); border: 1px solid var(--accent); background: none; cursor: help; font-family: ui-monospace, "SF Mono", Menlo, monospace; text-transform: none; }
-/* Trust cards stack: a rule id like R-REVIEW-DISPLAY-NOSTARS is far wider than
-   an effort chip, and side-by-side it crushed the recommendation into a
-   four-line column. The text is the part being read. */
-.ap-trust-rec .ap-rec-top { flex-direction: column; align-items: flex-start; gap: 6px; }
-.ap-trust-rec .ap-rec-tags { flex-wrap: wrap; }
+/* Provenance, not a grade — so it rides with the evidence rather than the chip
+   row, where a long id knocked the effort and impact chips out of line with
+   every other card in the plan. */
+.ap-trust-rule {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--accent);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 9px;
+  font-weight: 700;
+  vertical-align: 1px;
+  cursor: help;
+}
 .ap-trust-ceiling {
   margin-top: 5px;
   padding-left: 8px;

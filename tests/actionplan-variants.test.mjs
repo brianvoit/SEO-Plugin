@@ -537,3 +537,80 @@ describe('corrections drawn from a reviewed plan', () => {
     assert.doesNotMatch(jc.slice(0, 900), /ACTION_PLAN_CRAFT_RULES/);
   });
 });
+
+// ─── Task titles ──────────────────────────────────────────────────────────────
+
+describe('a recommendation title is liftable into a task manager', () => {
+  const splitLongChange = new Function(
+    `${src.slice(src.indexOf('const REC_TITLE_MAX'), src.indexOf('const _EFFORTS'))}
+     return splitLongChange;`
+  )();
+
+  test('all three prompts ask for a short title and a separate detail', () => {
+    [P.overview, P.seo, P.paid].forEach(t => {
+      assert.match(t, /"change": a SHORT task title, imperative, at most 80 characters/);
+      assert.match(t, /"detail": what to actually do/);
+    });
+  });
+
+  test('the title is told to carry no numbers or justification', () => {
+    // Those are what made it a paragraph in bold.
+    [P.overview, P.seo, P.paid].forEach(t =>
+      assert.match(t, /No examples, no numbers, no justification, no em-dash clauses/));
+  });
+
+  test('the trust contract splits the same way', () => {
+    [P.overview, P.seo].forEach(t =>
+      assert.match(t, /"change" \(a SHORT task title, imperative, at most 80 characters/));
+  });
+
+  test('a short title with its own detail is left alone', () => {
+    const r = splitLongChange('Rewrite the title tag', 'Lead with the head terms.');
+    assert.equal(r.change, 'Rewrite the title tag');
+    assert.equal(r.detail, 'Lead with the head terms.');
+  });
+
+  test('an over-long title with no detail is split at the clause break', () => {
+    // The real case from a reviewed plan: a whole brief inside "change".
+    const long = 'Rewrite the title tag to lead with the head terms the page already ranks #2\u20133 for but bleeds clicks on — e.g. "Minnesota Neuropsychology | Neuropsychological Testing".';
+    const r = splitLongChange(long, '');
+    assert.ok(r.change.length < long.length);
+    assert.match(r.change, /^Rewrite the title tag/);
+    assert.match(r.detail, /^e\.g\. "Minnesota Neuropsychology/);
+  });
+
+  test('a long title the model already split is never re-split', () => {
+    const long = 'A'.repeat(200);
+    const r = splitLongChange(long, 'the detail');
+    assert.equal(r.change, long);
+    assert.equal(r.detail, 'the detail');
+  });
+
+  test('a long title with no clause break is left whole rather than cut mid-sentence', () => {
+    const long = 'Rewrite the title tag to lead with the head terms the page already ranks for and stop bleeding clicks';
+    assert.equal(splitLongChange(long, '').change, long);
+  });
+
+  test('a break too near the start is ignored', () => {
+    // "Fix - the whole rest of the brief" must not become a two-word task.
+    const r = splitLongChange('Fix - ' + 'x'.repeat(120), '');
+    assert.match(r.change, /^Fix - /);
+  });
+
+  test('detail survives normalization onto the rec', () => {
+    assert.match(src, /const split = splitLongChange\(String\(r\.change \|\| ''\)\.trim\(\), String\(r\.detail \|\| ''\)\.trim\(\)\)/);
+    assert.match(src, /return split\.change \? \{ \.\.\.split, evidence, effort, impact, channel \}/);
+  });
+
+  test('every render path carries the detail line', () => {
+    assert.match(src, /d\.className = 'ap-rec-evidence ap-rec-detail'/);
+    assert.match(src, /if \(r\.detail\) parts\.push/);
+    assert.match(exportSrc, /if \(rec\.detail\) out\.push/);
+  });
+
+  test('detail and evidence share one type size', () => {
+    // The title is the task; everything below it is the brief, and a size
+    // change between them would make the detail read as another heading.
+    assert.match(src, /'ap-rec-evidence ap-rec-detail'/);
+  });
+});

@@ -17,8 +17,11 @@ const src    = await readFile(path.join(ROOT, 'popup-actionplan.js'), 'utf8');
 const trust  = await readFile(path.join(ROOT, 'popup-trust.js'), 'utf8');
 const exportSrc = await readFile(path.join(ROOT, 'bg-export.js'), 'utf8');
 
+// splitLongChange lives up in the normalization section and is called by
+// mergeTrustPhrasing, so it has to come along.
 const mergeTrustPhrasing = new Function(
-  `${src.slice(src.indexOf('function mergeTrustPhrasing('), src.indexOf('// ─── Main entry'))}
+  `${src.slice(src.indexOf('const REC_TITLE_MAX'), src.indexOf('const _EFFORTS'))}
+   ${src.slice(src.indexOf('function mergeTrustPhrasing('), src.indexOf('// ─── Main entry'))}
    return mergeTrustPhrasing;`
 )();
 
@@ -150,8 +153,27 @@ describe('all three render paths carry the new shape', () => {
   });
 
   test('the panel shows each rule id, with its trigger on hover', () => {
-    assert.match(src, /idTag\.textContent = r\.ruleId/);
-    assert.match(src, /Triggered by: \$\{r\.trigger\}/);
+    // The id sits with the evidence now, not in the chip row, and displays
+    // without the internal "R-" prefix.
+    assert.match(src, /idTag\.textContent = trustRuleLabel\(r\.ruleId\)/);
+    assert.match(src, /idTag\.title = `\$\{r\.ruleId\} — triggered by: \$\{r\.trigger\}`/);
+  });
+
+  test('the "R-" prefix is stripped for display but kept in the data', () => {
+    const label = new Function(`${src.slice(src.indexOf('function trustRuleLabel('), src.indexOf('// ─── Normalization'))}
+      return trustRuleLabel;`)();
+    assert.equal(label('R-REVIEW-DISPLAY-NOSTARS'), 'REVIEW-DISPLAY-NOSTARS');
+    assert.equal(label('R-ADDRESS'), 'ADDRESS');
+    const out = mergeTrustPhrasing({}, engineResult());
+    assert.equal(out.recommendations[0].ruleId, 'R-NAMED', 'the data keeps the real id');
+  });
+
+  test('effort and impact are the only chips in the row, as elsewhere in the plan', () => {
+    // A long rule id knocked them out of line with every other card.
+    const card = src.slice(src.indexOf("card.className = 'ap-rec ap-rec--moderate ap-trust-rec'"), src.indexOf('sec.appendChild(card)'));
+    assert.doesNotMatch(card, /tags\.appendChild\(idTag\)/);
+    assert.match(card, /tags\.appendChild\(eff\)/);
+    assert.match(card, /tags\.appendChild\(imp\)/);
   });
 
   test('the RTF export uses [x] / [ ] / [n/a]', () => {

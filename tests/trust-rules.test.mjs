@@ -93,8 +93,11 @@ describe('roster acceptance cases', () => {
     const s = clean({ hasCredentials: false });
     const health = evaluateTrustRules(s, client({ ymyl: 'health' })).fired.find(f => f.ruleId === 'R-CREDENTIALS');
     const legal  = evaluateTrustRules(s, client({ ymyl: 'legal'  })).fired.find(f => f.ruleId === 'R-CREDENTIALS');
-    assert.match(health.recommendation, /named reviewer line/);
-    assert.doesNotMatch(legal.recommendation, /named reviewer line/);
+    // It lives in the detail now — the title is a task name, identical for
+    // every regulated vertical.
+    assert.match(health.detail, /named reviewer line/);
+    assert.doesNotMatch(legal.detail, /named reviewer line/);
+    assert.equal(health.recommendation, legal.recommendation);
   });
 
   test('regression: no case produces a toxic-link or authority-metric rule', () => {
@@ -145,6 +148,25 @@ describe('client gating', () => {
 
   test('credentials advice is suppressed outside YMYL and regulated verticals', () => {
     assert.ok(suppressedIds(clean({ hasCredentials: false }), client({ ymyl: 'none' })).includes('R-CREDENTIALS'));
+  });
+
+  test('every rule carries a short title and a separate detail', () => {
+    // The fallback path — a fired rule the model did not phrase — must emit
+    // the same shape as a phrased one, or it renders a paragraph in bold where
+    // every other card has a task name.
+    const seen = new Set();
+    [
+      [clean({ hasNamedPeople: false, pageType: 'home', hasVisibleAddress: false, hasThirdPartyProof: false,
+               hasOrganizationSameAs: false, hasCredentials: false,
+               unquantifiedClaims: [{ claim: 'trusted', context: 'x', tag: 'p' }] }), client({ ymyl: 'health', hasGbp: true })],
+      [clean({ pageType: 'article', hasByline: true, bylineHref: null }), client({ authoredContent: true })],
+      [clean({ pageType: 'product' }), client({ businessModel: 'ecommerce' })]
+    ].forEach(([s2, c]) => evaluateTrustRules(s2, c).fired.forEach(f => {
+      seen.add(f.ruleId);
+      assert.ok(f.recommendation.length <= 60, `${f.ruleId} title too long: "${f.recommendation}"`);
+      assert.ok(f.detail, `${f.ruleId} has no detail`);
+    }));
+    assert.ok(seen.size >= 8, `only exercised ${seen.size} rules`);
   });
 
   test('"regulated" fires credentials without being health', () => {

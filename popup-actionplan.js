@@ -546,12 +546,13 @@ Rules:
 - Return 3–8 recommendations total. Order by impact within each effort tier.${ACTION_PLAN_CRAFT_RULES}
 
 Respond with ONLY a compact JSON object, no prose, no code fences, exactly:
-{"recommendations":[{"change":"…","evidence":"…","effort":"surgical|moderate|rewrite","impact":"high|medium|low","channel":"seo|paid|both"}],"contentGaps":["…","…"],"intentGap":{"pageIntent":"…","trafficIntent":"…","divergence":true,"summary":"…","suggestions":["…","…","…","…","…","…","…","…"]},"trust":{"recommendations":[{"ruleId":"…","change":"…","evidence":"…"}]}}
-- "change": the action to take (imperative, specific).
+{"recommendations":[{"change":"…","detail":"…","evidence":"…","effort":"surgical|moderate|rewrite","impact":"high|medium|low","channel":"seo|paid|both"}],"contentGaps":["…","…"],"intentGap":{"pageIntent":"…","trafficIntent":"…","divergence":true,"summary":"…","suggestions":["…","…","…","…","…","…","…","…"]},"trust":{"recommendations":[{"ruleId":"…","change":"…","evidence":"…"}]}}
+- "change": a SHORT task title, imperative, at most 80 characters. This is pasted straight into a task manager, so it must read as a task on its own: "Rewrite the title tag to lead with the head terms". No examples, no numbers, no justification, no em-dash clauses — those go in "detail".
+- "detail": what to actually do, including any specific wording, examples, or placement you are proposing.
 - "evidence": the data behind it, citing the actual numbers.
 - "contentGaps": short topic labels (2–4 words) the page should cover but doesn't. 0–8 items.
 - "intentGap": include ONLY when TRAFFIC INTENT DISTRIBUTION is present in the input. If the page's evident purpose (from its title, headings, and content) diverges significantly from the dominant traffic intent, set "divergence":true, "pageIntent" to the intent the page targets (one of: Informational, Navigational, Commercial, Transactional), "trafficIntent" to the dominant incoming intent, "summary" to one sentence explaining the mismatch and opportunity, and "suggestions" to exactly 8 diverse keyword phrases — range from head to long-tail, no brand terms — that the page should be visible for given its actual purpose. If no significant divergence exists, omit "intentGap" entirely.
-- "trust": phrasing for the E-E-A-T RULES block, and nothing else. One entry per FIRED rule, each with "ruleId" (copied exactly), "change" (that rule's recommendation rewritten against THIS page's actual copy — quote the real sentence or heading you mean) and "evidence" (what on the page triggered it). Do NOT invent a ruleId, do NOT include a suppressed rule, and do NOT assign an impact, effort or score — those are decided already. Omit "trust" entirely if no rule fired.`;
+- "trust": phrasing for the E-E-A-T RULES block, and nothing else. One entry per FIRED rule, each with "ruleId" (copied exactly), "change" (a SHORT task title, imperative, at most 80 characters, pasteable into a task manager), "detail" (that rule's recommendation rewritten against THIS page's actual copy — quote the real sentence or heading you mean) and "evidence" (what on the page triggered it). Do NOT invent a ruleId, do NOT include a suppressed rule, and do NOT assign an impact, effort or score — those are decided already. Omit "trust" entirely if no rule fired.`;
 
 // ─── The two specialized prompts ──────────────────────────────────────────────
 //
@@ -568,8 +569,9 @@ Respond with ONLY a compact JSON object, no prose, no code fences, exactly:
 // versa, and cutting either side off would make both plans worse.
 
 const ACTION_PLAN_JSON_CONTRACT = `Respond with ONLY a compact JSON object, no prose, no code fences, exactly:
-{"recommendations":[{"change":"…","evidence":"…","effort":"surgical|moderate|rewrite","impact":"high|medium|low","channel":"seo|paid|both"}],"contentGaps":["…","…"]REPLACE_EXTRAS}
-- "change": the action to take (imperative, specific).
+{"recommendations":[{"change":"…","detail":"…","evidence":"…","effort":"surgical|moderate|rewrite","impact":"high|medium|low","channel":"seo|paid|both"}],"contentGaps":["…","…"]REPLACE_EXTRAS}
+- "change": a SHORT task title, imperative, at most 80 characters. This is pasted straight into a task manager, so it must read as a task on its own: "Rewrite the title tag to lead with the head terms". No examples, no numbers, no justification, no em-dash clauses — those go in "detail".
+- "detail": what to actually do, including any specific wording, examples, or placement you are proposing.
 - "evidence": the data behind it, citing the actual numbers.
 - effort is one of: "surgical" (minutes), "moderate" (an hour), "rewrite" (major restructuring).
 - impact is one of: "high", "medium", "low".
@@ -596,7 +598,7 @@ Every recommendation must use channel "seo".
 
 ${ACTION_PLAN_JSON_CONTRACT.replace('REPLACE_EXTRAS', `,"intentGap":{…},"trust":{…}`)}
 - "contentGaps": short topic labels (2–4 words) the page should cover but doesn't. 0–8 items.${ACTION_PLAN_INTENT_CLAUSE}
-- "trust": phrasing for the E-E-A-T RULES block, and nothing else. One entry per FIRED rule, each with "ruleId" (copied exactly), "change" (that rule's recommendation rewritten against THIS page's actual copy — quote the real sentence or heading you mean) and "evidence" (what on the page triggered it). Do NOT invent a ruleId, do NOT include a suppressed rule, and do NOT assign an impact, effort or score — those are decided already. Omit "trust" entirely if no rule fired.
+- "trust": phrasing for the E-E-A-T RULES block, and nothing else. One entry per FIRED rule, each with "ruleId" (copied exactly), "change" (a SHORT task title, imperative, at most 80 characters, pasteable into a task manager), "detail" (that rule's recommendation rewritten against THIS page's actual copy — quote the real sentence or heading you mean) and "evidence" (what on the page triggered it). Do NOT invent a ruleId, do NOT include a suppressed rule, and do NOT assign an impact, effort or score — those are decided already. Omit "trust" entirely if no rule fired.
 ${ACTION_PLAN_CRAFT_RULES}`;
 
 const ACTION_PLAN_SYSTEM_PAID = `You are an elite Google Ads strategist. You are given a landing page's CONTENT and every signal available for it: its Google Ads campaigns, ad groups, ads, keywords and search terms, plus Search Console organic queries, Web CEO rankings, GA4 behaviour and Core Web Vitals.
@@ -627,6 +629,11 @@ const ACTION_PLAN_SYSTEMS = {
   paid:     ACTION_PLAN_SYSTEM_PAID
 };
 
+// Rule ids are internal taxonomy. The "R-" prefix distinguishes rules from the
+// "B-" hard blocks in the spec, which is meaningless to anyone reading a plan,
+// so it is stripped for display. The full id stays on the data and in tooltips.
+function trustRuleLabel(ruleId) { return String(ruleId || '').replace(/^R-/, ''); }
+
 // ─── Normalization (accept only well-formed, enum-valid recs) ─────────────────
 
 function actionPlanParse(text) {
@@ -637,6 +644,23 @@ function actionPlanParse(text) {
     try { return JSON.parse(s.slice(first, last + 1)); } catch { /* give up */ }
   }
   return null;
+}
+
+// The title is meant to be pasteable into a task manager, so a model that
+// ignores the length cap has to degrade into something usable rather than a
+// paragraph in bold. Split at the first clause break and demote the rest into
+// detail; if there is no clean break, leave it alone rather than cut a
+// sentence in half.
+const REC_TITLE_MAX = 90;
+
+function splitLongChange(change, detail) {
+  if (detail || change.length <= REC_TITLE_MAX) return { change, detail };
+  const brk = /\s—\s|\s–\s|\s-\s|\.\s|;\s/.exec(change);
+  if (!brk || brk.index < 20) return { change, detail };
+  return {
+    change: change.slice(0, brk.index).trim(),
+    detail: change.slice(brk.index + brk[0].length).trim()
+  };
 }
 
 const _EFFORTS = ['surgical', 'moderate', 'rewrite'];
@@ -665,9 +689,9 @@ function normalizeActionPlan(raw) {
     const effort = _EFFORTS.includes(String(r.effort).toLowerCase()) ? String(r.effort).toLowerCase() : 'moderate';
     const impact = _IMPACTS.includes(String(r.impact).toLowerCase()) ? String(r.impact).toLowerCase() : 'medium';
     const channel = _CHANNELS.includes(String(r.channel).toLowerCase()) ? String(r.channel).toLowerCase() : 'seo';
-    const change = String(r.change || '').trim();
+    const split = splitLongChange(String(r.change || '').trim(), String(r.detail || '').trim());
     const evidence = String(r.evidence || '').trim();
-    return change ? { change, evidence, effort, impact, channel } : null;
+    return split.change ? { ...split, evidence, effort, impact, channel } : null;
   }).filter(Boolean);
   if (!recommendations.length) return null;
   const contentGaps = Array.isArray(raw.contentGaps)
@@ -701,7 +725,10 @@ function mergeTrustPhrasing(raw, trust) {
   const list = raw && raw.trust && Array.isArray(raw.trust.recommendations) ? raw.trust.recommendations : [];
   list.forEach(r => {
     const id = String((r && r.ruleId) || '').trim();
-    if (id) phrased.set(id, { change: String(r.change || '').trim(), evidence: String(r.evidence || '').trim() });
+    if (id) phrased.set(id, {
+      ...splitLongChange(String(r.change || '').trim(), String(r.detail || '').trim()),
+      evidence: String(r.evidence || '').trim()
+    });
   });
 
   const recommendations = trust.fired.map(f => {
@@ -710,6 +737,7 @@ function mergeTrustPhrasing(raw, trust) {
       ruleId: f.ruleId,
       tier: f.tier,
       change: p.change || f.recommendation,       // engine text is the fallback, never a gap
+      detail: p.detail || f.detail || '',   // the engine's own brief when the model skipped it
       evidence: p.evidence || f.trigger,
       trigger: f.trigger,                          // always the engine's, so it can be defended
       impact: f.impact,
@@ -908,6 +936,15 @@ function actionPlanRecCard(rec, showChannel = true) {
   top.appendChild(tags);
   card.appendChild(top);
 
+  // Detail and evidence share one type size: the title is the task, everything
+  // below it is the brief. Keeping them the same size is what makes the title
+  // liftable into a task manager on its own.
+  if (rec.detail) {
+    const d = document.createElement('div');
+    d.className = 'ap-rec-evidence ap-rec-detail';
+    d.textContent = rec.detail;
+    card.appendChild(d);
+  }
   if (rec.evidence) {
     const ev = document.createElement('div');
     ev.className = 'ap-rec-evidence';
@@ -1170,11 +1207,6 @@ function renderActionPlanPanel() {
 
       const tags = document.createElement('div');
       tags.className = 'ap-rec-tags';
-      const idTag = document.createElement('span');
-      idTag.className = 'ap-tag ap-trust-rule';
-      idTag.textContent = r.ruleId;
-      idTag.title = `Triggered by: ${r.trigger}`;
-      tags.appendChild(idTag);
       const eff = document.createElement('span');
       eff.className = `ap-tag ap-tag--${r.effort}`;
       eff.textContent = r.effort;
@@ -1186,9 +1218,23 @@ function renderActionPlanPanel() {
       top.appendChild(tags);
       card.appendChild(top);
 
+      if (r.detail) {
+        const d = document.createElement('div');
+        d.className = 'ap-rec-evidence ap-rec-detail';
+        d.textContent = r.detail;
+        card.appendChild(d);
+      }
+
       const ev = document.createElement('div');
       ev.className = 'ap-rec-evidence';
-      ev.textContent = r.evidence;
+      // The rule id sits with the evidence rather than in the chip row: it is
+      // provenance, not a grade, and a long one (REVIEW-DISPLAY-NOSTARS) shoved
+      // the effort and impact chips out of line with every other card.
+      const idTag = document.createElement('span');
+      idTag.className = 'ap-trust-rule';
+      idTag.textContent = trustRuleLabel(r.ruleId);
+      idTag.title = `${r.ruleId} — triggered by: ${r.trigger}`;
+      ev.append(idTag, document.createTextNode(r.evidence));
       card.appendChild(ev);
 
       if (r.ceiling) {
@@ -1310,6 +1356,7 @@ async function exportActionPlanRtf() {
     recs.forEach(r => {
       const ch = r.channel === 'both' ? 'SEO + Paid' : r.channel === 'paid' ? 'Paid' : 'SEO';
       parts.push(`{\\b ${rtfEscape(r.change)}}  {\\i [${rtfEscape(r.effort)} \\u183? ${rtfEscape(r.impact)} impact \\u183? ${rtfEscape(ch)}]}\\par`);
+      if (r.detail) parts.push(`${rtfEscape(r.detail)}\\par`);
       if (r.evidence) parts.push(`${rtfEscape(r.evidence)}\\par`);
       parts.push('\\par');
     });
@@ -1337,7 +1384,8 @@ async function exportActionPlanRtf() {
     });
     if (trust.recommendations.length) parts.push('\\par');
     trust.recommendations.forEach(r => {
-      parts.push(`{\\b ${rtfEscape(r.change)}}  {\\i [${rtfEscape(r.ruleId)} \\u183? ${rtfEscape(r.effort)} \\u183? ${rtfEscape(r.impact)} impact]}\\par`);
+      parts.push(`{\\b ${rtfEscape(r.change)}}  {\\i [${rtfEscape(trustRuleLabel(r.ruleId))} \\u183? ${rtfEscape(r.effort)} \\u183? ${rtfEscape(r.impact)} impact]}\\par`);
+      if (r.detail) parts.push(`${rtfEscape(r.detail)}\\par`);
       parts.push(`${rtfEscape(r.evidence)}\\par`);
       if (r.ceiling) parts.push(`{\\i ${rtfEscape(r.ceiling)}}\\par`);
       parts.push('\\par');

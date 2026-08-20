@@ -2263,6 +2263,18 @@ const TRUST_CLAIM_PATTERNS = [
 ];
 
 const TRUST_CERT_BODY = /\b(licen[cs]ed|certified|accredited|registered|member of|bonded|insured|iso\s?\d|lead[- ]safe|epa|osha|nari|aia|nahb|bbb)\b/i;
+
+// Credentials actually surfaced on the page. Stricter than TRUST_CERT_BODY:
+// that one only has to spot a nearby proof token, whereas this drives a
+// checklist row and a rule, so a passing mention of "insured" should not count
+// as licensure being surfaced. Wants a licence/registration number, a named
+// credentialing body with a jurisdiction, or a post-nominal.
+const TRUST_CREDENTIAL_PATTERNS = [
+  /\b(?:licen[cs]e|lic\.?|registration|cert(?:ificate|ification)?)\s*(?:no\.?|number|#)?\s*[:#]?\s*[A-Z0-9][A-Z0-9-]{3,}/i,
+  /\blicen[cs]ed\s+in\s+[A-Z][a-z]+/,
+  /\b(?:board[- ]certified|state[- ]licen[cs]ed|licen[cs]ed\s+(?:professional|psychologist|engineer|contractor|architect|therapist))\b/i,
+  /\b(?:MD|DO|PhD|PsyD|DDS|DVM|RN|LPC|LCSW|PE|AIA|CPA|Esq\.?)\b/
+];
 const TRUST_CLAIM_CAP = 12;
 
 /** Every @type on the page, flattened and deduped. */
@@ -2449,6 +2461,18 @@ function trustUnquantifiedClaims() {
 }
 
 /**
+ * Licensure or credentials visible on the page. Feeds the credentials
+ * checklist row, and lets R-CREDENTIALS stay quiet on a page that already
+ * does this — the spec fires it on vertical alone, which would keep
+ * recommending it to clients who had already complied.
+ */
+function trustCredentials() {
+  if (document.querySelector('[itemprop="hasCredential"]')) return true;
+  const text = getCleanBodyText().slice(0, 20000);
+  return TRUST_CREDENTIAL_PATTERNS.some(re => re.test(text));
+}
+
+/**
  * All of it, in one structured-cloneable object. Inputs only — no rule in here
  * decides anything, so this stays valid however the rule set changes.
  */
@@ -2475,6 +2499,7 @@ function detectTrustSignals() {
     namedPeopleVia: named.via,
     hasVisibleAddress: address.hasVisibleAddress,
     visibleAddressVia: address.via,
+    hasCredentials: trustCredentials(),
     hasThirdPartyProof: thirdParty.hasThirdPartyProof,
     thirdPartyProof: thirdParty.thirdPartyProof,
     unquantifiedClaims: trustUnquantifiedClaims()

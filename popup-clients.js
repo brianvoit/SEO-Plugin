@@ -251,6 +251,16 @@ function renderClientPanelContent() {
   renderCompetitorsSection(competitorsSection, client);
   root.appendChild(competitorsSection);
 
+  // Trust profile — gates the E-E-A-T rules in the Action Plan.
+  const trustSection = document.createElement('section');
+  trustSection.className = 'field-section';
+  const trustHeader = document.createElement('div');
+  trustHeader.className = 'field-label';
+  trustHeader.textContent = 'TRUST PROFILE';
+  trustSection.appendChild(trustHeader);
+  renderTrustProfileSection(trustSection, client);
+  root.appendChild(trustSection);
+
   // Content generation settings — client-level, like branded terms above.
   // Applies uniformly to every AI-generated text field (Title, Meta, OG,
   // Twitter, and the WP Media Library image generators) — none of it is
@@ -305,6 +315,92 @@ function renderClientPanelContent() {
 // it is a remote write against the user's Web CEO quota, and it targets the
 // project bound to each domain, so firing it automatically as someone types
 // would be both surprising and wasteful.
+// Trust profile — the client-level gating for the E-E-A-T rules. Manual on
+// purpose: whether a business publishes bylined material or operates under a
+// licence is not detectable from a crawl, and guessing it wrong makes rules
+// fire that the client cannot act on.
+const CLIENT_BUSINESS_MODEL_OPTS = [
+  { value: 'local_service',  label: 'Local service' },
+  { value: 'multi_location', label: 'Multi-location' },
+  { value: 'ecommerce',      label: 'Ecommerce' },
+  { value: 'b2b_technical',  label: 'B2B / technical' },
+  { value: 'publisher',      label: 'Publisher' }
+];
+const CLIENT_YMYL_OPTS = [
+  { value: 'none',      label: 'None' },
+  { value: 'health',    label: 'Health' },
+  { value: 'finance',   label: 'Finance' },
+  { value: 'legal',     label: 'Legal' },
+  { value: 'regulated', label: 'Regulated (not YMYL)' }
+];
+
+function renderTrustProfileSection(container, client) {
+  const trust = Object.assign(
+    { businessModel: 'local_service', ymyl: 'none', hasGbp: false, authoredContent: false },
+    client.trust || {}
+  );
+
+  const save = async (patch) => {
+    const id = await ensureClientPersisted();
+    const res = await sendMessageWithTimeout({ action: 'clientRegistrySetTrust', id, trust: { ...trust, ...patch } });
+    if (res && res.client) { _editingClient = res.client; patchClientInList(_editingClient); renderClientPanelContent(); }
+  };
+
+  const addSelect = (labelText, opts, current, key, hint) => {
+    const label = document.createElement('label');
+    label.className = 'wp-field';
+    const lt = document.createElement('span');
+    lt.className = 'wp-field-label';
+    lt.textContent = labelText;
+    const sel = document.createElement('select');
+    sel.className = 'neg-list-select client-trust-select';
+    opts.forEach(o => {
+      const el = document.createElement('option');
+      el.value = o.value; el.textContent = o.label;
+      sel.appendChild(el);
+    });
+    sel.value = current;
+    sel.addEventListener('change', () => save({ [key]: sel.value }));
+    label.append(lt, sel);
+    container.appendChild(label);
+    if (hint) {
+      const h = document.createElement('div');
+      h.className = 'field-hint hint-muted';
+      h.textContent = hint;
+      container.appendChild(h);
+    }
+  };
+
+  addSelect('Business model', CLIENT_BUSINESS_MODEL_OPTS, trust.businessModel, 'businessModel',
+    'Decides which trust recommendations can fire at all.');
+  addSelect('YMYL / regulated', CLIENT_YMYL_OPTS, trust.ymyl, 'ymyl',
+    'Anything but "None" asks for licensure and credentials to be surfaced.');
+
+  const addToggle = (labelText, checked, key, hint) => {
+    const row = document.createElement('label');
+    row.className = 'client-trust-check';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!checked;
+    cb.addEventListener('change', () => save({ [key]: cb.checked }));
+    const txt = document.createElement('span');
+    txt.textContent = labelText;
+    row.append(cb, txt);
+    container.appendChild(row);
+    if (hint) {
+      const h = document.createElement('div');
+      h.className = 'field-hint hint-muted';
+      h.textContent = hint;
+      container.appendChild(h);
+    }
+  };
+
+  addToggle('Has a Google Business Profile', trust.hasGbp, 'hasGbp',
+    'Enables review-display advice, and the note that stars are not achievable on this entity type.');
+  addToggle('Publishes bylined content', trust.authoredContent, 'authoredContent',
+    'Off suppresses author-page and Person-schema advice entirely — most service businesses should leave this off.');
+}
+
 function renderCompetitorsSection(container, client) {
   const saveList = async (next) => {
     const id = await ensureClientPersisted();

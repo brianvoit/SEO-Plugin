@@ -3471,6 +3471,17 @@ body.settings-open #update-footer { margin-top: auto; }
 
 /* ── Client Registry ─────────────────────────────────────────────────────── */
 
+.client-trust-select { width: 100%; margin-top: 3px; }
+.client-trust-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+
 .client-domain-chips {
   display: flex;
   flex-wrap: wrap;

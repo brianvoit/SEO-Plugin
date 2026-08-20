@@ -2169,6 +2169,17 @@ browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  // Trust signals for the E-E-A-T rule engine. Its own message rather than a
+  // getPageData field: only the Action Plan needs it, and it walks every link
+  // and text block on the page — no reason to pay that on every popup open.
+  if (message.action === 'getTrustSignals') {
+    let signals;
+    try { signals = detectTrustSignals(); }
+    catch (e) { signals = { _readError: String((e && e.message) || e) }; }
+    sendResponse(signals);
+    return true;
+  }
+
   // Read-only peek at this page's overlay state, for the toolbar menu's
   // checkmarks. Synchronous — it is just the two module variables.
   if (message.action === 'getOverlayState') {
@@ -2190,6 +2201,330 @@ browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     generateAltText(message.srcUrl);
   }
 });
+
+// ─── Trust signals (E-E-A-T rule engine inputs) ───────────────────────────────
+//
+// Deterministic page-level detection feeding the Action Plan's E-E-A-T module.
+// Every field here is an INPUT to a rule, never a verdict: the rules decide
+// what fires, so a detector's only job is to be right about what is on the page.
+//
+// Bias throughout is toward DETECTING a signal rather than missing it. Every
+// rule that consumes these fires on absence ("no named people", "no visible
+// address"), so a false negative produces a recommendation the client has
+// already done — which is worse than staying silent.
+
+const TRUST_ROLE_WORDS = /\b(founder|co-?founder|ceo|cto|coo|cfo|president|owner|principal|partner|director|manager|architect|designer|engineer|attorney|doctor|dr\.|md|dds|phd|therapist|psychologist|realtor|agent|estimator|superintendent)\b/i;
+
+const TRUST_PEOPLE_PATHS = /\/(team|our-?team|about|about-?us|staff|people|leadership|bios?|our-?story|attorneys|doctors|providers|physicians|agents|meet-?the-?team)(\/|$)/i;
+
+// Hosts that constitute independent verification. Curated rather than
+// heuristic: ".org" and "any news site" would match half the web and make the
+// signal meaningless.
+const TRUST_THIRD_PARTY = [
+  { re: /(^|\.)yelp\.com$/i,                cat: 'review platform' },
+  { re: /(^|\.)trustpilot\.com$/i,          cat: 'review platform' },
+  { re: /(^|\.)bbb\.org$/i,                 cat: 'accreditation' },
+  { re: /(^|\.)houzz\.com$/i,               cat: 'review platform' },
+  { re: /(^|\.)angi(eslist)?\.com$/i,       cat: 'review platform' },
+  { re: /(^|\.)thumbtack\.com$/i,           cat: 'review platform' },
+  { re: /(^|\.)g2\.com$/i,                  cat: 'review platform' },
+  { re: /(^|\.)capterra\.com$/i,            cat: 'review platform' },
+  { re: /(^|\.)clutch\.co$/i,               cat: 'review platform' },
+  { re: /(^|\.)glassdoor\.com$/i,           cat: 'review platform' },
+  { re: /(^|\.)healthgrades\.com$/i,        cat: 'review platform' },
+  { re: /(^|\.)zocdoc\.com$/i,              cat: 'review platform' },
+  { re: /(^|\.)avvo\.com$/i,                cat: 'review platform' },
+  { re: /(^|\.)martindale\.com$/i,          cat: 'review platform' },
+  { re: /(^|\.)google\.com$/i, path: /\/maps|\/search\?.*place/i, cat: 'review platform' },
+  { re: /\.gov$/i,                          cat: 'government / licensing' },
+  { re: /\.edu$/i,                          cat: 'academic' },
+  { re: /(^|\.)aia\.org$/i,                 cat: 'professional association' },
+  { re: /(^|\.)nari\.org$/i,                cat: 'professional association' },
+  { re: /(^|\.)nahb\.org$/i,                cat: 'professional association' },
+  { re: /(^|\.)asme\.org$/i,                cat: 'professional association' },
+  { re: /(^|\.)ieee\.org$/i,                cat: 'professional association' },
+  { re: /(^|\.)apa\.org$/i,                 cat: 'professional association' },
+  { re: /(^|\.)ada\.org$/i,                 cat: 'professional association' },
+  { re: /(^|\.)ama-assn\.org$/i,            cat: 'professional association' }
+];
+
+// Claims that assert standing without evidence. "44 years" is deliberately
+// here: it is specific but unverified, and the rule that consumes this asks for
+// it to be ANCHORED to something checkable, not made more precise.
+const TRUST_CLAIM_PATTERNS = [
+  /\b\d{1,3}\+?\s*(?:years?|yrs?)\b/i,
+  /\btrusted\b/i,
+  /\bleading\b/i,
+  /\bindustry[- ]leader(?:s|ship)?\b/i,
+  /\baward[- ]winning\b/i,
+  /\bbest[- ]in[- ]class\b/i,
+  /\b(?:#\s?1|number one)\b/i,
+  /\bpremier\b/i
+];
+
+const TRUST_CERT_BODY = /\b(licen[cs]ed|certified|accredited|registered|member of|bonded|insured|iso\s?\d|lead[- ]safe|epa|osha|nari|aia|nahb|bbb)\b/i;
+const TRUST_CLAIM_CAP = 12;
+
+/** Every @type on the page, flattened and deduped. */
+function trustSchemaTypes() {
+  const out = [];
+  document.querySelectorAll('script[type="application/ld+json"]').forEach(el => {
+    let parsed;
+    try { parsed = JSON.parse(el.textContent); } catch { return; }
+    const walk = (node) => {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) { node.forEach(walk); return; }
+      [].concat(node['@type'] || []).forEach(t => { if (typeof t === 'string') out.push(t); });
+      // @graph and nested entities carry types the top level does not.
+      Object.values(node).forEach(v => { if (v && typeof v === 'object') walk(v); });
+    };
+    walk(parsed);
+  });
+  return [...new Set(out)];
+}
+
+// Schema first, then URL, then DOM — and record which one answered, because a
+// page typed by a URL guess deserves less confidence than one typed by its own
+// declared schema, and a rule that misfires needs to be traceable to the reason.
+const TRUST_SCHEMA_PAGE_TYPE = [
+  { types: ['Article', 'BlogPosting', 'NewsArticle', 'TechArticle'], pageType: 'article' },
+  { types: ['Product'],                                              pageType: 'product' },
+  { types: ['AboutPage'],                                            pageType: 'about' }
+];
+
+function trustPageType(schemaTypes) {
+  // Organization / LocalBusiness / WebSite are deliberately NOT mapped: they
+  // appear site-wide on every page and say nothing about which page this is.
+  for (const rule of TRUST_SCHEMA_PAGE_TYPE) {
+    if (schemaTypes.some(t => rule.types.includes(t))) return { pageType: rule.pageType, via: 'schema' };
+  }
+
+  let path = '/';
+  try { path = new URL(document.baseURI).pathname.toLowerCase(); } catch { /* keep root */ }
+  if (path === '/' || path === '') return { pageType: 'home', via: 'url' };
+  if (/\/(blog|news|articles?|posts?|insights?)(\/|$)/.test(path)) return { pageType: 'article', via: 'url' };
+  if (/\/(products?|shop|store|item)(\/|$)/.test(path))            return { pageType: 'product', via: 'url' };
+  if (/\/(locations?|offices?|branches?)(\/|$)/.test(path))        return { pageType: 'location', via: 'url' };
+  if (/\/(about|about-?us|our-?story)(\/|$)/.test(path))           return { pageType: 'about', via: 'url' };
+  if (/\/(services?|what-we-do|capabilities)(\/|$)/.test(path))    return { pageType: 'service', via: 'url' };
+
+  // DOM fallback: a real <article> with a byline reads as an article whatever
+  // its URL says.
+  if (document.querySelector('article') && document.querySelector('[rel~="author"], .byline, [itemprop="author"]')) {
+    return { pageType: 'article', via: 'dom' };
+  }
+  return { pageType: 'other', via: 'default' };
+}
+
+/** A visible author attribution, and where it points if it is a link. */
+function trustByline() {
+  const el = document.querySelector('[rel~="author"], [itemprop="author"], .byline, .author-name, .post-author, .entry-author');
+  if (el) {
+    const link = el.matches('a[href]') ? el : el.querySelector('a[href]');
+    const name = (el.textContent || '').replace(/^\s*(by|written by)\s*[:\-]?\s*/i, '').replace(/\s+/g, ' ').trim();
+    return { hasByline: true, bylineName: name.slice(0, 80) || null, bylineHref: link ? link.href : null };
+  }
+  // Visible "By Firstname Lastname" in the copy, as a fallback.
+  const m = /(?:^|\n|\s)By\s+([A-Z][a-z]+(?:\s+[A-Z][a-z.'-]+){1,2})\b/.exec(getCleanBodyText().slice(0, 4000));
+  if (m) return { hasByline: true, bylineName: m[1], bylineHref: null };
+  return { hasByline: false, bylineName: null, bylineHref: null };
+}
+
+/**
+ * Are actual people named, as opposed to "our team"? Ordered cheapest-first,
+ * and returns on the FIRST hit — the rule only needs a boolean, and stopping
+ * early keeps this off the critical path on large pages.
+ */
+function trustNamedPeople(schemaTypes, byline) {
+  if (schemaTypes.includes('Person')) return { hasNamedPeople: true, via: 'Person schema' };
+  if (byline.hasByline)               return { hasNamedPeople: true, via: 'byline' };
+
+  const peopleLink = [...document.querySelectorAll('a[href]')]
+    .find(a => { try { return TRUST_PEOPLE_PATHS.test(new URL(a.href, document.baseURI).pathname); } catch { return false; } });
+  if (peopleLink) return { hasNamedPeople: true, via: 'link to a team or bio page' };
+
+  // A capitalised full name ATTACHED to a role, the way a staff listing reads:
+  // "Jane Smith, Founder" or "Director: Jane Smith". Merely sharing a block is
+  // not enough — "Our director works across Saint Paul" has a role word and two
+  // capitalised words, and would otherwise read as a named person.
+  const NAME = "[A-Z][a-z]{1,15}\\s+[A-Z][a-z.'-]{1,20}";
+  const ROLE = TRUST_ROLE_WORDS.source.replace(/^\\b|\\b$/g, '');
+  const NAME_THEN_ROLE = new RegExp(`\\b${NAME}\\b\\s*[,—–-]\\s*[^.]{0,30}?${ROLE}`, 'i');
+  const ROLE_THEN_NAME = new RegExp(`${ROLE}[^.]{0,20}?[:—–-]\\s*\\b${NAME}\\b`, 'i');
+  const hit = [...document.querySelectorAll('li, p, figcaption, h2, h3, h4, td, .card, .team-member, .bio')]
+    .find(el => {
+      const t = (el.textContent || '').trim();
+      return t.length < 300 && (NAME_THEN_ROLE.test(t) || ROLE_THEN_NAME.test(t));
+    });
+  if (hit) return { hasNamedPeople: true, via: 'name beside a role' };
+
+  return { hasNamedPeople: false, via: null };
+}
+
+/**
+ * A postal address a human can see. Reads the FULL document, not
+ * getCleanBodyText() — that strips <footer>, which is exactly where a NAP
+ * block usually lives.
+ */
+function trustVisibleAddress() {
+  const addrEl = [...document.querySelectorAll('address')].find(el => (el.textContent || '').trim().length > 10);
+  if (addrEl) return { hasVisibleAddress: true, via: '<address> element' };
+
+  // Read per element, NOT off document.body.textContent. textContent
+  // concatenates blocks with no separator, so a footer following "…Welcome"
+  // yields "Welcome2001 Broadway St" — and the leading \b then fails, because
+  // "e" and "2" are both word characters. Every footer NAP block would be
+  // missed, which is precisely where they live.
+  // Street number, street, city, two-letter state, ZIP.
+  const ADDRESS = /\b\d{1,6}\s+[\w.'-]+(?:\s+[\w.'-]+){0,4},?\s+[A-Za-z.'-]+(?:\s+[A-Za-z.'-]+){0,2},\s*[A-Z]{2}\.?\s+\d{5}(?:-\d{4})?\b/;
+  const hit = [...document.querySelectorAll('p, div, li, span, td, footer, section')]
+    .find(el => {
+      const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      return t.length > 10 && t.length < 300 && ADDRESS.test(t);
+    });
+  if (hit) return { hasVisibleAddress: true, via: 'address pattern in rendered text' };
+  return { hasVisibleAddress: false, via: null };
+}
+
+/** Outbound links to independent verification. Full document, footers included. */
+function trustThirdPartyProof() {
+  let here = '';
+  try { here = new URL(document.baseURI).hostname.replace(/^www\./, '').toLowerCase(); } catch { /* none */ }
+
+  const hits = new Map();
+  document.querySelectorAll('a[href]').forEach(a => {
+    let u;
+    try { u = new URL(a.href, document.baseURI); } catch { return; }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return;
+    const host = u.hostname.replace(/^www\./, '').toLowerCase();
+    if (!host || host === here || host.endsWith('.' + here)) return;   // own site is not third-party
+    const rule = TRUST_THIRD_PARTY.find(r => r.re.test(host) && (!r.path || r.path.test(u.pathname + u.search)));
+    if (rule && !hits.has(host)) hits.set(host, { host, category: rule.cat });
+  });
+
+  const list = [...hits.values()].slice(0, 10);
+  return { hasThirdPartyProof: list.length > 0, thirdPartyProof: list };
+}
+
+/**
+ * Claims of standing with nothing checkable next to them.
+ *
+ * A claim counts as PROVEN when its own block carries a distinct verifiable
+ * element — a link, a four-digit year, a certifying body, or a figure that is
+ * not part of the claim itself. That last exclusion matters: "44 years"
+ * contains a number, so without removing the matched span from consideration
+ * every such claim would prove itself and the rule would never fire.
+ */
+function trustUnquantifiedClaims() {
+  const blocks = [...document.querySelectorAll('p, li, h1, h2, h3, h4, blockquote, td, figcaption')];
+  const out = [];
+  const seen = new Set();
+
+  for (const el of blocks) {
+    if (out.length >= TRUST_CLAIM_CAP) break;
+    const raw = (el.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!raw || raw.length > 400) continue;
+
+    for (const re of TRUST_CLAIM_PATTERNS) {
+      const m = re.exec(raw);
+      if (!m) continue;
+      const key = m[0].toLowerCase() + '|' + raw.slice(0, 40).toLowerCase();
+      if (seen.has(key)) continue;
+
+      // Everything in the block EXCEPT the claim itself.
+      const rest = raw.slice(0, m.index) + ' ' + raw.slice(m.index + m[0].length);
+      const proven =
+        !!el.querySelector('a[href]') ||
+        /\b(19|20)\d{2}\b/.test(rest) ||
+        /\d/.test(rest) ||
+        TRUST_CERT_BODY.test(rest);
+      if (proven) continue;
+
+      seen.add(key);
+      out.push({ claim: m[0], context: raw.slice(0, 160), tag: el.tagName.toLowerCase() });
+      break;   // one finding per block is enough to action it
+    }
+  }
+  return out;
+}
+
+/**
+ * All of it, in one structured-cloneable object. Inputs only — no rule in here
+ * decides anything, so this stays valid however the rule set changes.
+ */
+function detectTrustSignals() {
+  const schemaTypes = trustSchemaTypes();
+  const { pageType, via } = trustPageType(schemaTypes);
+  const byline = trustByline();
+  const named = trustNamedPeople(schemaTypes, byline);
+  const address = trustVisibleAddress();
+  const thirdParty = trustThirdPartyProof();
+
+  return {
+    pageType,
+    pageTypeVia: via,
+    schemaTypes,
+    hasOrganizationSchema: schemaTypes.some(t => /organization|localbusiness|corporation|ngo/i.test(t)),
+    hasOrganizationSameAs: trustHasSameAs(),
+    hasPersonSchema: schemaTypes.includes('Person'),
+    hasAggregateRatingOnOrg: trustAggregateRatingOnOrg(),
+    hasByline: byline.hasByline,
+    bylineName: byline.bylineName,
+    bylineHref: byline.bylineHref,
+    hasNamedPeople: named.hasNamedPeople,
+    namedPeopleVia: named.via,
+    hasVisibleAddress: address.hasVisibleAddress,
+    visibleAddressVia: address.via,
+    hasThirdPartyProof: thirdParty.hasThirdPartyProof,
+    thirdPartyProof: thirdParty.thirdPartyProof,
+    unquantifiedClaims: trustUnquantifiedClaims()
+  };
+}
+
+/** `sameAs` on the Organization entity — R-ORG treats its absence as incomplete. */
+function trustHasSameAs() {
+  let found = false;
+  document.querySelectorAll('script[type="application/ld+json"]').forEach(el => {
+    let parsed;
+    try { parsed = JSON.parse(el.textContent); } catch { return; }
+    const walk = (node) => {
+      if (!node || typeof node !== 'object' || found) return;
+      if (Array.isArray(node)) { node.forEach(walk); return; }
+      const types = [].concat(node['@type'] || []);
+      if (types.some(t => /organization|localbusiness|corporation|ngo/i.test(String(t)))) {
+        const s = node.sameAs;
+        if (typeof s === 'string' ? s.trim() : Array.isArray(s) && s.length) found = true;
+      }
+      Object.values(node).forEach(v => { if (v && typeof v === 'object') walk(v); });
+    };
+    walk(parsed);
+  });
+  return found;
+}
+
+/**
+ * aggregateRating sitting on the site's OWN Organization/LocalBusiness entity.
+ * Google has excluded self-serving reviews on these types from star eligibility
+ * since 2019, so this is reported as an informational finding — the client may
+ * believe it is earning stars that it cannot earn.
+ */
+function trustAggregateRatingOnOrg() {
+  let found = false;
+  document.querySelectorAll('script[type="application/ld+json"]').forEach(el => {
+    let parsed;
+    try { parsed = JSON.parse(el.textContent); } catch { return; }
+    const walk = (node) => {
+      if (!node || typeof node !== 'object' || found) return;
+      if (Array.isArray(node)) { node.forEach(walk); return; }
+      const types = [].concat(node['@type'] || []).map(String);
+      const isOrg = types.some(t => /organization|localbusiness|corporation|ngo/i.test(t));
+      if (isOrg && (node.aggregateRating || node.review)) found = true;
+      Object.values(node).forEach(v => { if (v && typeof v === 'object') walk(v); });
+    };
+    walk(parsed);
+  });
+  return found;
+}
 
 // ─── robots.txt: make the URLs clickable ──────────────────────────────────────
 //

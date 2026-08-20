@@ -102,6 +102,7 @@ function routeMessage(message) {
     case 'clientRegistryAddBrandedTerm':  return clientRegistryAddBrandedTerm(message);
     case 'clientRegistrySetImageSeo': return clientRegistrySetImageSeo(message);
     case 'clientRegistrySetCompetitors': return clientRegistrySetCompetitors(message);
+    case 'clientRegistrySetTrust':       return clientRegistrySetTrust(message);
     case 'driveConnectBrowse':   return driveConnectBrowse();
     case 'driveListFolders':     return driveListFolders(message);
     case 'driveListSharedDrives': return driveListSharedDrives(message);

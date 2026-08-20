@@ -47,10 +47,40 @@ function clientRegistryId() {
   return (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `c${Date.now()}${Math.random().toString(36).slice(2)}`;
 }
 
+// businessModel drives which trust rules can fire at all; ymyl adds the
+// credentialing rules. `regulated` covers verticals that need licensure
+// surfaced but are not Your-Money-Your-Life — engineering, water treatment —
+// which would otherwise have to masquerade as `health` to get the rule.
+const CLIENT_BUSINESS_MODELS = ['local_service', 'ecommerce', 'b2b_technical', 'multi_location', 'publisher'];
+const CLIENT_YMYL_LEVELS = ['none', 'health', 'finance', 'legal', 'regulated'];
+
+function clientRegistryTrustDefaults() {
+  return { businessModel: 'local_service', ymyl: 'none', hasGbp: false, authoredContent: false };
+}
+
+// Unknown values are coerced rather than rejected: a client shard written by a
+// newer build, or hand-edited, must not be able to put the rule engine into a
+// state no rule accounts for.
+function clientRegistryNormalizeTrust(raw) {
+  const d = clientRegistryTrustDefaults();
+  const t = raw && typeof raw === 'object' ? raw : {};
+  return {
+    businessModel: CLIENT_BUSINESS_MODELS.includes(t.businessModel) ? t.businessModel : d.businessModel,
+    ymyl:          CLIENT_YMYL_LEVELS.includes(t.ymyl)              ? t.ymyl          : d.ymyl,
+    hasGbp:          !!t.hasGbp,
+    authoredContent: !!t.authoredContent
+  };
+}
+
 function clientRegistryNew(name) {
   const now = Date.now();
   return {
     id: clientRegistryId(), name: name || 'New Client', domains: [], brandedTerms: '', keywords: [], competitors: [],
+    // E-E-A-T rule gating. Manual, client-level, and deliberately not guessed
+    // per crawl: a rule the client cannot execute is worse than silence, and
+    // only a human knows whether this business publishes bylined material or
+    // operates under a licence.
+    trust: clientRegistryTrustDefaults(),
     imageSeo: null, driveFolderId: null, driveFolderName: null, createdAt: now, updatedAt: now
   };
 }
@@ -369,6 +399,15 @@ async function clientRegistryAddBrandedTerm({ host, term }) {
 // a separate, explicit action (webceoSetCompetitors) rather than a side effect
 // of saving: it is a remote write against the user's quota, and silently
 // firing one on every keystroke would be surprising.
+async function clientRegistrySetTrust({ id, trust }) {
+  await ensureClientRegistryMigrated();
+  const client = await clientRegistryGetRaw(id);
+  if (!client) return { ok: false, error: 'NOT_FOUND' };
+  client.trust = clientRegistryNormalizeTrust({ ...clientRegistryNormalizeTrust(client.trust), ...(trust || {}) });
+  await clientRegistrySaveRaw(client);
+  return { ok: true, client };
+}
+
 async function clientRegistrySetCompetitors({ id, competitors }) {
   await ensureClientRegistryMigrated();
   const client = await clientRegistryGetRaw(id);

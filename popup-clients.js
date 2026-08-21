@@ -725,17 +725,43 @@ async function renderDriveFolderRow(container, client) {
   container.appendChild(row);
 
   if (client.driveFolderId) {
-    const verify = await sendMessageWithTimeout({ action: 'driveVerifyFolder', folderId: client.driveFolderId }).catch(() => null);
+    // Only ask Drive to resolve ancestors when we have none stored — a folder
+    // picked in this build already carried its path down from the browser, and
+    // each level costs a request.
+    const needPath = !(client.driveFolderPath && client.driveFolderPath.length);
+    const verify = await sendMessageWithTimeout({
+      action: 'driveVerifyFolder', folderId: client.driveFolderId, withPath: needPath
+    }).catch(() => null);
     if (verify && verify.missing) {
       const hint = document.createElement('span');
       hint.className = 'field-hint hint-red';
       hint.textContent = 'This folder is no longer available — pick a new one.';
       row.appendChild(hint);
     } else {
+      const ancestors = (client.driveFolderPath && client.driveFolderPath.length)
+        ? client.driveFolderPath
+        : ((verify && verify.path) || []);
+      const folderName = (verify && verify.name) || client.driveFolderName || client.driveFolderId;
+
       const name = document.createElement('span');
       name.className = 'client-drive-name';
-      name.textContent = client.driveFolderName || client.driveFolderId;
+      // Ancestors are muted and the folder itself is not, so the eye lands on
+      // the folder exports actually go into.
+      ancestors.forEach(a => {
+        const crumb = document.createElement('span');
+        crumb.className = 'client-drive-crumb';
+        crumb.textContent = a;
+        name.append(crumb, document.createTextNode(' \u203a '));
+      });
+      name.appendChild(document.createTextNode(folderName));
+      name.title = [...ancestors, folderName].join(' \u203a ');
       row.appendChild(name);
+
+      // Backfilled from Drive rather than the picker — save it so the next
+      // panel open costs nothing.
+      if (needPath && verify && verify.path && verify.path.length) {
+        saveClientField({ driveFolderPath: verify.path });
+      }
 
       const openBtn = document.createElement('button');
       openBtn.type = 'button';
@@ -747,7 +773,7 @@ async function renderDriveFolderRow(container, client) {
 
       row.appendChild(propertyTrashButton('Unlink this Drive folder', async () => {
         await ensureClientPersisted();
-        await saveClientField({ driveFolderId: null, driveFolderName: null });
+        await saveClientField({ driveFolderId: null, driveFolderName: null, driveFolderPath: [] });
         renderClientPanelContent();
       }));
     }
@@ -765,11 +791,29 @@ async function renderDriveFolderRow(container, client) {
   row.appendChild(browseBtn);
 }
 
-async function onDriveFolderPicked(folder) {
+// The breadcrumb the user just navigated IS the folder's path, so capturing it
+// here costs nothing. `ancestors` is everything above the chosen folder; only
+// the nearest two are kept, which is where a name stops being ambiguous.
+async function onDriveFolderPicked(folder, ancestors = []) {
   await ensureClientPersisted();
-  await saveClientField({ driveFolderId: folder.id, driveFolderName: folder.name });
+  await saveClientField({
+    driveFolderId: folder.id,
+    driveFolderName: folder.name,
+    driveFolderPath: ancestors.slice(-2)
+  });
   closeDriveFolderBrowser();
   renderClientPanelContent();
+}
+
+// Names above the current browser location, outermost first. My Drive is
+// included because "My Drive > Acme" tells a reader more than a bare "Acme";
+// a Shared Drive already sits at the head of _driveBrowserPath under its own
+// name, and "Shared with me" is not a real folder anything lives in.
+function driveBrowserAncestors(excludeCurrent) {
+  const names = _driveBrowserPath.map(f => f.name);
+  if (excludeCurrent) names.pop();
+  if (_driveBrowserRoot === 'mydrive') names.unshift('My Drive');
+  return names;
 }
 
 // ─── Per-domain binding pickers ───────────────────────────────────────────────
@@ -1090,7 +1134,8 @@ function driveBrowserRow(id, name, isDrive) {
   hereBtn.className = 'drive-browser-item-here';
   hereBtn.title = `Save exports directly in "${name}"`;
   hereBtn.textContent = 'Here';
-  hereBtn.addEventListener('click', (e) => { e.stopPropagation(); onDriveFolderPicked({ id, name }); });
+  // Picked without descending, so the current location is its whole path.
+  hereBtn.addEventListener('click', (e) => { e.stopPropagation(); onDriveFolderPicked({ id, name }, driveBrowserAncestors(false)); });
   actions.appendChild(hereBtn);
 
   const drillBtn = document.createElement('button');
@@ -1218,5 +1263,6 @@ document.getElementById('btn-drive-browser-close').addEventListener('click', clo
 document.getElementById('btn-drive-browser-cancel').addEventListener('click', closeDriveFolderBrowser);
 document.getElementById('btn-drive-browser-select').addEventListener('click', () => {
   if (!_driveBrowserPath.length) return;
-  onDriveFolderPicked(_driveBrowserPath[_driveBrowserPath.length - 1]);
+  // Picked from inside it, so drop it off the end of its own path.
+  onDriveFolderPicked(_driveBrowserPath[_driveBrowserPath.length - 1], driveBrowserAncestors(true));
 });

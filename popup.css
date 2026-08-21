@@ -3577,6 +3577,9 @@ body.settings-open #update-footer { margin-top: auto; }
 }
 .client-competitor-sync .field-hint { flex: 1 1 100%; margin: 0; }
 
+/* Ancestors are context; the folder itself is the answer. */
+.client-drive-crumb { color: var(--text-muted); }
+
 .client-drive-row {
   display: flex;
   align-items: center;

@@ -263,6 +263,12 @@ async function clientRegistrySave({ client }) {
   if ('driveFolderId' in client) {
     existing.driveFolderId = client.driveFolderId || null;
     existing.driveFolderName = client.driveFolderName || null;
+    // Ancestor names, outermost first. Display only — the folder id is still
+    // the single source of truth, and a stale path is cosmetic where a stale
+    // id would be a broken export.
+    if ('driveFolderPath' in client) {
+      existing.driveFolderPath = Array.isArray(client.driveFolderPath) ? client.driveFolderPath.slice(0, 2) : [];
+    }
     // A fresh folder attachment clears any earlier "not now" — the whole
     // reason to dismiss the prompt (no folder to offer) no longer applies.
     if (existing.driveFolderId) existing.driveFolderPromptDismissed = false;
@@ -519,18 +525,52 @@ async function driveListSharedDrives({ pageToken }) {
 // trust shape as sheetsGetOrCreateSpreadsheet). Never silently recreates —
 // it's the user's own folder, not one this app created — the caller should
 // prompt a re-pick when `missing` comes back true.
-async function driveVerifyFolder({ folderId }) {
+// How many ancestors to resolve for the "Clients > Acme > SEO" display. Two is
+// the point at which a folder name stops being ambiguous — most agencies have
+// several folders called "Assets" or "2026".
+const DRIVE_PATH_DEPTH = 2;
+
+/**
+ * Walk up from a folder, naming each ancestor. Best-effort throughout: a
+ * parent in someone else's Drive, or a Shared Drive root, can legitimately
+ * refuse to resolve, and a partial path is worth more than none.
+ *
+ * Returns outermost-first, so it renders left to right.
+ */
+async function driveAncestors(accessToken, firstParentId) {
+  const out = [];
+  let id = firstParentId;
+  for (let i = 0; i < DRIVE_PATH_DEPTH && id; i++) {
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${id}?fields=id,name,parents&supportsAllDrives=true`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    ).catch(() => null);
+    if (!res || !res.ok) break;
+    const meta = await res.json().catch(() => null);
+    if (!meta || !meta.name) break;
+    out.unshift(meta.name);
+    id = (meta.parents && meta.parents[0]) || null;
+  }
+  return out;
+}
+
+// `withPath` is opt-in: resolving ancestors costs one request per level, and
+// most callers only need to know the folder still exists.
+async function driveVerifyFolder({ folderId, withPath = false }) {
   if (!folderId) return { missing: true };
   const token = await docsGetAccessToken();
   if (token.error) return { notConnected: true, error: token.error };
   const res = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${folderId}?fields=id,name,trashed&supportsAllDrives=true`,
+    `https://www.googleapis.com/drive/v3/files/${folderId}?fields=id,name,trashed,parents&supportsAllDrives=true`,
     { headers: { Authorization: `Bearer ${token.accessToken}` } }
   ).catch(() => null);
   if (!res || !res.ok) return { missing: true };
   const meta = await res.json();
   if (meta.trashed) return { missing: true };
-  return { missing: false, name: meta.name };
+
+  const out = { missing: false, name: meta.name };
+  if (withPath) out.path = await driveAncestors(token.accessToken, (meta.parents && meta.parents[0]) || null);
+  return out;
 }
 
 // ─── Export retargeting: land exports in a Client's own Drive folder ───────

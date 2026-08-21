@@ -85,45 +85,68 @@ function htmlEsc(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Rule ids for a reader. "R-" separates rules from hard blocks in the spec and
+// means nothing outside it; hyphens are word breaks; and two ids run words
+// together in a way that reads badly in prose.
+function trustRuleDisplay(ruleId) {
+  return String(ruleId || '')
+    .replace(/^R-/, '')
+    .replace(/-/g, ' ')
+    .replace(/\bTHIRDPARTY\b/, 'THIRD PARTY')
+    .replace(/\bNOSTARS\b/, 'NO STARS');
+}
+
 // Build the Action Plan as an HTML document. Drive's import converter maps
-// h1/h2 → heading styles, b/i → bold/italic, and inline color styles → text color.
-function buildActionPlanHtml(plan, docTitle, fetchedAt) {
+// h1/h2 → heading styles, p.title/p.subtitle → the Title and Subtitle named
+// styles, b/i → bold/italic, and inline color styles → text color.
+//
+// Font sizes are deliberately NOT set. An inline font-size overrides the named
+// style it lands on, which is what stopped the document picking up the reader's
+// own heading and body styles. Colour is still set where it carries meaning —
+// effort banding and muted evidence — since nothing in a named style conveys
+// that.
+function buildActionPlanHtml(plan, meta, fetchedAt) {
   const GRAY = '#999999';
   const EFFORT_COLOR = { surgical: '#15803d', moderate: '#b45309', rewrite: '#808080' };
-  const out = [];
-
-  out.push(`<h1>${htmlEsc(docTitle)}</h1>`);
-  const dateStr = new Date(fetchedAt || Date.now()).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-  out.push(`<p style="color:${GRAY};font-size:10pt">Generated ${htmlEsc(dateStr)}</p>`);
-
   const TIERS = [
     { effort: 'surgical', title: 'Quick wins' },
     { effort: 'moderate', title: 'Recommended' },
     { effort: 'rewrite',  title: 'Heavy lift' }
   ];
+  const tierTitle = (effort) => (TIERS.find(t => t.effort === effort) || {}).title || 'Recommended';
+  const out = [];
+
+  // Title and Subtitle rather than a heading: the document's name is the plan,
+  // and the page it covers is its subtitle. No date here — "Generated …"
+  // carries that a line below, and repeating it in the title is noise.
+  out.push(`<p class="title">${htmlEsc(meta.title)}</p>`);
+  if (meta.subtitle) out.push(`<p class="subtitle">${htmlEsc(meta.subtitle)}</p>`);
+  const dateStr = new Date(fetchedAt || Date.now()).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  out.push(`<p style="color:${GRAY}">Generated ${htmlEsc(dateStr)}</p>`);
+
   TIERS.forEach(tier => {
     const recs = (plan.recommendations || []).filter(rec => rec.effort === tier.effort);
     if (!recs.length) return;
-    out.push(`<h2>${htmlEsc(tier.title)}</h2>`);
+    out.push(`<h1>${htmlEsc(tier.title)}</h1>`);
     const color = EFFORT_COLOR[tier.effort];
     recs.forEach(rec => {
-      out.push(`<p style="font-size:12pt"><b>${htmlEsc(rec.change)}</b></p>`);
+      out.push(`<h2>${htmlEsc(rec.change)}</h2>`);
       const ch = rec.channel === 'both' ? 'SEO + Paid' : rec.channel === 'paid' ? 'Paid' : 'SEO';
       const impactStr = (rec.impact ? `${tier.title} · ${rec.impact} impact` : tier.title) + ` · ${ch}`;
-      out.push(`<p style="color:${color};font-size:10pt">${htmlEsc(impactStr)}</p>`);
+      out.push(`<p style="color:${color}">${htmlEsc(impactStr)}</p>`);
       if (rec.detail) out.push(`<p>${htmlEsc(rec.detail)}</p>`);
       if (rec.evidence) out.push(`<p style="color:${GRAY}"><i>${htmlEsc(rec.evidence)}</i></p>`);
     });
   });
 
   if (plan.contentGaps && plan.contentGaps.length) {
-    out.push('<h2>Content gaps</h2>');
+    out.push('<h1>Content gaps</h1>');
     out.push(`<p>${htmlEsc(plan.contentGaps.join(', '))}</p>`);
   }
 
   const gap = plan.intentGap;
   if (gap && gap.pageIntent) {
-    out.push('<h2>Intent gap</h2>');
+    out.push('<h1>Intent gap</h1>');
     out.push(`<p><b>${htmlEsc(gap.pageIntent)} → ${htmlEsc(gap.trafficIntent || '')}</b></p>`);
     if (gap.summary) out.push(`<p style="color:${GRAY}"><i>${htmlEsc(gap.summary)}</i></p>`);
     if (gap.suggestions && gap.suggestions.length) {
@@ -137,7 +160,7 @@ function buildActionPlanHtml(plan, docTitle, fetchedAt) {
   // A checklist of observable signals is both.
   const trust = plan.trust;
   if (trust && ((trust.checklist || []).length || (trust.recommendations || []).length)) {
-    out.push('<h2>Trust Signals</h2>');
+    out.push('<h1>Trust Signals</h1>');
 
     if ((trust.checklist || []).length) {
       out.push('<ul>' + trust.checklist.map(c => {
@@ -147,20 +170,23 @@ function buildActionPlanHtml(plan, docTitle, fetchedAt) {
         const why = (c.state === 'na' && c.reason) ? ` <i>(${htmlEsc(c.reason)})</i>` : '';
         return `<li>${mark} ${htmlEsc(c.label)}${why}</li>`;
       }).join('') + '</ul>');
+      // Drive drops a truly empty <p>, so the spacer needs a character in it.
+      out.push('<p>&nbsp;</p>');
     }
 
     (trust.recommendations || []).forEach(r => {
-      // "R-" is internal taxonomy — it separates rules from hard blocks in the
-      // spec and means nothing to a reader.
-      const label = String(r.ruleId || '').replace(/^R-/, '');
-      out.push(`<p><b>${htmlEsc(r.change)}</b> <i>[${htmlEsc(label)} &middot; ${htmlEsc(r.effort)} &middot; ${htmlEsc(r.impact)} impact]</i></p>`);
+      out.push(`<h2>${htmlEsc(r.change)}</h2>`);
+      // Same shape, order and banding as a recommendation's meta line above:
+      // effort tier, then impact, then what kind of change it is.
+      const metaStr = `${tierTitle(r.effort)} · ${r.impact} impact · ${trustRuleDisplay(r.ruleId)}`;
+      out.push(`<p style="color:${EFFORT_COLOR[r.effort] || GRAY}">${htmlEsc(metaStr)}</p>`);
       if (r.detail) out.push(`<p>${htmlEsc(r.detail)}</p>`);
-      out.push(`<p style="color:${GRAY}">${htmlEsc(r.evidence)}</p>`);
+      out.push(`<p style="color:${GRAY}"><i>${htmlEsc(r.evidence)}</i></p>`);
       if (r.ceiling) out.push(`<p style="color:${GRAY}"><i>${htmlEsc(r.ceiling)}</i></p>`);
     });
 
     (trust.findings || []).forEach(f => out.push(`<p style="color:${GRAY}">${htmlEsc(f.text)}</p>`));
-    if (trust.caveat) out.push(`<p style="color:${GRAY};font-size:10pt"><i>${htmlEsc(trust.caveat)}</i></p>`);
+    if (trust.caveat) out.push(`<p style="color:${GRAY}"><i>${htmlEsc(trust.caveat)}</i></p>`);
   }
 
   return `<html><head><meta charset="utf-8"></head><body>${out.join('')}</body></html>`;
@@ -223,8 +249,16 @@ async function docsExportActionPlan({ plan, pageUrl, fetchedAt, planTitle }) {
 
   const { folderId } = await resolveExportFolder(token.accessToken, pageUrl, DRIVE_PLANS_SUBDIR);
   const date = new Date().toISOString().slice(0, 10);
+  // Two different names. The Drive FILE keeps its date so exports sort
+  // chronologically and never collide; the document's own Title does not,
+  // because "Generated …" already sits directly beneath it.
   const docTitle = `${date}: ${planTitle || 'Action Plan'} For ${docsUrlLabel(pageUrl)}`;
-  const html = buildActionPlanHtml(plan, docTitle, fetchedAt);
+  let domain = 'this page';
+  try { domain = new URL(pageUrl).hostname.replace(/^www\./, ''); } catch { /* keep the fallback */ }
+  const html = buildActionPlanHtml(plan, {
+    title: `${planTitle || 'Action Plan'} for ${domain}`,
+    subtitle: pageUrl || ''
+  }, fetchedAt);
   return docsUploadHtmlDoc(token.accessToken, docTitle, html, folderId);
 }
 

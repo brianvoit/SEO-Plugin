@@ -187,7 +187,7 @@ describe('all three render paths carry the new shape', () => {
   });
 
   test('the Google Doc export renders the checklist and drops the score', () => {
-    assert.match(exportSrc, /<h2>Trust Signals<\/h2>/);
+    assert.match(exportSrc, /<h1>Trust Signals<\/h1>/);
     assert.doesNotMatch(exportSrc, /E-E-A-T Signals/);
     assert.doesNotMatch(exportSrc, /Score: \$\{htmlEsc\(scoreLabel\)\}/);
   });

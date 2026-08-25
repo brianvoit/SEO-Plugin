@@ -467,33 +467,70 @@ function renderCompetitorsSection(container, client) {
   const status = document.createElement('span');
   status.className = 'field-hint hint-muted';
 
-  // With nothing to push, offer the other direction instead. A project whose
-  // competitors were configured in Web CEO's own UI already has a list, and
-  // pushing an empty one at it would WIPE that — so an empty list must never
-  // be a Sync button.
-  if (!current.length) {
-    const importBtn = document.createElement('button');
-    importBtn.className = 'save-key-btn';
-    importBtn.textContent = 'Import from Web CEO';
-    importBtn.addEventListener('click', async () => {
-      importBtn.disabled = true;
-      status.className = 'field-hint hint-muted';
-      status.textContent = 'Reading…';
-      const found = [];
-      const failures = [];
-      for (const d of bound) {
-        const res = await sendMessageWithTimeout({
-          action: 'webceoGetCompetitors', pageUrl: `https://${d.domain}/`
-        }).catch(() => null);
-        if (res && Array.isArray(res.competitors)) found.push(...res.competitors);
-        else failures.push(`${d.domain}: ${(res && (res.detail || res.error)) || 'no response'}`);
+  // Pull from Web CEO. A MERGE, never a replace: competitors typed here by
+  // hand and competitors configured in Web CEO are both real, and neither
+  // source gets to delete the other's.
+  const pullCompetitors = async ({ silent = false } = {}) => {
+    const found = [];
+    const failures = [];
+    for (const d of bound) {
+      const res = await sendMessageWithTimeout({
+        action: 'webceoGetCompetitors', pageUrl: `https://${d.domain}/`
+      }).catch(() => null);
+      if (res && Array.isArray(res.competitors)) found.push(...res.competitors);
+      else failures.push(`${d.domain}: ${(res && (res.detail || res.error)) || 'no response'}`);
+    }
+
+    const merged = [...new Set([...current, ...found])];
+    const added = merged.length - current.length;
+
+    // Save on any attempt, so the stamp lands even when Web CEO had nothing —
+    // otherwise the automatic pull below re-asks on every single panel open.
+    if (added || !client.competitorsPulledAt) {
+      const id = await ensureClientPersisted();
+      const res = await sendMessageWithTimeout({
+        action: 'clientRegistrySetCompetitors', id, competitors: merged, markPulled: true
+      });
+      if (res && res.client) {
+        _editingClient = res.client;
+        patchClientInList(_editingClient);
+        if (added) { renderClientPanelContent(); return { added, failures }; }
       }
-      importBtn.disabled = false;
-      if (found.length) { saveList([...new Set(found)]); return; }   // re-renders
+    }
+
+    if (!silent) {
       status.className = failures.length ? 'field-hint hint-red' : 'field-hint hint-muted';
-      status.textContent = failures.length ? failures.join(' · ') : 'Web CEO has no competitors for this project either.';
-    });
-    syncRow.append(importBtn, status);
+      status.textContent = failures.length
+        ? failures.join(' · ')
+        : (added ? `Added ${added} from Web CEO.` : 'Nothing new — Web CEO has no competitors this list is missing.');
+    }
+    return { added, failures };
+  };
+
+  // Ask Web CEO once per client, unprompted. Most projects that have
+  // competitors set them in Web CEO's own UI long before this panel exists, and
+  // making someone click to discover that is a worse first impression than one
+  // background read.
+  if (!client.competitorsPulledAt) pullCompetitors({ silent: true });
+
+  const importBtn = document.createElement('button');
+  importBtn.className = 'save-key-btn';
+  importBtn.textContent = 'Pull from Web CEO';
+  importBtn.title = 'Add any competitors configured in Web CEO that are missing here. Never removes one you added.';
+  importBtn.addEventListener('click', async () => {
+    importBtn.disabled = true;
+    status.className = 'field-hint hint-muted';
+    status.textContent = 'Reading…';
+    await pullCompetitors();
+    importBtn.disabled = false;
+  });
+  syncRow.appendChild(importBtn);
+
+  // Pushing an empty list would WIPE a project whose competitors live in Web
+  // CEO's own UI, so there is nothing to sync until this list has something in
+  // it. The pull above is always available regardless.
+  if (!current.length) {
+    syncRow.appendChild(status);
     container.appendChild(syncRow);
     return;
   }

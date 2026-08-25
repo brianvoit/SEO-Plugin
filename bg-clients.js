@@ -414,10 +414,15 @@ async function clientRegistrySetTrust({ id, trust }) {
   return { ok: true, client };
 }
 
-async function clientRegistrySetCompetitors({ id, competitors }) {
+// `markPulled` stamps that Web CEO has been asked for this client's
+// competitors. Stamped on the ATTEMPT, not on success: a client with none
+// configured in Web CEO would otherwise be re-queried on every panel open,
+// forever, to be told nothing every time.
+async function clientRegistrySetCompetitors({ id, competitors, markPulled }) {
   await ensureClientRegistryMigrated();
   const client = await clientRegistryGetRaw(id);
   if (!client) return { ok: false, error: 'NOT_FOUND' };
+  if (markPulled) client.competitorsPulledAt = Date.now();
   client.competitors = [...new Set((Array.isArray(competitors) ? competitors : [])
     .map(c => String(c || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, ''))
     .filter(Boolean))];

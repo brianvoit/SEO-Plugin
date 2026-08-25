@@ -13,7 +13,11 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { backgroundSource } from './helpers.mjs';
+import { backgroundSource, ROOT } from './helpers.mjs';
+import { readFileSync } from 'node:fs';
+import nodePath from 'node:path';
+
+const fsReadSync = (f) => readFileSync(nodePath.join(ROOT, f), 'utf8');
 
 const src = await backgroundSource();
 
@@ -278,5 +282,54 @@ describe('the client-level list', () => {
     const shard = b.sync[`client:${client.id}`];
     assert.ok(shard, 'the client shard should be in storage.sync');
     assert.deepEqual(plain(shard.competitors), ['rival.com']);
+  });
+});
+
+// ─── Pulling in competitors already set in Web CEO ────────────────────────────
+
+describe('the Web CEO pull merges rather than replaces', () => {
+  const clients = fsReadSync('popup-clients.js');
+  const bg      = fsReadSync('bg-clients.js');
+
+  test('local and remote lists are unioned', () => {
+    // Competitors typed here and competitors configured in Web CEO are both
+    // real; neither source gets to delete the other's.
+    assert.match(clients, /const merged = \[\.\.\.new Set\(\[\.\.\.current, \.\.\.found\]\)\]/);
+  });
+
+  test('the pull is offered whatever the list already holds', () => {
+    // It used to appear only on an empty list, so a single hand-typed
+    // competitor locked you out of importing the rest.
+    const tail = clients.slice(clients.indexOf('const pullCompetitors'));
+    const guard = tail.slice(0, tail.indexOf('syncRow.appendChild(importBtn)'));
+    assert.doesNotMatch(guard, /if \(!current\.length\)/);
+  });
+
+  test('the push still refuses an empty list', () => {
+    // Pushing empty would wipe a project configured in Web CEO's own UI.
+    const tail = clients.slice(clients.indexOf('syncRow.appendChild(importBtn)'));
+    assert.match(tail.slice(0, 600), /if \(!current\.length\)/);
+  });
+
+  test('a fresh client is asked once, unprompted', () => {
+    assert.match(clients, /if \(!client\.competitorsPulledAt\) pullCompetitors\(\{ silent: true \}\)/);
+  });
+
+  test('the attempt is stamped even when Web CEO had nothing', () => {
+    // Otherwise a client with none configured is re-queried on every open.
+    assert.match(clients, /if \(added \|\| !client\.competitorsPulledAt\)/);
+    assert.match(clients, /markPulled: true/);
+    assert.match(bg, /if \(markPulled\) client\.competitorsPulledAt = Date\.now\(\)/);
+  });
+
+  test('the button says what it did', () => {
+    assert.match(clients, /Added \$\{added\} from Web CEO\./);
+    assert.match(clients, /Nothing new — Web CEO has no competitors this list is missing\./);
+  });
+
+  test('removing a competitor by hand still sticks', () => {
+    // The auto-pull is once-per-client, so a deliberate removal is not undone
+    // on the next panel open.
+    assert.match(clients, /competitorsPulledAt/);
   });
 });

@@ -16,6 +16,11 @@
 // used for the lightweight page insights. Change here to trade cost for depth.
 const ACTION_PLAN_MODEL = MODEL_HEAVY;
 const ACTION_PLAN_TTL_MS = 60 * 60 * 1000;     // 1h — GSC data shifts; stale plans mislead
+// Headroom, not a target. A full plan is 3-8 recommendations with a title,
+// detail and evidence each, plus content gaps, an intent gap with 8 phrase
+// suggestions, and up to ten phrased trust rules. Nothing is billed for
+// headroom that goes unused.
+const ACTION_PLAN_MAX_TOKENS = 8192;
 const ACTION_PLAN_RANGE = '90';                // 90-day demand window (impressions/terms)
 
 // Tier metadata: effort label → section heading + accent class
@@ -819,14 +824,26 @@ async function loadActionPlan(forceRefresh = false, variant = _apVariant) {
       },
       body: JSON.stringify({
         model: ACTION_PLAN_MODEL,
-        max_tokens: 4096,
+        // Raised from 4096. The response grew twice without this moving: the
+        // trust module added up to ten more phrased recommendations, and every
+        // recommendation gained a `detail`. Unused headroom costs nothing —
+        // output is billed on what is produced — while running out truncates
+        // the JSON mid-object and loses the whole plan.
+        max_tokens: ACTION_PLAN_MAX_TOKENS,
         system: [{ type: 'text', text: ACTION_PLAN_SYSTEMS[variant] || ACTION_PLAN_SYSTEM, cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: context }]
       })
     });
     const parsed = actionPlanParse(claudeText(data));
     const plan = applyVariantContract(normalizeActionPlan(parsed), variant);
-    if (!plan) throw new Error('Could not parse a plan from the response.');
+    if (!plan) {
+      // Four different failures used to share one message, so a user could not
+      // tell "try again" from "this page will never work". Truncation is the
+      // one that recurs forever, and it is the one the API tells us about.
+      throw new Error(data && data.stop_reason === 'max_tokens'
+        ? 'The response was cut off before it finished — this page produces more than fits in one plan. Try the SEO or Paid plan on its own; the Overview plan asks for the most.'
+        : 'Could not parse a plan from the response. This is usually transient — try again.');
+    }
     // Attached after the variant contract, which strips trust from the Paid
     // plan — an organic concept has no place there.
     if (variant !== 'paid') {
@@ -981,14 +998,34 @@ function renderActionPlanPanel() {
     msg.className = 'field-hint hint-red';
     msg.textContent = st.error;
     sec.appendChild(msg);
+    // This branch returns before the header renders, so its refresh control is
+    // not on screen — without a button here the only way to retry was to leave
+    // the panel and come back, which nothing tells you.
+    const actions = document.createElement('div');
+    actions.className = 'ap-error-actions';
     if (/Claude API key/.test(st.error)) {
       const btn = document.createElement('button');
       btn.className = 'save-key-btn';
-      btn.style.marginTop = '8px';
       btn.textContent = 'Open Settings';
       btn.addEventListener('click', showSettings);
-      sec.appendChild(btn);
+      actions.appendChild(btn);
+    } else {
+      const retry = document.createElement('button');
+      retry.className = 'save-key-btn';
+      retry.textContent = 'Try again';
+      retry.addEventListener('click', () => loadActionPlan(true, _apVariant));
+      actions.appendChild(retry);
+
+      // Truncation is the failure retrying cannot fix, so offer the way out
+      // rather than inviting a loop.
+      if (_apVariant === 'overview') {
+        const hint = document.createElement('div');
+        hint.className = 'field-hint hint-muted';
+        hint.textContent = 'The SEO and Paid plans each ask for less, and often succeed where the Overview plan does not.';
+        sec.appendChild(hint);
+      }
     }
+    sec.appendChild(actions);
     root.appendChild(sec);
     return;
   }

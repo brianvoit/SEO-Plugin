@@ -3518,6 +3518,8 @@ body.settings-open #update-footer { margin-top: auto; }
 }
 .ap-suggestion-chip:hover { background: var(--heading-tag-bg); border-color: var(--accent); color: var(--accent); }
 
+.ap-error-actions { display: flex; gap: 8px; margin-top: 8px; }
+
 /* ── Action Plan: trust signals ───────────────────────────────────────────── */
 .ap-trust-checklist { display: flex; flex-direction: column; gap: 3px; margin: 6px 0 10px; }
 .ap-trust-row { display: flex; align-items: baseline; gap: 7px; font-size: 12px; }

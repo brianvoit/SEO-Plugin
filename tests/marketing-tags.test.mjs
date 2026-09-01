@@ -44,10 +44,12 @@ function scan(html, resources = []) {
       ? resources.map((r, i) => typeof r === 'string' ? { name: r, startTime: (i + 1) * 100 } : { startTime: (i + 1) * 100, ...r })
       : [];
 
+  // `location` is passed in because every reading stamps the page it came
+  // from — tag data that outlives its page gets attributed to the wrong site.
   const { detectMarketingTags, TAG_VENDORS } = new Function(
-    'document', 'performance',
+    'document', 'performance', 'location',
     `${source}; return { detectMarketingTags, TAG_VENDORS };`
-  )(window.document, window.performance);
+  )(window.document, window.performance, window.location);
 
   return { ...detectMarketingTags(), TAG_VENDORS };
 }
@@ -56,6 +58,19 @@ const vendor = (res, id) => res.vendors.find(v => v.id === id);
 const codes = (res) => res.flags.map(f => f.code);
 
 const script = (src) => `<script src="${src}"></script>`;
+
+describe('the reading names its page', () => {
+  test('every scan carries the URL it was taken from', () => {
+    // Without it, a reading kept after a failed re-scan is indistinguishable
+    // from one belonging to the page on screen — which is how a container from
+    // another client was reported on edcoproducts.com.
+    assert.equal(scan(script('https://www.googletagmanager.com/gtm.js?id=GTM-AAA1')).pageUrl, 'https://site.test/');
+  });
+
+  test('a page with no tags still says where it looked', () => {
+    assert.equal(scan('<p>nothing here</p>').pageUrl, 'https://site.test/');
+  });
+});
 
 describe('the shared-host trap', () => {
   // Tag Manager and GA4 both live on googletagmanager.com and differ only by

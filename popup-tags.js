@@ -9,6 +9,18 @@
 
 let _tagsData = null;
 let _tagsScanning = false;
+// Why the last read produced nothing: 'unreadable' when the page could not be
+// asked at all, 'navigated' when the answer came back describing a different
+// page. Both used to leave the PREVIOUS page's tags on screen, which is how a
+// GTM container from another client ended up attributed to this one.
+let _tagsError = null;
+
+// A reading is only valid for the page it was taken from. Compared without the
+// hash, since a fragment change is the same document and the same tags.
+function tagsSameUrl(a, b) {
+  const norm = (u) => String(u || '').split('#')[0];
+  return !!a && !!b && norm(a) === norm(b);
+}
 
 const TAG_CATEGORIES = [
   ['analytics',  'Analytics'],
@@ -26,6 +38,7 @@ function tagsWarned(vendorId) {
 
 function renderTagsEntry(data) {
   _tagsData = (data && data.marketingTags) || null;
+  _tagsError = null;
   renderTagsChips();
 }
 
@@ -110,8 +123,25 @@ async function rescanTags() {
     // or embed iframe is full of ad pixels and would happily report them as
     // the page's own stack.
     const res = await browser.tabs.sendMessage(tab.id, { action: 'getMarketingTags' }, TOP_FRAME);
-    if (res && res.vendors) _tagsData = res;
-  } catch { /* no content script on this page — keep what Overview had */ }
+    if (!res || !res.vendors) {
+      _tagsData = null;
+      _tagsError = 'unreadable';
+    } else if (res.pageUrl && tab.url && !tagsSameUrl(res.pageUrl, tab.url)) {
+      // The tab navigated while the read was in flight. Its answer describes a
+      // page nobody is looking at any more.
+      _tagsData = null;
+      _tagsError = 'navigated';
+    } else {
+      _tagsData = res;
+      _tagsError = null;
+    }
+  } catch {
+    // The page cannot be read — about:, the PDF viewer, AMO, a tab still
+    // loading. Previously this KEPT the last reading, so the tags of whatever
+    // you looked at before were shown as if they belonged to this page.
+    _tagsData = null;
+    _tagsError = 'unreadable';
+  }
   _tagsScanning = false;
   renderTagsPanel();
   renderTagsChips();     // a late-loading tag should show up on Overview too
@@ -131,9 +161,13 @@ function renderTagsPanel() {
 
   if (!vendors.length) {
     const hint = document.createElement('div');
-    hint.className = 'field-section field-hint hint-muted';
-    hint.textContent = _tagsScanning
-      ? 'Scanning the page…'
+    hint.className = 'field-section field-hint ' + (_tagsError && !_tagsScanning ? 'hint-amber' : 'hint-muted');
+    // "Could not read" and "read it, found nothing" are different findings —
+    // an audit that conflates them is how you conclude a site has no
+    // analytics when you simply never looked.
+    hint.textContent = _tagsScanning ? 'Scanning the page…'
+      : _tagsError === 'unreadable' ? 'Could not read this page — open the panel on a regular web page and refresh.'
+      : _tagsError === 'navigated'  ? 'The page changed while scanning — refresh to read it again.'
       : 'No marketing or analytics tags detected on this page.';
     root.appendChild(hint);
     return;

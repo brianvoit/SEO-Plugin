@@ -537,6 +537,10 @@ function detectMarketingTags() {
   });
 
   return {
+    // The reading names the page it came from. Tag data that outlives its page
+    // is worse than none: attributed to the wrong site it reports another
+    // client's stack as this client's, and nothing on screen says so.
+    pageUrl: (typeof location !== 'undefined' && location.href) || '',
     scannedAt: Math.round((typeof performance !== 'undefined' && performance.now) ? performance.now() : 0),
     vendors: accs.map(a => a.rec),
     flags: tagFlags(accs),

@@ -12,6 +12,9 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
 import { ROOT } from './helpers.mjs';
+import { readFileSync } from 'node:fs';
+
+const fsRead = (f) => readFileSync(path.join(ROOT, f), 'utf8');
 
 const src = await readFile(path.join(ROOT, 'popup-tags.js'), 'utf8');
 
@@ -217,10 +220,16 @@ describe('re-scanning', () => {
     assert.equal(chips(b).length, 1, 'the chip row still showed the stale reading');
   });
 
-  test('a page with no content script keeps the previous reading instead of blanking', async () => {
+  test('a page that cannot be read blanks, rather than keeping the last one', async () => {
+    // This test previously asserted the OPPOSITE — that a failed re-scan kept
+    // what was already known — and in doing so pinned a real bug in place.
+    // edcoproducts.com was reported showing GTM-N5ZZT3, a container verifiably
+    // not on that page: the panel was still displaying the previous site's
+    // stack, because the read for this one had failed and nothing cleared it.
+    // Keeping a reading is only ever right for the page it was taken from.
     const b = boot({ tags: { scannedAt: 1, flags: [], vendors: [v('ga4', 'GA4', 'analytics')] } });
     await b.api.rescanTags();   // harness rejects the sendMessage
-    assert.equal(chips(b).length, 1, 'a failed re-scan wiped out what was already known');
+    assert.equal(chips(b).length, 0, 'another page\'s tags were left attributed to this one');
   });
 });
 
@@ -325,5 +334,66 @@ describe('recent events', () => {
     b.api.renderTagsPanel();
     const labels = [...b.d.querySelectorAll('#tags-content .field-label')].map(el => el.textContent);
     assert.deepEqual(labels.slice(0, 3), ['WHAT TO LOOK AT', 'RECENT EVENTS', 'ANALYTICS']);
+  });
+});
+
+// ─── A reading never outlives its page ────────────────────────────────────────
+//
+// Reported: edcoproducts.com showed GTM-N5ZZT3, a container verifiably not on
+// that page — its real one is GTM-MZS4NCC4. The detection rules were correct;
+// the popup was displaying a reading taken from a DIFFERENT page.
+//
+// rescanTags() used to keep the previous _tagsData whenever a read failed, with
+// a comment saying so. In sidebar mode the panel stays open across navigations,
+// so any unreadable page in between left one client's tag stack attributed to
+// the next client's site, with nothing on screen admitting it.
+
+describe('tag readings are pinned to their page', () => {
+  const tags    = fsRead('popup-tags.js');
+  const content = fsRead('content.js');
+
+  test('every reading names the page it came from', () => {
+    // typeof-guarded, matching the performance read on the very next line —
+    // the detector is sliced out and run headless by the test suite.
+    assert.match(content, /pageUrl: \(typeof location !== 'undefined' && location\.href\) \|\| ''/);
+  });
+
+  test('a failed read clears the data instead of keeping it', () => {
+    const fn = tags.slice(tags.indexOf('async function rescanTags('), tags.indexOf('function renderTagsPanel('));
+    assert.match(fn, /_tagsData = null;\s*\n\s*_tagsError = 'unreadable'/);
+    assert.doesNotMatch(fn, /keep what Overview had/);
+  });
+
+  test('an answer describing a different page is rejected', () => {
+    // The tab can navigate while the read is in flight.
+    const fn = tags.slice(tags.indexOf('async function rescanTags('), tags.indexOf('function renderTagsPanel('));
+    assert.match(fn, /!tagsSameUrl\(res\.pageUrl, tab\.url\)/);
+    assert.match(fn, /_tagsError = 'navigated'/);
+  });
+
+  test('a fragment change is the same page', () => {
+    const same = new Function(`${tags.slice(tags.indexOf('function tagsSameUrl('), tags.indexOf('// ─── Overview row'))}
+      return tagsSameUrl;`)();
+    assert.equal(same('https://a.com/x#one', 'https://a.com/x#two'), true);
+    assert.equal(same('https://a.com/x', 'https://a.com/y'), false);
+    assert.equal(same('', 'https://a.com/x'), false);
+    assert.equal(same(null, null), false);
+  });
+
+  test('"could not read" is distinguished from "read it, found nothing"', () => {
+    // Conflating them is how you conclude a site has no analytics when you
+    // simply never looked at it.
+    assert.match(tags, /Could not read this page/);
+    assert.match(tags, /The page changed while scanning/);
+    assert.match(tags, /No marketing or analytics tags detected on this page/);
+  });
+
+  test('an unreadable page reads as a warning, not as a clean result', () => {
+    assert.match(tags, /_tagsError && !_tagsScanning \? 'hint-amber' : 'hint-muted'/);
+  });
+
+  test('a fresh Overview read clears any previous error', () => {
+    const fn = tags.slice(tags.indexOf('function renderTagsEntry('), tags.indexOf('function renderTagsChips('));
+    assert.match(fn, /_tagsError = null/);
   });
 });

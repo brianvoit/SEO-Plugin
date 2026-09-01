@@ -147,6 +147,149 @@ async function rescanTags() {
   renderTagsChips();     // a late-loading tag should show up on Overview too
 }
 
+// ─── Attribution: what the tag manager fired ─────────────────────────────────
+//
+// Two evidence levels, kept apart on purpose. A tag whose LIBRARY carries the
+// container's `gtm=` stamp was demonstrably loaded by it. A tag that merely
+// appeared after the container loaded is a guess — usually a good one, since
+// that is how Meta and TikTok pixels are normally deployed, but nothing in the
+// request proves it. Presenting the guess as the fact is exactly the failure
+// this panel just got fixed for.
+function tagsAttribution(vendors) {
+  const containers = vendors.filter(v => v.cat === 'tagmanager');
+  const others = vendors.filter(v => v.cat !== 'tagmanager');
+
+  // Earliest container load. Anything before it cannot have been fired by it.
+  const containerAt = containers.reduce((min, c) =>
+    (c.firstAt != null && (min == null || c.firstAt < min)) ? c.firstAt : min, null);
+
+  const fired = [], measured = [], after = [], independent = [];
+  others.forEach(v => {
+    // Proven: the container loaded the library itself.
+    if (v.loadedByTagManager) fired.push(v);
+    // Also proven, but a different arrangement: the page loaded the library
+    // and the container drives its measurement. Common, and neither "fired by
+    // the container" nor "nothing to do with it" describes it.
+    else if (v.beaconsViaTagManager) measured.push(v);
+    else if (containerAt != null && v.firstAt != null && v.firstAt >= containerAt) after.push(v);
+    else independent.push(v);
+  });
+
+  const byTime = (a, b) => (a.firstAt ?? 1e9) - (b.firstAt ?? 1e9);
+  return {
+    containers,
+    // The stamp names no container, so a page with several of them can only be
+    // told that "a container" fired the tag.
+    ambiguous: containers.length > 1,
+    fired: fired.sort(byTime),
+    measured: measured.sort(byTime),
+    after: after.sort(byTime),
+    independent: independent.sort(byTime)
+  };
+}
+
+// The container view: what it fired, what merely followed it, and what it had
+// nothing to do with.
+function tagsAttributionSection(attr, events) {
+  const sec = document.createElement('section');
+  sec.className = 'field-section';
+
+  const head = document.createElement('div');
+  head.className = 'field-header';
+  const lbl = document.createElement('span');
+  lbl.className = 'field-label';
+  const names = attr.containers.map(c => (c.ids && c.ids[0]) || c.label);
+  lbl.textContent = names.length === 1 ? `FIRED BY ${names[0]}` : 'FIRED BY TAG MANAGER';
+  head.appendChild(lbl);
+  sec.appendChild(head);
+
+  const group = (title, list, note, level) => {
+    if (!list.length) return;
+    const h = document.createElement('div');
+    h.className = `tags-attr-group tags-attr-group--${level}`;
+    h.textContent = title;
+    if (note) h.title = note;
+    sec.appendChild(h);
+    if (note) {
+      const n = document.createElement('div');
+      n.className = 'field-hint hint-muted tags-attr-note';
+      n.textContent = note;
+      sec.appendChild(n);
+    }
+    list.forEach(v => sec.appendChild(tagsAttrRow(v, events)));
+  };
+
+  group(
+    attr.ambiguous ? 'Fired by a tag manager' : 'Fired by this container',
+    attr.fired,
+    'Proven: the request carries the container\u2019s own gtm= stamp.',
+    'proven'
+  );
+  group(
+    'Measured by it, loaded by the page',
+    attr.measured,
+    'The library is on the page directly, but its beacons carry the container\u2019s stamp.',
+    'proven'
+  );
+  group(
+    'Loaded after it',
+    attr.after,
+    'Inferred from timing only \u2014 these carry no container stamp, so this is likely but unproven.',
+    'inferred'
+  );
+  group(
+    'Independent of it',
+    attr.independent,
+    'Loaded before the container, so it cannot have fired them.',
+    'independent'
+  );
+
+  return sec;
+}
+
+function tagsAttrRow(v, events) {
+  const row = document.createElement('div');
+  row.className = 'tags-attr-row';
+
+  const line = document.createElement('div');
+  line.className = 'tags-attr-line';
+  const name = document.createElement('span');
+  name.className = 'tags-attr-name';
+  name.textContent = v.label + (v.ids && v.ids.length ? `  ${v.ids.join(', ')}` : '');
+  line.appendChild(name);
+
+  if (v.firstAt != null) {
+    const at = document.createElement('span');
+    at.className = 'tags-attr-at';
+    at.textContent = `${v.firstAt} ms`;
+    line.appendChild(at);
+  }
+  if (v.tagManagerStamp) {
+    const st = document.createElement('span');
+    st.className = 'tags-attr-stamp';
+    st.textContent = `gtm=${v.tagManagerStamp}`;
+    st.title = 'The container version stamp carried by this request';
+    line.appendChild(st);
+  }
+  row.appendChild(line);
+
+  // A tag whose library the page loaded but whose beacons the container
+  // drives is a real and common arrangement, and neither half of it alone
+  // describes the setup.
+  events.filter(e => e.vendorId === v.id).slice(0, 6).forEach(e => {
+    const ev = document.createElement('div');
+    ev.className = 'tags-attr-event';
+    ev.textContent = `\u2192 ${e.name}`;
+    const at = document.createElement('span');
+    at.className = 'tags-attr-at';
+    at.textContent = `${e.at} ms`;
+    ev.appendChild(at);
+    row.appendChild(ev);
+  });
+
+  return row;
+}
+
 function renderTagsPanel() {
   const root = document.getElementById('tags-content');
   const meta = document.getElementById('tags-header-meta');
@@ -174,6 +317,11 @@ function renderTagsPanel() {
   }
 
   if (flags.length) root.appendChild(tagsFlagsSection(flags));
+
+  const attr = tagsAttribution(vendors);
+  if (attr.containers.length && (attr.fired.length || attr.measured.length || attr.after.length)) {
+    root.appendChild(tagsAttributionSection(attr, (_tagsData && _tagsData.events) || []));
+  }
 
   const events = (_tagsData && _tagsData.events) || [];
   if (events.length) root.appendChild(tagsEventsSection(events));

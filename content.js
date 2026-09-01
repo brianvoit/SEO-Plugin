@@ -253,10 +253,20 @@ function getGaMeasurementIds() {
 const TAG_VENDORS = [
   // ── Analytics ──
   { id: 'ga4', label: 'Google Analytics 4', cat: 'analytics',
-    url: /googletagmanager\.com\/gtag\/js/i, idFrom: [/[?&]id=(G-[A-Z0-9]+)/i], inline: /\b(G-[A-Z0-9]{6,})\b/,
+    // The id prefix is load-bearing. /gtag/js is a SHARED endpoint: the same
+    // path serves GA4 (G-), Google Ads (AW-) and Floodlight (DC-), separated
+    // only by what follows id=. Matching the path alone counted every Ads
+    // conversion load as a GA4 load — and, once container attribution
+    // arrived, let an Ads tag's gtm= stamp mark GA4 as manager-injected when
+    // the page had hardcoded it.
+    url: /googletagmanager\.com\/gtag\/(js|destination)\b[^#]*[?&]id=G-/i,
+    idFrom: [/[?&]id=(G-[A-Z0-9]+)/i], inline: /\b(G-[A-Z0-9]{6,})\b/,
     // /g/collect is the actual measurement hit (page_view, custom events, …),
-    // sent to the bare domain or a regional subdomain (region1.google-analytics.com).
-    hit: { url: /google-analytics\.com\/g\/collect/i, event: /[?&]en=([^&]+)/i } },
+    // sent to the bare domain or a regional subdomain (region1.google-analytics.com)
+    // — and, once Google Signals is enabled, to stats.g.doubleclick.net
+    // instead, which is where a real audited page turned out to be sending
+    // every one of its GA4 events.
+    hit: { url: /(google-analytics\.com|stats\.g\.doubleclick\.net)\/g\/collect/i, event: /[?&]en=([^&]+)/i } },
   { id: 'ua', label: 'Universal Analytics', cat: 'analytics',
     url: /google-analytics\.com\/(analytics|ga)\.js/i, inline: /\b(UA-\d{4,}-\d+)\b/,
     hit: { url: /google-analytics\.com\/(r\/)?collect/i, event: uaHitEventName } },
@@ -302,9 +312,11 @@ const TAG_VENDORS = [
 
   // ── Ad & conversion pixels ──
   { id: 'google-ads', label: 'Google Ads', cat: 'pixel', beacon: true,
-    // Conversion tracking; distinct from gtag.js analytics loads by path.
-    url: /googleadservices\.com\/pagead\/conversion|google\.com\/pagead\/(1p-)?conversion/i,
-    idFrom: [/conversion\/(\d+)/i] },
+    // Two shapes: the classic conversion endpoints, and the gtag/js load for
+    // an AW- destination — which is the same URL GA4 uses, told apart by the
+    // id prefix (see the ga4 rule above).
+    url: /googleadservices\.com\/pagead\/conversion|google\.com\/pagead\/(1p-)?conversion|googletagmanager\.com\/gtag\/(js|destination)\b[^#]*[?&]id=AW-/i,
+    idFrom: [/conversion\/(\d+)/i, /[?&]id=(AW-\d+)/i] },
   { id: 'floodlight', label: 'Floodlight', cat: 'pixel', beacon: true, url: /fls\.doubleclick\.net|ad\.doubleclick\.net\/activity/i },
   { id: 'meta-pixel', label: 'Meta Pixel', cat: 'pixel', beacon: true,
     url: /connect\.facebook\.net\/.*\/fbevents\.js|facebook\.com\/tr/i,
@@ -404,11 +416,24 @@ function ensureTagPerfBuffer() {
 // Accumulator per vendor. The Sets/Map here are working state only — the
 // public record handed back to the popup has to survive structured cloning,
 // so finalizeTags() converts them before returning.
+// Google Tag Manager stamps every Google-family request it fires with a `gtm=`
+// container-version parameter. That is the container's own fingerprint, not an
+// inference from timing — but it proves THAT a container fired the tag, not
+// WHICH one, so naming a specific container is only safe on a page with
+// exactly one. Non-Google tags (Meta, TikTok) are never stamped, so for those
+// the only evidence is when they loaded.
+function tagGtmStamp(url) {
+  try {
+    return new URL(url, (typeof location !== 'undefined' && location.href) || 'https://x/').searchParams.get('gtm') || null;
+  } catch { return null; }
+}
+
 function tagAcc(map, vendor) {
   let acc = map.get(vendor.id);
   if (!acc) {
     acc = {
       rec: { id: vendor.id, label: vendor.label, cat: vendor.cat, ids: [], where: [], loads: 0, fetches: 0, evidence: [] },
+      vendor,                   // kept for the attribution pass (load vs beacon URLs)
       beacon: !!vendor.beacon,
       urls: new Set(),          // distinct URLs seen, from any source
       idUrls: new Map(),        // id → Set of URLs that carried it
@@ -530,10 +555,51 @@ function detectMarketingTags() {
   try { entries = performance.getEntriesByType('resource') || []; } catch { entries = []; }
   entries.forEach(e => matchUrl(e.name, 'network'));
 
+  // When each URL first hit the network, so a vendor can be placed on the
+  // timeline relative to the container.
+  const firstSeen = new Map();
+  entries.forEach(e => {
+    const at = Math.round(e.startTime);
+    if (!firstSeen.has(e.name) || at < firstSeen.get(e.name)) firstSeen.set(e.name, at);
+  });
+
   const accs = Array.from(found.values());
   accs.forEach(a => {
     a.rec.loads = a.urls.size;
     a.rec.fetches = [...a.urlFetches.values()].reduce((n, c) => n + c, 0);
+
+    // A tag's LIBRARY carrying the stamp means the container loaded it. Its
+    // BEACONS carrying the stamp means the container is driving the
+    // measurement — which is a different, weaker claim, and true of tags the
+    // page itself hardcoded. Conflating the two would report a hand-placed
+    // GA4 snippet as GTM-injected.
+    let loadStamp = null, beaconStamp = null, firstAt = null;
+    a.urls.forEach(u => {
+      const at = firstSeen.has(u) ? firstSeen.get(u) : null;
+      if (at != null && (firstAt == null || at < firstAt)) firstAt = at;
+      const stamp = tagGtmStamp(u);
+      if (!stamp) return;
+      const isBeacon = a.vendor.hit && a.vendor.hit.url.test(u);
+      if (isBeacon) beaconStamp = beaconStamp || stamp;
+      else loadStamp = loadStamp || stamp;
+    });
+
+    // Beacons often live on a host the vendor's LIBRARY rule never matches —
+    // GA4 with Google Signals enabled sends every hit to
+    // stats.g.doubleclick.net, which is nothing like googletagmanager.com — so
+    // acc.urls does not contain them. Scan the timeline for this vendor's hits
+    // directly, or the container stamp on them is invisible.
+    if (a.vendor.hit) {
+      entries.forEach(e => {
+        if (!a.vendor.hit.url.test(e.name)) return;
+        beaconStamp = beaconStamp || tagGtmStamp(e.name);
+      });
+    }
+
+    a.rec.firstAt = firstAt;
+    a.rec.loadedByTagManager = !!loadStamp;
+    a.rec.beaconsViaTagManager = !!beaconStamp;
+    a.rec.tagManagerStamp = loadStamp || beaconStamp || null;
   });
 
   return {

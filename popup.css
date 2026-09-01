@@ -3395,6 +3395,51 @@ body.settings-open #update-footer { margin-top: auto; }
 .favicon-href { cursor: pointer; }
 .favicon-href:hover { color: var(--accent); text-decoration: underline; }
 
+/* ── Tags: what the container fired ────────────────────────────────────────── */
+.tags-attr-group {
+  margin-top: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+/* Proven and inferred are colour-separated, because the whole point of the
+   section is that they are different kinds of claim. */
+.tags-attr-group--proven      { color: var(--hint-green); }
+.tags-attr-group--inferred    { color: var(--hint-amber); }
+.tags-attr-group--independent { color: var(--text-muted); }
+.tags-attr-note { margin: 2px 0 4px; font-style: italic; }
+.tags-attr-row {
+  padding: 5px 0 5px 8px;
+  border-left: 2px solid var(--border);
+  margin-bottom: 2px;
+}
+.tags-attr-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.tags-attr-name { color: var(--text); font-weight: 600; }
+.tags-attr-at {
+  color: var(--text-muted);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10px;
+  margin-left: auto;
+}
+.tags-attr-stamp {
+  color: var(--accent);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 9px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+.tags-attr-event {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 3px;
+  padding-left: 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 /* ── Internal links (Analytics tab) ────────────────────────────────────────── */
 .ga-link-row {
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 92px;

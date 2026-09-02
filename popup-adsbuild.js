@@ -78,7 +78,13 @@ async function abResolvePage() {
     || (tab && tab.url)
     || null;
   let info = (pageData && pageData.url) ? pageData : null;
-  if (!info && tab) info = await getPageDataFromTab(tab.id).catch(() => null);
+  if (!info && tab) {
+    info = await getPageDataFromTab(tab.id).catch(() => null);
+    // Fill the shared global if the Overview tab has not run. It is the same
+    // object render() assigns, so this is a fill-in rather than an override —
+    // and generateAdCopy, which this panel reuses, refuses to run without it.
+    if (info && !pageData) pageData = info;
+  }
   return { url, info };
 }
 
@@ -335,16 +341,22 @@ function abNameSection() {
 function abCopySection() {
   const s = abSection('AD COPY');
   if (!_abCopy) {
-    const chosen = _abKeywords.filter(k => k.include).length;
-    s.appendChild(abHint(chosen
-      ? `15 headlines and 4 descriptions, written from this page's intent and sentiment and the ${chosen} keyword${chosen === 1 ? '' : 's'} selected above.`
-      : 'Select some keywords first — the copy is written to match them.'));
+    // Both of these are kept in sync by abSyncCopyGate as keywords are ticked.
+    // Rendering them once left the button permanently disabled: the section is
+    // built while nothing is selected, and selecting a keyword re-rendered only
+    // the keyword list.
+    const hint = abHint('');
+    hint.id = 'adsbuild-copy-hint';
+    s.appendChild(hint);
+
     const btn = document.createElement('button');
     btn.className = 'save-key-btn';
+    btn.id = 'adsbuild-copy-btn';
     btn.textContent = 'Generate ad copy';
-    btn.disabled = !chosen;
     btn.addEventListener('click', () => abGenerateCopy(btn));
     s.appendChild(btn);
+
+    abSyncCopyGate(hint, btn);
     return s;
   }
 
@@ -444,8 +456,15 @@ async function abGenerateCopy(btn) {
   btn.disabled = true;
   btn.textContent = 'Generating…';
   try {
+    const chosen = _abKeywords.filter(k => k.include);
+    // The hint above promises the copy is written to match these, so they have
+    // to actually reach the model — buildAdCopyGrounding only knows about
+    // tracked keywords and organic queries, not this ad group's selection.
+    const extra = chosen.length
+      ? `This ad group targets these keywords. Work the important ones into the headlines naturally, without forcing every one in:\n${chosen.map(k => `- ${k.text}`).join('\n')}`
+      : '';
     // generateAdCopy populates the shared _adCopy used by the Ad Copy panel.
-    await generateAdCopy(true);
+    await generateAdCopy(true, extra);
     const copy = typeof _adCopy !== 'undefined' ? _adCopy : null;
     if (!copy) throw new Error('Ad copy generation returned nothing.');
     _abCopy = {
@@ -539,6 +558,7 @@ function abKeywordAddBar() {
     });
     input.value = '';
     abRenderKeywordList(document.getElementById('adsbuild-kw-list'));
+    abSyncCopyGate();
     abSyncCommit();
     // Classify it like any other so its chips match the rest of the list.
     abClassify([text], () => abRenderKeywordList(document.getElementById('adsbuild-kw-list')));
@@ -605,6 +625,7 @@ function abKeywordFilterBar() {
     const turnOn = shown.some(k => !k.include);
     shown.forEach(k => { k.include = turnOn; });
     abRenderKeywordList(document.getElementById('adsbuild-kw-list'));
+    abSyncCopyGate();
     abSyncCommit();
   });
 
@@ -664,6 +685,7 @@ function abKeywordRow(k) {
   cb.addEventListener('change', () => {
     k.include = cb.checked;
     abSyncKeywordSummary();
+    abSyncCopyGate();
     abSyncCommit();
   });
 
@@ -687,6 +709,22 @@ function abKeywordRow(k) {
   row.appendChild(volume);
   row.appendChild(chips);
   return row;
+}
+
+// Enables "Generate ad copy" once at least one keyword is selected, and keeps
+// the explanation next to it truthful. Called on every selection change, since
+// the copy section is not re-rendered when the keyword list is.
+function abSyncCopyGate(hintEl, btnEl) {
+  const hint = hintEl || document.getElementById('adsbuild-copy-hint');
+  const btn = btnEl || document.getElementById('adsbuild-copy-btn');
+  if (!hint && !btn) return;   // copy already generated — nothing to gate
+  const chosen = _abKeywords.filter(k => k.include).length;
+  if (btn) btn.disabled = !chosen;
+  if (hint) {
+    hint.textContent = chosen
+      ? `15 headlines and 4 descriptions, written from this page's intent and sentiment and the ${chosen} keyword${chosen === 1 ? '' : 's'} selected above.`
+      : 'Select some keywords first — the copy is written to match them.';
+  }
 }
 
 function abSyncKeywordSummary() {

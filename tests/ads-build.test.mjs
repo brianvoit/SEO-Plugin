@@ -780,3 +780,69 @@ describe('subject gate inside ranking', () => {
     assert.equal(out.length, 1, 'a proven query was filtered out by the subject gate');
   });
 });
+
+// ─── Copy gate ───────────────────────────────────────────────────────────────
+// Regression cover for a shipped bug: "Generate ad copy" stayed disabled after
+// keywords were ticked. The section is built while nothing is selected, and
+// ticking a keyword re-rendered only the keyword list — so the button kept the
+// disabled state it was born with, and the hint kept telling the user to
+// select keywords they had already selected.
+
+function loadCopyGate() {
+  const from = panelSrc.indexOf('function abSyncCopyGate');
+  const to = panelSrc.indexOf('function abSyncKeywordSummary');
+  if (from === -1 || to <= from) throw new Error('abSyncCopyGate not found — update the slice markers');
+  return (keywords, els) => {
+    const ctx = {
+      _abKeywords: keywords,
+      document: { getElementById: (id) => els[id] || null },
+      String, Object, Array
+    };
+    vm.createContext(ctx);
+    vm.runInContext(`${panelSrc.slice(from, to)}; globalThis.__g = abSyncCopyGate;`, ctx);
+    ctx.__g();
+    return els;
+  };
+}
+
+describe('generate-copy gate', () => {
+  const gate = loadCopyGate();
+  const els = () => ({
+    'adsbuild-copy-hint': { textContent: '' },
+    'adsbuild-copy-btn': { disabled: true }
+  });
+
+  test('enables the button once a keyword is selected', () => {
+    const out = gate([{ text: 'a', include: true }, { text: 'b', include: false }], els());
+    assert.equal(out['adsbuild-copy-btn'].disabled, false);
+  });
+
+  test('stays disabled while nothing is selected', () => {
+    const out = gate([{ text: 'a', include: false }], els());
+    assert.equal(out['adsbuild-copy-btn'].disabled, true);
+    assert.match(out['adsbuild-copy-hint'].textContent, /Select some keywords first/);
+  });
+
+  test('re-disables when the last keyword is unticked', () => {
+    // The bug ran in both directions: the gate has to close again too.
+    const out = gate([{ text: 'a', include: false }], els());
+    assert.equal(out['adsbuild-copy-btn'].disabled, true);
+  });
+
+  test('the hint counts the selection and agrees with the button', () => {
+    const out = gate([{ text: 'a', include: true }, { text: 'b', include: true }], els());
+    assert.match(out['adsbuild-copy-hint'].textContent, /2 keywords selected above/);
+    assert.equal(out['adsbuild-copy-btn'].disabled, false);
+  });
+
+  test('says "keyword" not "keywords" for one', () => {
+    const out = gate([{ text: 'a', include: true }], els());
+    assert.match(out['adsbuild-copy-hint'].textContent, /1 keyword selected above/);
+  });
+
+  test('does nothing once the copy exists and the gate is gone', () => {
+    // After generation the hint and button no longer exist; the gate must not
+    // throw when called from a later selection change.
+    assert.doesNotThrow(() => gate([{ text: 'a', include: true }], {}));
+  });
+});

@@ -1973,7 +1973,10 @@ async function buildAdCopyGrounding() {
   return { context, insights, brandTerms };
 }
 
-async function generateAdCopy(force) {
+// `extraContext` is appended to the grounding block. The ad group builder uses
+// it to pass the keywords that group will target, which are not otherwise
+// visible to buildAdCopyGrounding.
+async function generateAdCopy(force, extraContext) {
   if (_adCopyLoading) return;
   if (!pageData) { adcopyBodyMessage('Open this on a regular web page to generate ad copy.', true); return; }
   if (!force && _adCopy) { renderAdCopyFields(_adCopy, _adCopyInsights); return; }
@@ -2003,7 +2006,7 @@ async function generateAdCopy(force) {
         max_tokens: 1600,
         thinking: { type: 'disabled' },
         system: systemBlocks,
-        messages: [{ role: 'user', content: context }]
+        messages: [{ role: 'user', content: extraContext ? `${context}\n\n${extraContext}` : context }]
       })
     });
     // Robust JSON extraction: strip code fences, then take the outermost {…}.

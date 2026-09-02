@@ -3267,7 +3267,9 @@ async function ensureAdAssetInsights(texts, onReady) {
     const { claudeApiKey } = await browser.storage.local.get('claudeApiKey');
     if (!claudeApiKey) return;
     const system = [
-      'Classify each Google Ads asset (a headline or description) by search INTENT and TONE (sentiment).',
+      // Also used for keywords by the ad group builder, hence "phrase" rather
+      // than naming only the asset types.
+      'Classify each short Google Ads phrase (a headline, a description, or a keyword) by search INTENT and TONE (sentiment).',
       'Intent is exactly one of: Informational, Navigational, Commercial, Transactional.',
       'Sentiment is exactly one of: Positive, Negative, Neutral, Mixed.',
       'Return ONLY a JSON array with one object per input line, in the same order:',

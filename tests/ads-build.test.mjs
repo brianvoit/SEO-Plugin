@@ -466,3 +466,115 @@ describe('page resolution', () => {
     assert.equal(url, null);
   });
 });
+
+// ─── Page-text phrase mining ─────────────────────────────────────────────────
+// The whole point of this feature is an ad group scoped to ONE page, so the
+// page's own language is the primary keyword source. These pin the shape of
+// what it will and will not offer.
+
+function loadPhraser() {
+  const from = panelSrc.indexOf('const AB_STOPWORDS');
+  const to = panelSrc.indexOf('// Candidates come from the page itself first');
+  if (from === -1 || to <= from) throw new Error('abPagePhrases not found — update the slice markers');
+  const ctx = { Map, Set, String, Array, Math, Object };
+  vm.createContext(ctx);
+  vm.runInContext(`${panelSrc.slice(from, to)}; globalThis.__f = abPagePhrases;`, ctx);
+  return ctx.__f;
+}
+
+describe('page phrase mining', () => {
+  const phrases = loadPhraser();
+  const textsOf = (out) => out.map(p => p.text);
+
+  const page = {
+    h1: 'Dead Tree Removal Services',
+    title: 'Dead Tree Removal Minneapolis | Tree Top Climbers',
+    metaDescription: 'We handle the safe removal of dead trees for homeowners.',
+    headings: [{ level: 2, text: 'Emergency Tree Removal' }]
+  };
+
+  test('pulls multi-word phrases out of the page', () => {
+    const out = textsOf(phrases(page));
+    assert.ok(out.includes('dead tree removal'), out.slice(0, 10).join(' | '));
+    assert.ok(out.includes('emergency tree removal'));
+  });
+
+  test('offers only two- and three-word phrases', () => {
+    // One word is too broad to earn its own keyword; four or more matches
+    // almost nothing under phrase match.
+    for (const p of phrases(page)) {
+      const n = p.text.split(' ').length;
+      assert.ok(n >= 2 && n <= 3, `"${p.text}" has ${n} words`);
+    }
+  });
+
+  test('the H1 outranks the meta description', () => {
+    // An H1 states what the page is; a meta description is supporting prose.
+    const out = phrases(page);
+    const h1Phrase = out.find(p => p.text === 'dead tree removal');
+    const metaPhrase = out.find(p => p.text === 'safe removal');
+    if (metaPhrase) assert.ok(h1Phrase.pageScore > metaPhrase.pageScore);
+    assert.ok(h1Phrase, 'expected the H1 phrase to be present');
+  });
+
+  test('phrases never start or end on a stopword', () => {
+    for (const p of phrases({ h1: 'The removal of the dead trees' })) {
+      const w = p.text.split(' ');
+      assert.ok(!['the', 'of', 'and', 'for'].includes(w[0]), `"${p.text}" starts on a stopword`);
+      assert.ok(!['the', 'of', 'and', 'for'].includes(w[w.length - 1]), `"${p.text}" ends on a stopword`);
+    }
+  });
+
+  test('phrases do not run across punctuation', () => {
+    // "minneapolis tree" would span the pipe in a title like
+    // "… Minneapolis | Tree Top Climbers" and mean nothing.
+    const out = textsOf(phrases({ title: 'Dead Tree Removal Minneapolis | Tree Top Climbers' }));
+    assert.ok(!out.includes('minneapolis tree'), out.join(' | '));
+  });
+
+  test('a repeated phrase scores higher than a one-off', () => {
+    const out = phrases({
+      h1: 'Tree Removal',
+      title: 'Tree Removal Services',
+      headings: [{ level: 2, text: 'Tree Removal Costs' }]
+    });
+    const repeated = out.find(p => p.text === 'tree removal');
+    const once = out.find(p => p.text === 'removal costs');
+    assert.ok(repeated.pageScore > once.pageScore);
+  });
+
+  test('an empty page yields nothing rather than throwing', () => {
+    assert.deepEqual(plain(phrases(null)), []);
+    assert.deepEqual(plain(phrases({})), []);
+  });
+});
+
+describe('page phrases feed the ranking', () => {
+  const rank = loadRanker();
+
+  test('a page phrase outranks an unrelated term with similar volume', () => {
+    const out = rank(
+      [{ text: 'dead tree removal', pageScore: 10, onPage: true },
+       { text: 'lawn care', pageScore: 0, onPage: false }],
+      { 'dead tree removal': { avgMonthlySearches: 500 }, 'lawn care': { avgMonthlySearches: 500 } },
+      new Map()
+    );
+    assert.equal(out[0].text, 'dead tree removal');
+  });
+
+  test('zero measured demand switches a term off, missing demand does not', () => {
+    const out = rank(
+      [{ text: 'measured dead', pageScore: 5, onPage: true },
+       { text: 'unmeasured term', pageScore: 5, onPage: true }],
+      { 'measured dead': { avgMonthlySearches: 0 } },
+      new Map()
+    );
+    assert.equal(out.find(k => k.text === 'measured dead').include, false);
+    assert.equal(out.find(k => k.text === 'unmeasured term').include, true);
+  });
+
+  test('match type still defaults to phrase for page-derived terms', () => {
+    const out = rank([{ text: 'dead tree removal', pageScore: 9, onPage: true }], {}, new Map());
+    assert.equal(out[0].matchType, 'PHRASE');
+  });
+});

@@ -3994,3 +3994,78 @@ body.settings-open #update-footer { margin-top: auto; }
 
 /* Utility */
 .hidden { display: none !important; }
+
+/* ─── Ad group builder (popup-adsbuild.js) ─────────────────────────────────── */
+/* Asset and keyword rows are edited in place, so each is a single row of
+   controls that stays aligned as the text length changes. */
+
+.adsbuild-asset-row,
+.adsbuild-kw-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+.adsbuild-asset-input {
+  flex: 1;
+  min-width: 0;          /* let the input shrink instead of pushing the count out */
+  height: 26px;
+  font-size: 12px;
+}
+
+/* Fixed width so the counts line up down the column rather than jittering as
+   the character count changes width. */
+.adsbuild-count {
+  flex: 0 0 auto;
+  min-width: 46px;
+  text-align: right;
+  font-size: 11px;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+.adsbuild-count.is-over {
+  color: var(--danger, #e5534b);
+  opacity: 1;
+  font-weight: 600;
+}
+
+.adsbuild-kw-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.adsbuild-kw-match {
+  flex: 0 0 auto;
+  height: 24px;
+  font-size: 11px;
+  padding: 0 4px;
+}
+
+.adsbuild-kw-vol {
+  flex: 0 0 auto;
+  min-width: 62px;
+  text-align: right;
+  font-size: 11px;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+.adsbuild-kw-warn {
+  flex: 0 0 auto;
+  font-size: 11px;
+  opacity: 0.7;
+  font-style: italic;
+}
+
+/* Chips arrive after classification resolves; reserve nothing, so rows do not
+   jump on first paint — they simply gain a chip at the end. */
+.adsbuild-chips {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 4px;
+}

@@ -212,8 +212,10 @@ function renderAdsBuild() {
   if (!_abCampaignId) return;   // everything below depends on the campaign
 
   body.appendChild(abNameSection());
-  body.appendChild(abCopySection());
+  // Keywords first: the ad copy is written to match the terms being targeted,
+  // so choosing them second would mean generating against nothing.
   body.appendChild(abKeywordSection());
+  body.appendChild(abCopySection());
   body.appendChild(abCommitSection());
 }
 
@@ -305,17 +307,22 @@ function abNameSection() {
 function abCopySection() {
   const s = abSection('AD COPY');
   if (!_abCopy) {
-    s.appendChild(abHint('15 headlines and 4 descriptions, written from this page\'s intent and sentiment.'));
+    const chosen = _abKeywords.filter(k => k.include).length;
+    s.appendChild(abHint(chosen
+      ? `15 headlines and 4 descriptions, written from this page's intent and sentiment and the ${chosen} keyword${chosen === 1 ? '' : 's'} selected above.`
+      : 'Select some keywords first — the copy is written to match them.'));
     const btn = document.createElement('button');
     btn.className = 'save-key-btn';
     btn.textContent = 'Generate ad copy';
+    btn.disabled = !chosen;
     btn.addEventListener('click', () => abGenerateCopy(btn));
     s.appendChild(btn);
     return s;
   }
 
-  s.appendChild(abAssetList('Headlines', _abCopy.headlines, 30));
-  s.appendChild(abAssetList('Descriptions', _abCopy.descriptions, 90));
+  s.appendChild(abAssetList('Headlines', 'headlines', 30));
+  s.appendChild(abAssetList('Descriptions', 'descriptions', 90));
+
   const regen = document.createElement('button');
   regen.className = 'save-key-btn';
   regen.textContent = 'Regenerate';
@@ -324,27 +331,85 @@ function abCopySection() {
   return s;
 }
 
-function abAssetList(label, items, max) {
+/**
+ * Editable asset rows.
+ *
+ * Every line is a text input rather than static text: the generator gets the
+ * wording close, but the person shipping the ad is the one who knows the
+ * brand's voice. The count updates on each keystroke and turns red past the
+ * limit, so an over-length edit is visible immediately instead of surfacing as
+ * an API rejection at create time.
+ */
+function abAssetList(label, key, max) {
   const wrap = document.createElement('div');
-  const h = document.createElement('div');
-  h.className = 'field-hint';
-  h.textContent = `${label} (${items.length})`;
-  wrap.appendChild(h);
-  items.forEach(text => {
+  const items = _abCopy[key] || [];
+
+  const head = document.createElement('div');
+  head.className = 'field-hint';
+  head.textContent = `${label} (${items.length})`;
+  wrap.appendChild(head);
+
+  items.forEach((text, i) => {
     const row = document.createElement('div');
-    row.className = 'field-hint';
-    row.style.display = 'flex';
-    row.style.justifyContent = 'space-between';
-    row.style.gap = '8px';
-    const t = document.createElement('span');
-    t.textContent = text;
-    const c = document.createElement('span');
-    c.textContent = `${text.length}/${max}`;
-    if (text.length > max) c.style.color = 'var(--danger, #c00)';
-    row.appendChild(t); row.appendChild(c);
+    row.className = 'adsbuild-asset-row';
+    row.dataset.assetText = text;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'wp-input adsbuild-asset-input';
+    input.value = text;
+
+    const count = document.createElement('span');
+    count.className = 'adsbuild-count';
+
+    const chips = document.createElement('span');
+    chips.className = 'asset-insight-chips adsbuild-chips';
+
+    const paintCount = () => {
+      count.textContent = `${input.value.length}/${max}`;
+      count.classList.toggle('is-over', input.value.length > max);
+    };
+    paintCount();
+    abPaintChips(chips, input.value);
+
+    input.addEventListener('input', () => {
+      _abCopy[key][i] = input.value;
+      paintCount();
+      abSyncCommit();
+    });
+    // Classification costs an API call, so it waits for the edit to settle
+    // rather than firing on every keystroke.
+    input.addEventListener('change', () => {
+      row.dataset.assetText = input.value;
+      abClassify([input.value], () => abPaintChips(chips, input.value));
+    });
+
+    row.appendChild(input);
+    row.appendChild(count);
+    row.appendChild(chips);
     wrap.appendChild(row);
   });
+
   return wrap;
+}
+
+// Intent and sentiment for one phrase, from the shared classifier cache that
+// the Ad Copy panel already populates. Absent until classification resolves.
+function abPaintChips(box, text) {
+  if (!box) return;
+  const ins = (typeof _adAssetInsights !== 'undefined')
+    ? _adAssetInsights[String(text || '').toLowerCase()] : null;
+  box.replaceChildren();
+  if (!ins) return;
+  const chips = typeof buildInsightChips === 'function' ? buildInsightChips(ins) : null;
+  if (chips) box.appendChild(chips);
+}
+
+// Classify a batch, then repaint. Everything is cached by text in
+// _adAssetInsights, so re-running over already-known lines costs nothing.
+function abClassify(texts, onReady) {
+  if (typeof ensureAdAssetInsights !== 'function') return;
+  ensureAdAssetInsights(texts, onReady);
 }
 
 async function abGenerateCopy(btn) {
@@ -360,6 +425,11 @@ async function abGenerateCopy(btn) {
       descriptions: (copy.descriptions || []).slice(0, 4)
     };
     renderAdsBuild();
+    abClassify([..._abCopy.headlines, ..._abCopy.descriptions], () => {
+      document.querySelectorAll('.adsbuild-asset-row').forEach(row => {
+        abPaintChips(row.querySelector('.adsbuild-chips'), row.dataset.assetText);
+      });
+    });
   } catch (e) {
     btn.disabled = false;
     btn.textContent = 'Generate ad copy';
@@ -374,7 +444,7 @@ async function abGenerateCopy(btn) {
 function abKeywordSection() {
   const s = abSection('KEYWORDS');
   if (!_abKeywords.length) {
-    s.appendChild(abHint('Pulled from this page\'s Search Console queries and tracked keywords, with anything already targeted in the account removed.'));
+    s.appendChild(abHint('Mined from this page\'s own headings, title and meta description, then cross-checked against its Search Console queries and tracked keywords. Anything already targeted in the account is flagged.'));
     const btn = document.createElement('button');
     btn.className = 'save-key-btn';
     btn.textContent = 'Find keywords';
@@ -384,41 +454,78 @@ function abKeywordSection() {
   }
 
   const chosen = _abKeywords.filter(k => k.include).length;
-  s.appendChild(abHint(`${chosen} of ${_abKeywords.length} selected. Phrase match is the default: short enough to catch long-tail variants, tight enough to stay relevant.`));
+  const summary = abHint(`${chosen} of ${_abKeywords.length} selected.`);
+  summary.id = 'adsbuild-kw-summary';
+  s.appendChild(summary);
 
-  _abKeywords.forEach(k => {
-    const row = document.createElement('label');
-    row.className = 'field-hint';
-    row.style.display = 'flex';
-    row.style.alignItems = 'center';
-    row.style.gap = '8px';
-
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = !!k.include;
-    cb.addEventListener('change', () => { k.include = cb.checked; abSyncCommit(); });
-
-    const text = document.createElement('span');
-    text.style.flex = '1';
-    text.textContent = k.text;
-
-    const meta = document.createElement('span');
-    meta.style.opacity = '0.75';
-    meta.textContent = k.volume != null ? `${k.volume.toLocaleString()}/mo` : '—';
-
-    row.appendChild(cb); row.appendChild(text); row.appendChild(meta);
-
-    // Adding a term that already lives elsewhere creates internal competition,
-    // so say where it is rather than silently dropping it.
-    if (k.targetedIn) {
-      const warn = document.createElement('span');
-      warn.style.opacity = '0.75';
-      warn.textContent = `already in ${k.targetedIn}`;
-      row.appendChild(warn);
-    }
-    s.appendChild(row);
-  });
+  _abKeywords.forEach(k => s.appendChild(abKeywordRow(k)));
   return s;
+}
+
+/**
+ * One keyword row: include, term, match type, volume, and its classification.
+ *
+ * Match type is editable in place because the right choice is per term, not
+ * per ad group — a broad head term wants phrase, a specific product name wants
+ * exact, and forcing one setting across the list would be wrong for half of it.
+ */
+function abKeywordRow(k) {
+  const row = document.createElement('div');
+  row.className = 'adsbuild-kw-row';
+
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = !!k.include;
+  cb.addEventListener('change', () => {
+    k.include = cb.checked;
+    abSyncKeywordSummary();
+    abSyncCommit();
+  });
+
+  const text = document.createElement('span');
+  text.className = 'adsbuild-kw-text';
+  text.textContent = k.text;
+  if (k.onPage) text.title = 'Appears in this page\'s own headings, title or meta description';
+
+  const match = document.createElement('select');
+  match.className = 'adsbuild-kw-match';
+  [['PHRASE', 'Phrase'], ['EXACT', 'Exact'], ['BROAD', 'Broad']].forEach(([v, label]) => {
+    const o = document.createElement('option');
+    o.value = v; o.textContent = label;
+    if (v === k.matchType) o.selected = true;
+    match.appendChild(o);
+  });
+  match.addEventListener('change', () => { k.matchType = match.value; });
+
+  const volume = document.createElement('span');
+  volume.className = 'adsbuild-kw-vol';
+  volume.textContent = k.volume != null ? `${k.volume.toLocaleString()}/mo` : '—';
+  if (k.volume == null) volume.title = 'No Keyword Planner figure — not the same as no demand';
+
+  const chips = document.createElement('span');
+  chips.className = 'asset-insight-chips adsbuild-chips';
+  abPaintChips(chips, k.text);
+
+  row.appendChild(cb);
+  row.appendChild(text);
+  row.appendChild(match);
+  row.appendChild(volume);
+  row.appendChild(chips);
+
+  // Adding a term that already lives elsewhere creates internal competition,
+  // so name where it is rather than silently dropping it.
+  if (k.targetedIn) {
+    const warn = document.createElement('span');
+    warn.className = 'adsbuild-kw-warn';
+    warn.textContent = `already in ${k.targetedIn}`;
+    row.appendChild(warn);
+  }
+  return row;
+}
+
+function abSyncKeywordSummary() {
+  const el = document.getElementById('adsbuild-kw-summary');
+  if (el) el.textContent = `${_abKeywords.filter(k => k.include).length} of ${_abKeywords.length} selected.`;
 }
 
 async function abLoadKeywords(btn) {
@@ -439,12 +546,23 @@ async function abLoadKeywords(btn) {
 
     let volumes = {};
     try {
-      const ideas = await sendMessageWithTimeout({ action: 'adsGetKeywordIdeas', pageUrl: _abPageUrl, keywords: seeds.slice(0, 60) });
+      const ideas = await sendMessageWithTimeout({
+        action: 'adsGetKeywordIdeas', pageUrl: _abPageUrl,
+        keywords: seeds.slice(0, 60).map(s => s.text)   // the API takes plain strings
+      });
       volumes = (ideas && ideas.byKeyword) || {};
     } catch { /* volume is enrichment only */ }
 
     _abKeywords = abRankKeywords(seeds, volumes, targeted);
     renderAdsBuild();
+    // Intent and sentiment resolve after the list is on screen — the chips
+    // fill in rather than holding up the whole section.
+    abClassify(_abKeywords.map(k => k.text), () => {
+      document.querySelectorAll('.adsbuild-kw-row').forEach(row => {
+        const t = row.querySelector('.adsbuild-kw-text');
+        abPaintChips(row.querySelector('.adsbuild-chips'), t && t.textContent);
+      });
+    });
   } catch (e) {
     btn.disabled = false;
     btn.textContent = 'Find keywords';
@@ -454,31 +572,127 @@ async function abLoadKeywords(btn) {
   }
 }
 
-// GSC queries for this page plus the client's tracked keywords.
+// Words that carry no targeting value on their own. A candidate phrase that
+// starts or ends on one of these reads as a fragment ("of tree removal"), so
+// those are trimmed rather than offered.
+const AB_STOPWORDS = new Set([
+  'a','an','the','and','or','but','if','of','to','in','on','for','with','at','by','from',
+  'is','are','was','were','be','been','being','it','its','this','that','these','those',
+  'we','our','you','your','us','they','their','as','can','will','our','has','have','had',
+  'about','into','over','more','most','other','than','then','so','such','no','not','all',
+  'your','you','get','how','why','what','when','where','who','which'
+]);
+
+/**
+ * Candidate keyword phrases mined from the page's own text.
+ *
+ * The point of this feature is an ad group tightly scoped to ONE page, so the
+ * page's own language is the strongest signal available — stronger than
+ * account-wide history. Weighting follows how much intent each element
+ * carries: an H1 states what the page is, a title is written for search, an H2
+ * names a sub-topic, and a meta description is supporting prose.
+ *
+ * Two- and three-word phrases only. One word is too broad to be worth its own
+ * keyword, and four or more matches almost nothing under phrase match.
+ */
+function abPagePhrases(info) {
+  const sources = [
+    { text: info && info.h1, weight: 5 },
+    { text: info && info.title, weight: 4 },
+    { text: (info && info.metaDescription) || (info && info.description), weight: 2 }
+  ];
+  ((info && info.headings) || []).forEach(h => {
+    if (!h || !h.text) return;
+    if (h.level === 1) sources.push({ text: h.text, weight: 5 });
+    else if (h.level === 2) sources.push({ text: h.text, weight: 3 });
+    else if (h.level === 3) sources.push({ text: h.text, weight: 2 });
+  });
+
+  const scores = new Map();
+  for (const { text, weight } of sources) {
+    if (!text) continue;
+    // Split on punctuation as well as whitespace: a phrase should never run
+    // across a comma or a dash into an unrelated clause.
+    const clauses = String(text).toLowerCase().split(/[.,;:!?|/()\[\]—–-]+/);
+    for (const clause of clauses) {
+      const words = clause.split(/\s+/).map(w => w.replace(/[^a-z0-9']/gi, '')).filter(Boolean);
+      for (let n = 2; n <= 3; n++) {
+        for (let i = 0; i + n <= words.length; i++) {
+          const gram = words.slice(i, i + n);
+          if (AB_STOPWORDS.has(gram[0]) || AB_STOPWORDS.has(gram[gram.length - 1])) continue;
+          if (gram.some(w => w.length < 2)) continue;
+          const phrase = gram.join(' ');
+          scores.set(phrase, (scores.get(phrase) || 0) + weight);
+        }
+      }
+    }
+  }
+
+  return [...scores.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].length - b[0].length)
+    .map(([text, pageScore]) => ({ text, pageScore }));
+}
+
+// The client's own brand terms, lowercased. A services ad group should not bid
+// on the brand name that happens to sit in the page title — brand traffic
+// belongs in its own campaign, and including it here quietly competes with it.
+async function abBrandTerms() {
+  try {
+    let host = '';
+    try { host = new URL(_abPageUrl).hostname.replace(/^www\./, ''); } catch { return []; }
+    const all = (typeof loadBrandedTermsStore === 'function') ? await loadBrandedTermsStore() : null;
+    return String((all && all[host]) || '')
+      .split('|').map(t => t.trim().toLowerCase()).filter(Boolean);
+  } catch { return []; }
+}
+
+// Candidates come from the page itself first, then the queries this page
+// already earns organically and the keywords the client tracks.
 async function abKeywordSeeds() {
-  const out = new Set();
+  const brand = await abBrandTerms();
+  const isBrand = (phrase) => brand.some(b => phrase.includes(b) || b.includes(phrase));
+  const fromPage = abPagePhrases(_abPageInfo).filter(p => !isBrand(p.text));
+  const pageScores = new Map(fromPage.map(p => [p.text, p.pageScore]));
+  const out = new Map(fromPage.map(p => [p.text, p.pageScore]));
+
   try {
     const gsc = await sendMessageWithTimeout({ action: 'gscGetQueryData', pageUrl: _abPageUrl, range: '3m' });
-    ((gsc && gsc.rows) || []).forEach(r => { if (r.query) out.add(String(r.query).toLowerCase()); });
+    ((gsc && gsc.rows) || []).forEach(r => {
+      const q = String(r.query || '').toLowerCase().trim();
+      if (q) out.set(q, (out.get(q) || 0) + 3);   // real demand, already earned
+    });
   } catch { /* optional source */ }
+
   try {
     const wc = await sendMessageWithTimeout({ action: 'webceoGetTrackedKeywords', pageUrl: _abPageUrl });
-    ((wc && wc.keywords) || []).forEach(k => out.add(String(k).toLowerCase()));
+    ((wc && wc.keywords) || []).forEach(k => {
+      const t = String(k || '').toLowerCase().trim();
+      if (t) out.set(t, (out.get(t) || 0) + 3);   // deliberately tracked
+    });
   } catch { /* optional source */ }
-  return [...out].filter(Boolean);
+
+  return [...out.entries()].map(([text, pageScore]) => ({ text, pageScore, onPage: pageScores.has(text) }));
 }
 
 /**
  * Order candidates the way a search campaign wants them.
  *
- * Preference goes to shorter terms with real volume: a two-word phrase-match
- * keyword catches the long-tail variants underneath it, whereas a five-word
- * one matches almost nothing on its own. Terms already targeted elsewhere sink
- * to the bottom and start unchecked, but stay visible so the user can decide
- * between moving and duplicating.
+ * Three signals, in order of weight:
+ *   pageScore — how prominently the phrase appears in the page's own text.
+ *               This is what keeps the ad group scoped to ONE page.
+ *   volume    — real demand, when Keyword Planner has a figure.
+ *   brevity   — a two-word phrase-match keyword catches the long tail beneath
+ *               it; a five-word one matches almost nothing on its own.
+ *
+ * Terms already targeted elsewhere sink to the bottom and start unchecked, but
+ * stay visible: silently dropping them hides the internal competition the user
+ * is about to create, and the choice between moving and duplicating is theirs.
  */
 function abRankKeywords(seeds, volumes, targeted) {
-  const scored = seeds.map(text => {
+  const scored = seeds.map(seed => {
+    const text = typeof seed === 'string' ? seed : seed.text;
+    const pageScore = (typeof seed === 'object' && seed.pageScore) || 0;
+    const onPage = typeof seed === 'object' ? !!seed.onPage : false;
     const v = volumes[text] || {};
     const volume = v.avgMonthlySearches != null ? Number(v.avgMonthlySearches) : null;
     const words = text.trim().split(/\s+/).length;
@@ -489,9 +703,11 @@ function abRankKeywords(seeds, volumes, targeted) {
       volume,
       competition: v.competition || null,
       targetedIn,
-      // Volume carries the ranking; brevity breaks the tie toward terms broad
-      // enough to be worth their own keyword.
-      _score: (volume || 0) / Math.max(1, words - 1)
+      onPage,
+      pageScore,
+      // Volume is scaled to sit in the same range as pageScore so neither
+      // signal can swamp the other; brevity breaks the remaining ties.
+      _score: (pageScore * 2) + Math.log10((volume || 0) + 1) * 3 - (words - 2)
     };
   });
 
@@ -502,9 +718,13 @@ function abRankKeywords(seeds, volumes, targeted) {
 
   return scored.slice(0, AB_KEYWORD_CAP).map(k => ({
     ...k,
-    // Default on only for untargeted terms with measurable volume — anything
-    // else is a judgement call the user should make deliberately.
-    include: !k.targetedIn && (k.volume == null || k.volume > 0)
+    // Every candidate already comes from the page, from a query this page
+    // earns, or from a tracked keyword — so the default is ON. Only two things
+    // switch it off: the term is already targeted elsewhere (adding it would
+    // compete with an existing ad group), or Keyword Planner explicitly
+    // measured zero demand. A MISSING figure is not zero demand — plenty of
+    // valid long-tail terms have none — so null stays included.
+    include: !k.targetedIn && k.volume !== 0
   }));
 }
 

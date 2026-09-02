@@ -1120,3 +1120,276 @@ async function adsAddKeywords({ pageUrl, groups }) {
   }
   return { connected: true, results };
 }
+
+// ─── Build ads for an unadvertised page ──────────────────────────────────────
+// When no ad points at the current page the Ads tab has nothing to show, and
+// Add Keywords degrades to research-only because it has no ad group to write
+// to. These three handlers give that research somewhere to land: pick an
+// existing Search campaign, and create an ad group + responsive search ad +
+// keywords under it in one shot.
+//
+// Creating a CAMPAIGN is deliberately out of scope — budget, bidding strategy,
+// geo and schedule are a much larger surface and a much larger blast radius.
+
+// Every campaign type that can hold a keyword-targeted RSA ad group. Anything
+// else (PERFORMANCE_MAX, SHOPPING, DISPLAY, DEMAND_GEN, VIDEO…) either has no
+// ad groups at all or rejects keyword criteria, and picking one would surface
+// as an opaque API error at write time — so they're filtered out with a reason
+// rather than offered and allowed to fail.
+const ADS_BUILDABLE_CHANNELS = new Set(['SEARCH']);
+
+// Bidding strategies where an ad-group-level CPC bid is actually honoured.
+// Under the automated strategies the field is ignored (or rejected), so the UI
+// hides the bid input rather than collecting a number that does nothing.
+const ADS_MANUAL_BID_STRATEGIES = new Set(['MANUAL_CPC', 'MANUAL_CPM', 'MANUAL_CPV']);
+
+function adsChannelLabel(type) {
+  return String(type || 'UNKNOWN').replace(/_/g, ' ').toLowerCase()
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// Campaigns in the page's account, split into ones that can take a new ad
+// group and ones that can't. The excluded list is returned too — telling the
+// user "your only campaign is Performance Max" is far more useful than an
+// empty picker.
+async function adsListCampaignsForBuild({ pageUrl }) {
+  const tokenResult = await adsGetAccessToken();
+  if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
+  if (tokenResult.error === 'REAUTH_REQUIRED') return { connected: false, reauthRequired: true };
+  if (tokenResult.error) return { connected: true, error: tokenResult.error };
+
+  const customerId = await adsGetAccount(gscPageHost(pageUrl));
+  if (!customerId) return { connected: true, error: 'NO_ACCOUNT' };
+  const cid = adsDigits(customerId);
+
+  const res = await adsSearch(tokenResult.accessToken, cid,
+    `SELECT campaign.id, campaign.name, campaign.status,
+            campaign.advertising_channel_type, campaign.bidding_strategy_type,
+            campaign_budget.amount_micros, campaign_budget.period
+     FROM campaign
+     WHERE campaign.status IN ('ENABLED', 'PAUSED')
+     ORDER BY campaign.name`);
+  if (res.error) return { connected: true, error: res.error, detail: res.detail };
+
+  const eligible = [];
+  const excluded = [];
+  for (const row of (res.rows || [])) {
+    const c = row.campaign || {};
+    const channel = c.advertisingChannelType || null;
+    const entry = {
+      campaignId: c.id != null ? String(c.id) : null,
+      campaignName: c.name || null,
+      status: c.status || null,
+      channelType: channel,
+      channelLabel: adsChannelLabel(channel),
+      biddingStrategy: c.biddingStrategyType || null,
+      // Ad-group CPC bids only apply under a manual strategy; the UI uses this
+      // to decide whether to ask for a bid at all.
+      acceptsCpcBid: ADS_MANUAL_BID_STRATEGIES.has(String(c.biddingStrategyType || '')),
+      budgetMicros: row.campaignBudget?.amountMicros != null ? Number(row.campaignBudget.amountMicros) : null,
+      budgetPeriod: row.campaignBudget?.period || null
+    };
+    if (!entry.campaignId) continue;
+    if (ADS_BUILDABLE_CHANNELS.has(String(channel))) eligible.push(entry);
+    else excluded.push(entry);
+  }
+  return { connected: true, eligible, excluded };
+}
+
+// Existing ad group names, so the UI can suggest a name that matches whatever
+// convention the account already uses instead of inventing its own.
+async function adsGetCampaignAdGroupNames({ pageUrl, campaignId }) {
+  const tokenResult = await adsGetAccessToken();
+  if (tokenResult.error) return { names: [] };
+  const customerId = await adsGetAccount(gscPageHost(pageUrl));
+  if (!customerId) return { names: [] };
+
+  const res = await adsSearch(tokenResult.accessToken, adsDigits(customerId),
+    `SELECT ad_group.name FROM ad_group
+     WHERE campaign.id = ${adsDigits(campaignId)} AND ad_group.status != 'REMOVED'
+     ORDER BY ad_group.name`);
+  // Naming help is a nicety — never surface an error for it.
+  return { names: (res.rows || []).map(r => r.adGroup?.name).filter(Boolean) };
+}
+
+// Google's RSA limits. Below the minimums the ad is rejected outright; above
+// the maximums the extra assets are dropped silently, which is worse.
+const RSA_LIMITS = {
+  headline:    { max: 30, min: 3,  cap: 15 },
+  description: { max: 90, min: 2,  cap: 4  }
+};
+
+// Trim, de-duplicate (case-insensitively) and length-check one asset list.
+// Returns { ok, assets, error } — the caller stops before touching the API if
+// this fails, so a miscounted character never becomes an opaque API error.
+function rsaAssets(list, kind) {
+  const spec = RSA_LIMITS[kind];
+  const seen = new Set();
+  const assets = [];
+  for (const raw of (list || [])) {
+    const text = String(raw == null ? '' : raw).trim();
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;      // Google rejects duplicate assets
+    seen.add(key);
+    if (text.length > spec.max) {
+      return { ok: false, error: `${kind} over ${spec.max} characters (${text.length}): "${text}"` };
+    }
+    assets.push({ text });
+    if (assets.length >= spec.cap) break;
+  }
+  if (assets.length < spec.min) {
+    return { ok: false, error: `Need at least ${spec.min} ${kind}s, got ${assets.length}.` };
+  }
+  return { ok: true, assets };
+}
+
+// Atomic multi-resource write. Unlike adsMutate (one resource type per call,
+// no dry run), googleAds:mutate takes operations across resource types in a
+// single transaction and supports validateOnly — so an ad group, its ad and
+// its keywords are created together or not at all, and can be checked first.
+// Without this a partial failure would strand an orphaned empty ad group.
+async function adsMutateOperations(accessToken, cid, mutateOperations, { validateOnly = false } = {}) {
+  const { adsDeveloperToken, adsManagerId } = await browser.storage.local.get(['adsDeveloperToken', 'adsManagerId']);
+  if (!adsDeveloperToken) return { error: 'NO_DEV_TOKEN' };
+
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    'developer-token': adsDeveloperToken,
+    'Content-Type': 'application/json'
+  };
+  if (adsManagerId) headers['login-customer-id'] = adsDigits(adsManagerId);
+
+  let res;
+  try {
+    res = await fetch(`${GA_ADS_API}/customers/${adsDigits(cid)}/googleAds:mutate`, {
+      method: 'POST',
+      headers,
+      // partialFailure stays false on purpose: a half-created ad group is
+      // worse than a clean failure the user can retry.
+      body: JSON.stringify({ mutateOperations, validateOnly, partialFailure: false })
+    });
+  } catch {
+    return { error: 'NETWORK' };
+  }
+  if (res.status === 429) return { error: 'RATE_LIMITED' };
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    return { error: 'API_ERROR', detail: adsErrorDetail(body) || `HTTP ${res.status}` };
+  }
+  const data = await res.json();
+  return { results: data.mutateOperationResponses || [] };
+}
+
+// Build an ad group + responsive search ad + keywords under an existing
+// campaign, in one atomic operation.
+//
+// `validateOnly: true` runs the identical request as a dry run — Google checks
+// everything and writes nothing — which is what the UI uses to preview before
+// the real commit. Both paths go through the same operation list, so the
+// preview can't drift from what actually gets written.
+//
+// Everything is created PAUSED. This writes to an account that spends real
+// money, and nothing should start serving because someone clicked through a
+// panel; enabling is a deliberate, separate act in the Ads UI.
+async function adsCreateAdGroup(message) {
+  const {
+    pageUrl, campaignId, adGroupName, finalUrl,
+    headlines, descriptions, keywords, cpcBidMicros, validateOnly
+  } = message || {};
+
+  if (!campaignId) return { connected: true, error: 'NO_CAMPAIGN' };
+  const name = String(adGroupName || '').trim();
+  if (!name) return { connected: true, error: 'INVALID', detail: 'Ad group name is required.' };
+
+  // The ad points wherever the user is standing; the caller passes the URL
+  // already resolved through any redirect chain, so ads never land on a hop.
+  const dest = String(finalUrl || pageUrl || '').trim();
+  if (!/^https?:\/\//i.test(dest)) {
+    return { connected: true, error: 'INVALID', detail: 'A valid http(s) final URL is required.' };
+  }
+
+  const head = rsaAssets(headlines, 'headline');
+  if (!head.ok) return { connected: true, error: 'INVALID', detail: head.error };
+  const desc = rsaAssets(descriptions, 'description');
+  if (!desc.ok) return { connected: true, error: 'INVALID', detail: desc.error };
+
+  const tokenResult = await adsGetAccessToken();
+  if (tokenResult.error === 'NOT_CONNECTED') return { connected: false };
+  if (tokenResult.error === 'REAUTH_REQUIRED') return { connected: false, reauthRequired: true };
+  if (tokenResult.error) return { connected: true, error: tokenResult.error };
+
+  const customerId = await adsGetAccount(gscPageHost(pageUrl));
+  if (!customerId) return { connected: true, error: 'NO_ACCOUNT' };
+  const cid = adsDigits(customerId);
+
+  // A negative id is a temporary resource name: later operations in the same
+  // request refer to the ad group by it, and Google substitutes the real id.
+  const TEMP_AD_GROUP = `customers/${cid}/adGroups/-1`;
+
+  const adGroup = {
+    resourceName: TEMP_AD_GROUP,
+    name,
+    campaign: `customers/${cid}/campaigns/${adsDigits(campaignId)}`,
+    status: 'PAUSED',
+    type: 'SEARCH_STANDARD'
+  };
+  // Only meaningful under a manual bidding strategy; the caller omits it
+  // otherwise rather than sending a value the campaign would ignore.
+  if (cpcBidMicros != null && Number.isFinite(Number(cpcBidMicros))) {
+    adGroup.cpcBidMicros = String(Math.round(Number(cpcBidMicros)));
+  }
+
+  const ops = [
+    { adGroupOperation: { create: adGroup } },
+    { adGroupAdOperation: { create: {
+      adGroup: TEMP_AD_GROUP,
+      status: 'PAUSED',
+      ad: { finalUrls: [dest], responsiveSearchAd: { headlines: head.assets, descriptions: desc.assets } }
+    } } }
+  ];
+
+  // Keywords are ENABLED — the paused ad group already stops everything, and
+  // leaving them paused too would mean a second cleanup pass later.
+  const wantedKeywords = [];
+  const seenKeyword = new Set();
+  for (const k of (keywords || [])) {
+    const text = String(k?.text || '').trim();
+    if (!text) continue;
+    const matchType = negMatchType(k.matchType);
+    const key = `${text.toLowerCase()}::${matchType}`;
+    if (seenKeyword.has(key)) continue;
+    seenKeyword.add(key);
+    wantedKeywords.push({ text, matchType });
+    ops.push({ adGroupCriterionOperation: { create: {
+      adGroup: TEMP_AD_GROUP, status: 'ENABLED', keyword: { text, matchType }
+    } } });
+  }
+
+  const res = await adsMutateOperations(tokenResult.accessToken, cid, ops, { validateOnly: !!validateOnly });
+  if (res.error) return { connected: true, error: res.error, detail: res.detail };
+
+  // A dry run returns empty responses by design — report what WOULD be made.
+  if (validateOnly) {
+    return {
+      connected: true, validated: true,
+      adGroupName: name, finalUrl: dest,
+      headlines: head.assets.map(a => a.text),
+      descriptions: desc.assets.map(a => a.text),
+      keywords: wantedKeywords
+    };
+  }
+
+  // Pull the real ad group id back out of the first operation's response so
+  // the UI can deep-link to it.
+  const created = (res.results || [])[0]?.adGroupResult?.resourceName || null;
+  const newAdGroupId = created ? created.split('/').pop() : null;
+
+  return {
+    connected: true, created: true,
+    adGroupId: newAdGroupId, adGroupName: name, finalUrl: dest,
+    headlines: head.assets.map(a => a.text),
+    descriptions: desc.assets.map(a => a.text),
+    keywords: wantedKeywords
+  };
+}

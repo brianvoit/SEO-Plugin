@@ -22,6 +22,8 @@ let _abHost = null;           // host the current state was built for
 let _abResult = null;         // after a successful create
 let _abPageUrl = null;        // the page this panel is building for
 let _abPageInfo = null;       // its parsed content, for naming (may be null)
+let _abKwFilter = '';         // regex filter over the keyword list
+let _abKwFilterExclude = false;
 
 const AB_KEYWORD_CAP = 40;
 
@@ -187,9 +189,15 @@ async function abSuggestName() {
 // gets a usable name from its URL.
 function abPageLabel() {
   const info = _abPageInfo || {};
-  const h1 = (info.headings || []).find(h => h.level === 1 && h.text && h.text.trim());
-  if (h1) return h1.text.trim().slice(0, 60);
-  if (info.title) return String(info.title).split(/[|\-—]/)[0].trim().slice(0, 60);
+  const asText = (v) => (!v ? '' : (typeof v === 'string' ? v : (typeof v.text === 'string' ? v.text : '')));
+
+  const h1 = ((info.headings || []).find(h => (h.tag || (h.level != null ? `h${h.level}` : '')) === 'h1'));
+  const h1Text = asText(h1);
+  if (h1Text) return h1Text.trim().slice(0, 60);
+
+  const title = asText(info.title);
+  if (title) return title.split(/[|\-—]/)[0].trim().slice(0, 60);
+
   try {
     const seg = new URL(_abPageUrl).pathname.split('/').filter(Boolean).pop();
     if (seg) return seg.replace(/[-_]+/g, ' ').replace(/\.\w+$/, '').trim().slice(0, 60);
@@ -245,9 +253,18 @@ function abLandingSection() {
 
 function abCampaignSection() {
   const s = abSection('CAMPAIGN');
-  const eligible = _abCampaigns.eligible;
+  // Paused campaigns are hidden: an ad group built into one cannot serve until
+  // the campaign itself is enabled, which is a trap rather than a choice.
+  const eligible = _abCampaigns.eligible.filter(c => c.status !== 'PAUSED');
+  const pausedCount = _abCampaigns.eligible.length - eligible.length;
 
   if (!eligible.length) {
+    if (pausedCount && !_abCampaigns.excluded.length) {
+      const paused = abHint(`The only Search campaign${pausedCount === 1 ? '' : 's'} in this account ${pausedCount === 1 ? 'is' : 'are'} paused. Enable one in Google Ads to build an ad group inside it.`);
+      paused.classList.add('is-error');
+      s.appendChild(paused);
+      return s;
+    }
     const msg = abHint(_abCampaigns.excluded.length
       ? `No Search campaigns in this account. An ad group with keywords can only live in a Search campaign — the ${_abCampaigns.excluded.length} campaign${_abCampaigns.excluded.length === 1 ? '' : 's'} here ${_abCampaigns.excluded.length === 1 ? 'is' : 'are'} ${[...new Set(_abCampaigns.excluded.map(c => c.channelLabel))].join(', ')}. Create a Search campaign in Google Ads first.`
       : 'No enabled or paused campaigns in this account.');
@@ -265,8 +282,10 @@ function abCampaignSection() {
   eligible.forEach(c => {
     const o = document.createElement('option');
     o.value = c.campaignId;
+    // Name first, budget last: the name is what is being chosen, and putting
+    // the figure at the end keeps the names aligned and scannable.
     const budget = c.budgetMicros != null ? ` — ${abMoney(c.budgetMicros)}/day` : '';
-    o.textContent = `${c.campaignName}${c.status === 'PAUSED' ? ' (paused)' : ''}${budget}`;
+    o.textContent = `${c.campaignName}${budget}`;
     if (c.campaignId === _abCampaignId) o.selected = true;
     select.appendChild(o);
   });
@@ -279,6 +298,9 @@ function abCampaignSection() {
 
   if (_abCampaigns.excluded.length) {
     s.appendChild(abHint(`${_abCampaigns.excluded.length} campaign${_abCampaigns.excluded.length === 1 ? '' : 's'} hidden — ${[...new Set(_abCampaigns.excluded.map(c => c.channelLabel))].join(', ')} cannot hold keyword-targeted ad groups.`));
+  }
+  if (pausedCount) {
+    s.appendChild(abHint(`${pausedCount} paused Search campaign${pausedCount === 1 ? '' : 's'} hidden — an ad group inside one cannot serve.`));
   }
   return s;
 }
@@ -444,7 +466,7 @@ async function abGenerateCopy(btn) {
 function abKeywordSection() {
   const s = abSection('KEYWORDS');
   if (!_abKeywords.length) {
-    s.appendChild(abHint('Mined from this page\'s own headings, title and meta description, then cross-checked against its Search Console queries and tracked keywords. Anything already targeted in the account is flagged.'));
+    s.appendChild(abHint('Mined from this page\'s own headings, title and meta description, then cross-checked against its Search Console queries and tracked keywords. Terms already targeted elsewhere in the account are left out.'));
     const btn = document.createElement('button');
     btn.className = 'save-key-btn';
     btn.textContent = 'Find keywords';
@@ -453,25 +475,118 @@ function abKeywordSection() {
     return s;
   }
 
-  const chosen = _abKeywords.filter(k => k.include).length;
-  const summary = abHint(`${chosen} of ${_abKeywords.length} selected.`);
+  s.appendChild(abKeywordFilterBar());
+
+  const summary = document.createElement('div');
+  summary.className = 'field-hint';
   summary.id = 'adsbuild-kw-summary';
   s.appendChild(summary);
 
-  _abKeywords.forEach(k => s.appendChild(abKeywordRow(k)));
+  const list = document.createElement('div');
+  list.id = 'adsbuild-kw-list';
+  s.appendChild(list);
+
+  abRenderKeywordList(list);
   return s;
 }
 
 /**
- * One keyword row: include, term, match type, volume, and its classification.
+ * Regex filter + bulk select, matching the Search Terms and Keywords tables.
  *
- * Match type is editable in place because the right choice is per term, not
- * per ad group — a broad head term wants phrase, a specific product name wants
- * exact, and forcing one setting across the list would be wrong for half of it.
+ * Nothing starts selected, so the intended flow is: narrow with the filter,
+ * then select what survives. "Select all" therefore acts on the FILTERED set,
+ * not the whole list — selecting hidden rows would be invisible and dangerous
+ * on something that writes to a live account.
+ */
+function abKeywordFilterBar() {
+  const bar = document.createElement('div');
+  bar.className = 'gsc-query-search-bar';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'gsc-query-search-input';
+  input.placeholder = 'Filter keywords (regex: term|term2)';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.value = _abKwFilter;
+  input.addEventListener('input', () => {
+    _abKwFilter = input.value;
+    abRenderKeywordList(document.getElementById('adsbuild-kw-list'));
+  });
+
+  const mode = document.createElement('button');
+  mode.className = 'gsc-query-search-mode-btn';
+  mode.title = 'Toggle include/exclude';
+  mode.textContent = _abKwFilterExclude ? 'Exclude' : 'Match';
+  mode.addEventListener('click', () => {
+    _abKwFilterExclude = !_abKwFilterExclude;
+    mode.textContent = _abKwFilterExclude ? 'Exclude' : 'Match';
+    abRenderKeywordList(document.getElementById('adsbuild-kw-list'));
+  });
+
+  const all = document.createElement('button');
+  all.className = 'gsc-query-search-mode-btn';
+  all.textContent = 'Select all';
+  all.title = 'Select every keyword currently shown';
+  all.addEventListener('click', () => {
+    const shown = _abKeywords.filter(abKwVisible);
+    // If everything visible is already on, the button clears instead — one
+    // control for both directions, since that is what people reach for.
+    const turnOn = shown.some(k => !k.include);
+    shown.forEach(k => { k.include = turnOn; });
+    abRenderKeywordList(document.getElementById('adsbuild-kw-list'));
+    abSyncCommit();
+  });
+
+  bar.appendChild(input);
+  bar.appendChild(mode);
+  bar.appendChild(all);
+  return bar;
+}
+
+// Invalid regex filters nothing, matching the other tables — a half-typed
+// pattern should not blank the list.
+function abKwVisible(k) {
+  if (!_abKwFilter) return true;
+  let re;
+  try { re = new RegExp(_abKwFilter, 'i'); } catch { return true; }
+  const m = re.test(k.text || '');
+  return _abKwFilterExclude ? !m : m;
+}
+
+function abRenderKeywordList(list) {
+  if (!list) return;
+  list.replaceChildren();
+  const shown = _abKeywords.filter(abKwVisible);
+  shown.forEach(k => list.appendChild(abKeywordRow(k)));
+  if (!shown.length) list.appendChild(abHint('No keywords match that filter.'));
+  abSyncKeywordSummary();
+}
+
+/**
+ * One keyword row: match type, include, term, volume, classification.
+ *
+ * Match type leads because it is the decision being made about each term —
+ * a broad head term wants phrase, a specific product name wants exact — and
+ * reading it before the term makes the list scannable as a set of choices
+ * rather than a wall of text.
  */
 function abKeywordRow(k) {
   const row = document.createElement('div');
   row.className = 'adsbuild-kw-row';
+
+  const match = document.createElement('select');
+  match.className = `adsbuild-kw-match is-${k.matchType.toLowerCase()}`;
+  [['PHRASE', 'Phrase'], ['EXACT', 'Exact'], ['BROAD', 'Broad']].forEach(([v, label]) => {
+    const o = document.createElement('option');
+    o.value = v; o.textContent = label;
+    if (v === k.matchType) o.selected = true;
+    match.appendChild(o);
+  });
+  match.addEventListener('change', () => {
+    k.matchType = match.value;
+    match.className = `adsbuild-kw-match is-${k.matchType.toLowerCase()}`;
+  });
 
   const cb = document.createElement('input');
   cb.type = 'checkbox';
@@ -487,16 +602,6 @@ function abKeywordRow(k) {
   text.textContent = k.text;
   if (k.onPage) text.title = 'Appears in this page\'s own headings, title or meta description';
 
-  const match = document.createElement('select');
-  match.className = 'adsbuild-kw-match';
-  [['PHRASE', 'Phrase'], ['EXACT', 'Exact'], ['BROAD', 'Broad']].forEach(([v, label]) => {
-    const o = document.createElement('option');
-    o.value = v; o.textContent = label;
-    if (v === k.matchType) o.selected = true;
-    match.appendChild(o);
-  });
-  match.addEventListener('change', () => { k.matchType = match.value; });
-
   const volume = document.createElement('span');
   volume.className = 'adsbuild-kw-vol';
   volume.textContent = k.volume != null ? `${k.volume.toLocaleString()}/mo` : '—';
@@ -506,26 +611,22 @@ function abKeywordRow(k) {
   chips.className = 'asset-insight-chips adsbuild-chips';
   abPaintChips(chips, k.text);
 
+  row.appendChild(match);
   row.appendChild(cb);
   row.appendChild(text);
-  row.appendChild(match);
   row.appendChild(volume);
   row.appendChild(chips);
-
-  // Adding a term that already lives elsewhere creates internal competition,
-  // so name where it is rather than silently dropping it.
-  if (k.targetedIn) {
-    const warn = document.createElement('span');
-    warn.className = 'adsbuild-kw-warn';
-    warn.textContent = `already in ${k.targetedIn}`;
-    row.appendChild(warn);
-  }
   return row;
 }
 
 function abSyncKeywordSummary() {
   const el = document.getElementById('adsbuild-kw-summary');
-  if (el) el.textContent = `${_abKeywords.filter(k => k.include).length} of ${_abKeywords.length} selected.`;
+  if (!el) return;
+  const chosen = _abKeywords.filter(k => k.include).length;
+  const shown = _abKeywords.filter(abKwVisible).length;
+  el.textContent = shown === _abKeywords.length
+    ? `${chosen} of ${_abKeywords.length} selected.`
+    : `${chosen} selected · showing ${shown} of ${_abKeywords.length}.`;
 }
 
 async function abLoadKeywords(btn) {
@@ -596,16 +697,29 @@ const AB_STOPWORDS = new Set([
  * keyword, and four or more matches almost nothing under phrase match.
  */
 function abPagePhrases(info) {
+  // getPageData returns title and metaDescription as OBJECTS ({text, charCount,
+  // wordCount}) and tags headings with `tag: 'h1'` rather than a numeric level.
+  // Reading them as plain strings yields "[object Object]" and silently skips
+  // every heading — which is exactly what an earlier version of this did.
+  const asText = (v) => {
+    if (!v) return '';
+    if (typeof v === 'string') return v;
+    return typeof v.text === 'string' ? v.text : '';
+  };
+  const HEADING_WEIGHT = { h1: 5, h2: 3, h3: 2 };
+
   const sources = [
-    { text: info && info.h1, weight: 5 },
-    { text: info && info.title, weight: 4 },
-    { text: (info && info.metaDescription) || (info && info.description), weight: 2 }
+    { text: asText(info && info.title), weight: 4 },
+    { text: asText(info && info.metaDescription) || asText(info && info.description), weight: 2 }
   ];
   ((info && info.headings) || []).forEach(h => {
-    if (!h || !h.text) return;
-    if (h.level === 1) sources.push({ text: h.text, weight: 5 });
-    else if (h.level === 2) sources.push({ text: h.text, weight: 3 });
-    else if (h.level === 3) sources.push({ text: h.text, weight: 2 });
+    const text = asText(h);
+    if (!text) return;
+    // Accept either shape: `tag` is what getPageData emits, `level` is what a
+    // caller assembling its own page object might use.
+    const tag = h.tag || (h.level != null ? `h${h.level}` : null);
+    const weight = HEADING_WEIGHT[tag];
+    if (weight) sources.push({ text, weight });
   });
 
   const scores = new Map();
@@ -711,21 +825,18 @@ function abRankKeywords(seeds, volumes, targeted) {
     };
   });
 
-  scored.sort((a, b) => {
-    if (!!a.targetedIn !== !!b.targetedIn) return a.targetedIn ? 1 : -1;
-    return b._score - a._score;
-  });
+  // Terms already targeted elsewhere are REMOVED, not listed. An earlier
+  // version showed them greyed out so the user could choose between moving and
+  // duplicating, but in practice they were most of the list and drowned the
+  // candidates that were actually actionable.
+  const available = scored.filter(k => !k.targetedIn);
 
-  return scored.slice(0, AB_KEYWORD_CAP).map(k => ({
-    ...k,
-    // Every candidate already comes from the page, from a query this page
-    // earns, or from a tracked keyword — so the default is ON. Only two things
-    // switch it off: the term is already targeted elsewhere (adding it would
-    // compete with an existing ad group), or Keyword Planner explicitly
-    // measured zero demand. A MISSING figure is not zero demand — plenty of
-    // valid long-tail terms have none — so null stays included.
-    include: !k.targetedIn && k.volume !== 0
-  }));
+  available.sort((a, b) => b._score - a._score);
+
+  // Nothing is pre-selected: this writes keywords into a live account, so each
+  // one should be a deliberate choice. The regex filter above narrows the list
+  // first, and "Select all" acts on whatever survives that filter.
+  return available.slice(0, AB_KEYWORD_CAP).map(k => ({ ...k, include: false }));
 }
 
 // ─── Commit ──────────────────────────────────────────────────────────────────

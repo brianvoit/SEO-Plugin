@@ -357,24 +357,20 @@ describe('keyword ranking', () => {
     assert.equal(out[0].text, 'big term');
   });
 
-  test('already-targeted terms sink and start unchecked', () => {
+  test('already-targeted terms are removed entirely', () => {
+    // These are dropped rather than listed: in practice they were most of the
+    // list and drowned the candidates that were actually actionable.
     const out = rank(
       ['already used', 'brand new'],
       { 'already used': { avgMonthlySearches: 9000 }, 'brand new': { avgMonthlySearches: 5 } },
       new Map([['already used', 'Brand — Roofing']])
     );
-    // Even with far more volume it goes last, because adding it would compete
-    // with an existing ad group.
-    assert.equal(out[out.length - 1].text, 'already used');
-    assert.equal(out.find(k => k.text === 'already used').include, false);
+    assert.deepEqual(plain(out.map(k => k.text)), ['brand new']);
   });
 
-  test('an already-targeted term is still shown, with where it lives', () => {
-    // Silently dropping it reads as a weak suggestion engine; naming the ad
-    // group lets the user choose between moving and duplicating.
+  test('a list of only already-targeted terms comes back empty', () => {
     const out = rank(['already used'], {}, new Map([['already used', 'Brand — Roofing']]));
-    assert.equal(out.length, 1);
-    assert.equal(out[0].targetedIn, 'Brand — Roofing');
+    assert.equal(out.length, 0);
   });
 
   test('everything defaults to phrase match', () => {
@@ -382,16 +378,24 @@ describe('keyword ranking', () => {
     assert.ok(out.every(k => k.matchType === 'PHRASE'));
   });
 
-  test('terms with zero measured volume are listed but unchecked', () => {
-    const out = rank(['dead term'], { 'dead term': { avgMonthlySearches: 0 } }, new Map());
-    assert.equal(out[0].include, false);
+  test('nothing is pre-selected', () => {
+    // This writes keywords into a live account, so every one should be a
+    // deliberate choice. The regex filter narrows the list; Select all acts on
+    // what survives it.
+    const out = rank(
+      ['measured term', 'unmeasured term', 'dead term'],
+      { 'measured term': { avgMonthlySearches: 5000 }, 'dead term': { avgMonthlySearches: 0 } },
+      new Map()
+    );
+    assert.ok(out.length >= 3);
+    assert.ok(out.every(k => k.include === false), 'a keyword started pre-selected');
   });
 
-  test('unknown volume still defaults to included', () => {
-    // No data is not the same as no demand — Keyword Planner returns nothing
-    // for plenty of valid long-tail terms.
-    const out = rank(['unmeasured term'], {}, new Map());
-    assert.equal(out[0].include, true);
+  test('zero-volume terms are still offered', () => {
+    // Keyword Planner measuring zero is worth showing — the user may know
+    // better than the tool does about a new or niche term.
+    const out = rank(['dead term'], { 'dead term': { avgMonthlySearches: 0 } }, new Map());
+    assert.equal(out.length, 1);
   });
 
   test('the list is capped', () => {
@@ -562,19 +566,118 @@ describe('page phrases feed the ranking', () => {
     assert.equal(out[0].text, 'dead tree removal');
   });
 
-  test('zero measured demand switches a term off, missing demand does not', () => {
+  test('page-derived terms are offered regardless of measured volume', () => {
+    // A phrase the page itself leads with is worth showing even when Keyword
+    // Planner has no figure, or a zero, for it.
     const out = rank(
       [{ text: 'measured dead', pageScore: 5, onPage: true },
        { text: 'unmeasured term', pageScore: 5, onPage: true }],
       { 'measured dead': { avgMonthlySearches: 0 } },
       new Map()
     );
-    assert.equal(out.find(k => k.text === 'measured dead').include, false);
-    assert.equal(out.find(k => k.text === 'unmeasured term').include, true);
+    assert.equal(out.length, 2);
+    assert.ok(out.every(k => k.include === false));
   });
 
   test('match type still defaults to phrase for page-derived terms', () => {
     const out = rank([{ text: 'dead tree removal', pageScore: 9, onPage: true }], {}, new Map());
     assert.equal(out[0].matchType, 'PHRASE');
+  });
+});
+
+// ─── Real getPageData shapes ─────────────────────────────────────────────────
+// Regression cover for a shipped bug: getPageData returns `title` and
+// `metaDescription` as OBJECTS ({text, charCount, wordCount}) and tags headings
+// with `tag: 'h1'`, not `level: 1`. Reading them as plain strings produced a
+// literal "[object Object]" keyword — it reached the user's screen as
+// "object object" at 9,900/mo — and skipped every heading.
+
+describe('page mining against the real getPageData shape', () => {
+  const phrases = loadPhraser();
+  const realPage = {
+    title: { text: 'Dead Tree Removal Services | Tree Top Climbers', charCount: 46, wordCount: 7 },
+    metaDescription: { text: 'Expert dead tree removal in Minneapolis.', charCount: 39, wordCount: 6 },
+    headings: [
+      { tag: 'h1', text: 'Dead Tree Removal Services' },
+      { tag: 'h2', text: 'Emergency Tree Removal' }
+    ]
+  };
+
+  test('never emits a stringified object', () => {
+    const out = phrases(realPage).map(p => p.text);
+    assert.ok(!out.some(t => t.includes('object')), `leaked: ${out.filter(t => t.includes('object')).join(', ')}`);
+  });
+
+  test('reads the object-wrapped title', () => {
+    const out = phrases({ title: { text: 'Dead Tree Removal Services' } }).map(p => p.text);
+    assert.ok(out.includes('dead tree removal'), out.join(' | '));
+  });
+
+  test('reads the object-wrapped meta description', () => {
+    const out = phrases({ metaDescription: { text: 'Emergency stump grinding available' } }).map(p => p.text);
+    assert.ok(out.includes('emergency stump grinding'), out.join(' | '));
+  });
+
+  test('reads headings tagged h1/h2, not level 1/2', () => {
+    const out = phrases({ headings: [{ tag: 'h2', text: 'Emergency Tree Removal' }] }).map(p => p.text);
+    assert.ok(out.includes('emergency tree removal'), out.join(' | '));
+  });
+
+  test('an h1 still outweighs an h2', () => {
+    const out = phrases({
+      headings: [{ tag: 'h1', text: 'Dead Tree Removal' }, { tag: 'h2', text: 'Stump Grinding Service' }]
+    });
+    const h1 = out.find(p => p.text === 'dead tree removal');
+    const h2 = out.find(p => p.text === 'stump grinding');
+    assert.ok(h1.pageScore > h2.pageScore);
+  });
+
+  test('a plain-string page object still works', () => {
+    // A caller assembling its own object should not have to mimic the wrapper.
+    const out = phrases({ title: 'Dead Tree Removal', headings: [{ level: 2, text: 'Stump Grinding Service' }] })
+      .map(p => p.text);
+    assert.ok(out.includes('dead tree removal'));
+    assert.ok(out.includes('stump grinding'));
+  });
+});
+
+// ─── Keyword regex filter ────────────────────────────────────────────────────
+
+function loadFilter() {
+  const from = panelSrc.indexOf('function abKwVisible');
+  const to = panelSrc.indexOf('function abRenderKeywordList');
+  if (from === -1 || to <= from) throw new Error('abKwVisible not found — update the slice markers');
+  return (filter, exclude) => {
+    const ctx = { _abKwFilter: filter, _abKwFilterExclude: exclude, RegExp, String };
+    vm.createContext(ctx);
+    vm.runInContext(`${panelSrc.slice(from, to)}; globalThis.__v = abKwVisible;`, ctx);
+    return ctx.__v;
+  };
+}
+
+describe('keyword filter', () => {
+  const make = loadFilter();
+  const kws = [{ text: 'tree removal' }, { text: 'stump grinding' }, { text: 'tree trimming' }];
+  const shown = (filter, exclude = false) => kws.filter(make(filter, exclude)).map(k => k.text);
+
+  test('an empty filter shows everything', () => {
+    assert.equal(shown('').length, 3);
+  });
+
+  test('matches as a regex, not a literal', () => {
+    assert.deepEqual(plain(shown('removal|trimming')), ['tree removal', 'tree trimming']);
+  });
+
+  test('is case-insensitive', () => {
+    assert.deepEqual(plain(shown('TREE')), ['tree removal', 'tree trimming']);
+  });
+
+  test('exclude mode inverts the match', () => {
+    assert.deepEqual(plain(shown('tree', true)), ['stump grinding']);
+  });
+
+  test('an invalid regex filters nothing rather than blanking the list', () => {
+    // Half-typed patterns are normal while someone is still typing.
+    assert.equal(shown('tree(').length, 3);
   });
 });

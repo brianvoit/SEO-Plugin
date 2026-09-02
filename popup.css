@@ -3999,26 +3999,47 @@ body.settings-open #update-footer { margin-top: auto; }
 /* Asset and keyword rows are edited in place, so each is a single row of
    controls that stays aligned as the text length changes. */
 
-.adsbuild-asset-row,
-.adsbuild-kw-row {
-  display: flex;
+/* Both lists are grids rather than flex rows, so the count and the two
+   classification columns line up down the list instead of trailing each line
+   at whatever width its text happens to be. Units live in the header. */
+.adsbuild-asset-row {
+  display: grid;
+  grid-template-columns: 1fr 42px 76px 62px;
   align-items: center;
   gap: 8px;
   padding: 3px 0;
 }
 
+.adsbuild-kw-row {
+  display: grid;
+  grid-template-columns: 78px 16px 1fr 58px 76px 62px;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+/* Header row: same grid, quieter type, and it should not look clickable. */
+.adsbuild-head {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--border, #2a2a2e);
+  margin-bottom: 2px;
+  pointer-events: none;
+}
+
+.adsbuild-col { min-width: 0; }
+
 .adsbuild-asset-input {
-  flex: 1;
-  min-width: 0;          /* let the input shrink instead of pushing the count out */
   height: 26px;
   font-size: 12px;
 }
 
-/* Fixed width so the counts line up down the column rather than jittering as
-   the character count changes width. */
-.adsbuild-count {
-  flex: 0 0 auto;
-  min-width: 46px;
+/* Right-aligned numerics with tabular figures so digits line up column-wise. */
+.adsbuild-count,
+.adsbuild-col-vol {
   text-align: right;
   font-size: 11px;
   opacity: 0.7;
@@ -4030,76 +4051,27 @@ body.settings-open #update-footer { margin-top: auto; }
   font-weight: 600;
 }
 
+/* Chip columns hold at most one chip each and stay put while classification
+   is still resolving, so rows do not reflow when the chips arrive. */
+.adsbuild-col-intent,
+.adsbuild-col-sentiment {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+.adsbuild-head .adsbuild-col-intent,
+.adsbuild-head .adsbuild-col-sentiment { display: block; }
+
 .adsbuild-kw-text {
-  flex: 1;
-  min-width: 0;
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* Match type leads the row and is colour-coded, so the list scans as a set of
-   decisions rather than a wall of text. Colours follow the intent chips:
-   tighter targeting reads cooler, broader reads warmer. */
-.adsbuild-kw-match {
-  flex: 0 0 auto;
-  width: 78px;
-  height: 24px;
-  font-size: 11px;
-  padding: 0 4px;
-  border-radius: 4px;
-  border: 1px solid var(--border, #333);
-  background: var(--input-bg, #1b1b1f);
-  color: var(--text, #e8e8ea);
-  cursor: pointer;
-}
-.adsbuild-kw-match:focus-visible {
-  outline: 2px solid var(--accent, #4a9eff);
-  outline-offset: 1px;
-}
-.adsbuild-kw-match.is-exact {
-  border-color: #3b82f6;
-  color: #93c5fd;
-  background: color-mix(in srgb, #3b82f6 12%, transparent);
-}
-.adsbuild-kw-match.is-phrase {
-  border-color: #10b981;
-  color: #6ee7b7;
-  background: color-mix(in srgb, #10b981 12%, transparent);
-}
-.adsbuild-kw-match.is-broad {
-  border-color: #f59e0b;
-  color: #fcd34d;
-  background: color-mix(in srgb, #f59e0b 12%, transparent);
-}
 
-/* The filter bar sits above the list; "Select all" acts on what is visible. */
-.adsbuild-kw-row .adsbuild-kw-text { margin-left: 2px; }
 
-.adsbuild-kw-vol {
-  flex: 0 0 auto;
-  min-width: 62px;
-  text-align: right;
-  font-size: 11px;
-  opacity: 0.7;
-  font-variant-numeric: tabular-nums;
-}
 
-.adsbuild-kw-warn {
-  flex: 0 0 auto;
-  font-size: 11px;
-  opacity: 0.7;
-  font-style: italic;
-}
-
-/* Chips arrive after classification resolves; reserve nothing, so rows do not
-   jump on first paint — they simply gain a chip at the end. */
-.adsbuild-chips {
-  flex: 0 0 auto;
-  display: inline-flex;
-  gap: 4px;
-}
 
 /* Manual keyword entry sits under the filter; its note only appears when
    there is something to say (duplicate, or already targeted elsewhere). */

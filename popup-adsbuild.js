@@ -389,6 +389,21 @@ function abAssetList(label, key, max) {
   head.textContent = `${label} (${items.length})`;
   wrap.appendChild(head);
 
+  // Column headings, so the count and the two classifications line up down the
+  // list rather than trailing each line at whatever width it happens to be.
+  const cols = document.createElement('div');
+  cols.className = 'adsbuild-asset-row adsbuild-head';
+  [['adsbuild-asset-input', label.replace(/s$/, '')],
+   ['adsbuild-count', `Chars/${max}`],
+   ['adsbuild-col-intent', 'Intent'],
+   ['adsbuild-col-sentiment', 'Sentiment']].forEach(([cls, text]) => {
+    const c = document.createElement('span');
+    c.className = `adsbuild-col ${cls}`;
+    c.textContent = text;
+    cols.appendChild(c);
+  });
+  wrap.appendChild(cols);
+
   items.forEach((text, i) => {
     const row = document.createElement('div');
     row.className = 'adsbuild-asset-row';
@@ -396,21 +411,18 @@ function abAssetList(label, key, max) {
 
     const input = document.createElement('input');
     input.type = 'text';
-    input.className = 'wp-input adsbuild-asset-input';
+    input.className = 'wp-input adsbuild-col adsbuild-asset-input';
     input.value = text;
 
+    // Bare number — the limit is stated once in the header.
     const count = document.createElement('span');
-    count.className = 'adsbuild-count';
-
-    const chips = document.createElement('span');
-    chips.className = 'asset-insight-chips adsbuild-chips';
+    count.className = 'adsbuild-col adsbuild-count';
 
     const paintCount = () => {
-      count.textContent = `${input.value.length}/${max}`;
+      count.textContent = String(input.value.length);
       count.classList.toggle('is-over', input.value.length > max);
     };
     paintCount();
-    abPaintChips(chips, input.value);
 
     input.addEventListener('input', () => {
       _abCopy[key][i] = input.value;
@@ -421,12 +433,14 @@ function abAssetList(label, key, max) {
     // rather than firing on every keystroke.
     input.addEventListener('change', () => {
       row.dataset.assetText = input.value;
-      abClassify([input.value], () => abPaintChips(chips, input.value));
+      abClassify([input.value], () => abPaintChips(row, input.value));
     });
 
     row.appendChild(input);
     row.appendChild(count);
-    row.appendChild(chips);
+    row.appendChild(abChipCell('intent'));
+    row.appendChild(abChipCell('sentiment'));
+    abPaintChips(row, text);
     wrap.appendChild(row);
   });
 
@@ -435,14 +449,39 @@ function abAssetList(label, key, max) {
 
 // Intent and sentiment for one phrase, from the shared classifier cache that
 // the Ad Copy panel already populates. Absent until classification resolves.
-function abPaintChips(box, text) {
-  if (!box) return;
-  const ins = (typeof _adAssetInsights !== 'undefined')
+function abInsightsFor(text) {
+  return (typeof _adAssetInsights !== 'undefined')
     ? _adAssetInsights[String(text || '').toLowerCase()] : null;
-  box.replaceChildren();
-  if (!ins) return;
-  const chips = typeof buildInsightChips === 'function' ? buildInsightChips(ins) : null;
-  if (chips) box.appendChild(chips);
+}
+
+// One chip in its own cell. buildInsightChips emits intent and sentiment
+// together in a single span, which cannot line up as two columns.
+function abChipCell(kind) {
+  const cell = document.createElement('span');
+  cell.className = `adsbuild-col adsbuild-col-${kind}`;
+  cell.dataset.kind = kind;
+  return cell;
+}
+
+function abPaintChipCell(cell, text) {
+  if (!cell) return;
+  const ins = abInsightsFor(text);
+  const value = ins ? ins[cell.dataset.kind] : null;
+  cell.replaceChildren();
+  if (!value) return;
+  const cls = (typeof INSIGHT_CHIP_CLASS !== 'undefined' && INSIGHT_CHIP_CLASS[value]) || 'neutral';
+  const chip = document.createElement('span');
+  chip.className = `og-insight-chip og-insight-chip--${cls}`;
+  chip.textContent = value;
+  chip.title = value;
+  cell.appendChild(chip);
+}
+
+// Repaint both chip columns of a row.
+function abPaintChips(row, text) {
+  if (!row) return;
+  row.querySelectorAll('.adsbuild-col-intent, .adsbuild-col-sentiment')
+    .forEach(cell => abPaintChipCell(cell, text));
 }
 
 // Classify a batch, then repaint. Everything is cached by text in
@@ -473,8 +512,8 @@ async function abGenerateCopy(btn) {
     };
     renderAdsBuild();
     abClassify([..._abCopy.headlines, ..._abCopy.descriptions], () => {
-      document.querySelectorAll('.adsbuild-asset-row').forEach(row => {
-        abPaintChips(row.querySelector('.adsbuild-chips'), row.dataset.assetText);
+      document.querySelectorAll('.adsbuild-asset-row:not(.adsbuild-head)').forEach(row => {
+        abPaintChips(row, row.dataset.assetText);
       });
     });
   } catch (e) {
@@ -649,6 +688,7 @@ function abRenderKeywordList(list) {
   if (!list) return;
   list.replaceChildren();
   const shown = _abKeywords.filter(abKwVisible);
+  if (shown.length) list.appendChild(abKeywordHeader());
   shown.forEach(k => list.appendChild(abKeywordRow(k)));
   if (!shown.length) list.appendChild(abHint('No keywords match that filter.'));
   abSyncKeywordSummary();
@@ -681,6 +721,7 @@ function abKeywordRow(k) {
 
   const cb = document.createElement('input');
   cb.type = 'checkbox';
+  cb.className = 'adsbuild-col adsbuild-col-check';
   cb.checked = !!k.include;
   cb.addEventListener('change', () => {
     k.include = cb.checked;
@@ -690,30 +731,47 @@ function abKeywordRow(k) {
   });
 
   const text = document.createElement('span');
-  text.className = 'adsbuild-kw-text';
+  text.className = 'adsbuild-col adsbuild-kw-text';
   text.textContent = k.text;
   if (k.onPage) text.title = 'Appears in this page\'s own headings, title or meta description';
 
+  // Bare number — the unit lives in the column header rather than repeating on
+  // every row.
   const volume = document.createElement('span');
-  volume.className = 'adsbuild-kw-vol';
-  volume.textContent = k.volume != null ? `${k.volume.toLocaleString()}/mo` : '—';
+  volume.className = 'adsbuild-col adsbuild-col-vol';
+  volume.textContent = k.volume != null ? k.volume.toLocaleString() : '—';
   if (k.volume == null) volume.title = 'No Keyword Planner figure — not the same as no demand';
-
-  const chips = document.createElement('span');
-  chips.className = 'asset-insight-chips adsbuild-chips';
-  abPaintChips(chips, k.text);
 
   row.appendChild(match);
   row.appendChild(cb);
   row.appendChild(text);
   row.appendChild(volume);
-  row.appendChild(chips);
+  row.appendChild(abChipCell('intent'));
+  row.appendChild(abChipCell('sentiment'));
+  abPaintChips(row, k.text);
   return row;
 }
 
-// Enables "Generate ad copy" once at least one keyword is selected, and keeps
-// the explanation next to it truthful. Called on every selection change, since
-// the copy section is not re-rendered when the keyword list is.
+// Column headings for the keyword table. The volume unit sits here so the
+// rows carry nothing but the figure.
+function abKeywordHeader() {
+  const row = document.createElement('div');
+  row.className = 'adsbuild-kw-row adsbuild-head';
+  ['Match', '', 'Keyword', 'Vol/mo', 'Intent', 'Sentiment'].forEach((label, i) => {
+    const cell = document.createElement('span');
+    cell.className = 'adsbuild-col';
+    if (i === 0) cell.classList.add('adsbuild-col-match');
+    if (i === 1) cell.classList.add('adsbuild-col-check');
+    if (i === 2) cell.classList.add('adsbuild-kw-text');
+    if (i === 3) cell.classList.add('adsbuild-col-vol');
+    if (i === 4) cell.classList.add('adsbuild-col-intent');
+    if (i === 5) cell.classList.add('adsbuild-col-sentiment');
+    cell.textContent = label;
+    row.appendChild(cell);
+  });
+  return row;
+}
+
 function abSyncCopyGate(hintEl, btnEl) {
   const hint = hintEl || document.getElementById('adsbuild-copy-hint');
   const btn = btnEl || document.getElementById('adsbuild-copy-btn');
@@ -770,9 +828,9 @@ async function abLoadKeywords(btn) {
     // Intent and sentiment resolve after the list is on screen — the chips
     // fill in rather than holding up the whole section.
     abClassify(_abKeywords.map(k => k.text), () => {
-      document.querySelectorAll('.adsbuild-kw-row').forEach(row => {
+      document.querySelectorAll('.adsbuild-kw-row:not(.adsbuild-head)').forEach(row => {
         const t = row.querySelector('.adsbuild-kw-text');
-        abPaintChips(row.querySelector('.adsbuild-chips'), t && t.textContent);
+        abPaintChips(row, t && t.textContent);
       });
     });
   } catch (e) {

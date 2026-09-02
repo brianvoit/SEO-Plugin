@@ -312,3 +312,90 @@ describe('failure reporting', () => {
     assert.equal(res.adGroupId, '555');
   });
 });
+
+// ─── Keyword ranking (popup-adsbuild.js) ─────────────────────────────────────
+// Pure scoring, sliced out of the panel the same way the background tests
+// slice bg-core. This decides what a user sees pre-checked against their own
+// ad spend, so the ordering rules are worth pinning.
+
+import { readFile } from 'node:fs/promises';
+import { ROOT } from './helpers.mjs';
+
+const panelSrc = await readFile(`${ROOT}/popup-adsbuild.js`, 'utf8');
+
+function loadRanker() {
+  const from = panelSrc.indexOf('function abRankKeywords');
+  const to = panelSrc.indexOf('// ─── Commit');
+  if (from === -1 || to <= from) throw new Error('abRankKeywords not found — update the slice markers');
+  const ctx = { AB_KEYWORD_CAP: 40, Math, Number, Object, Array, String };
+  vm.createContext(ctx);
+  vm.runInContext(`${panelSrc.slice(from, to)}; globalThis.__r = abRankKeywords;`, ctx);
+  return ctx.__r;
+}
+
+describe('keyword ranking', () => {
+  const rank = loadRanker();
+
+  test('shorter terms outrank longer ones at equal volume', () => {
+    // A two-word phrase-match keyword catches the long tail beneath it; a
+    // five-word one matches almost nothing on its own.
+    const out = rank(
+      ['roof repair', 'emergency roof repair near me today'],
+      { 'roof repair': { avgMonthlySearches: 1000 },
+        'emergency roof repair near me today': { avgMonthlySearches: 1000 } },
+      new Map()
+    );
+    assert.equal(out[0].text, 'roof repair');
+  });
+
+  test('volume dominates the ordering', () => {
+    const out = rank(
+      ['tiny term', 'big term'],
+      { 'tiny term': { avgMonthlySearches: 10 }, 'big term': { avgMonthlySearches: 9000 } },
+      new Map()
+    );
+    assert.equal(out[0].text, 'big term');
+  });
+
+  test('already-targeted terms sink and start unchecked', () => {
+    const out = rank(
+      ['already used', 'brand new'],
+      { 'already used': { avgMonthlySearches: 9000 }, 'brand new': { avgMonthlySearches: 5 } },
+      new Map([['already used', 'Brand — Roofing']])
+    );
+    // Even with far more volume it goes last, because adding it would compete
+    // with an existing ad group.
+    assert.equal(out[out.length - 1].text, 'already used');
+    assert.equal(out.find(k => k.text === 'already used').include, false);
+  });
+
+  test('an already-targeted term is still shown, with where it lives', () => {
+    // Silently dropping it reads as a weak suggestion engine; naming the ad
+    // group lets the user choose between moving and duplicating.
+    const out = rank(['already used'], {}, new Map([['already used', 'Brand — Roofing']]));
+    assert.equal(out.length, 1);
+    assert.equal(out[0].targetedIn, 'Brand — Roofing');
+  });
+
+  test('everything defaults to phrase match', () => {
+    const out = rank(['roof repair', 'roofers near me'], {}, new Map());
+    assert.ok(out.every(k => k.matchType === 'PHRASE'));
+  });
+
+  test('terms with zero measured volume are listed but unchecked', () => {
+    const out = rank(['dead term'], { 'dead term': { avgMonthlySearches: 0 } }, new Map());
+    assert.equal(out[0].include, false);
+  });
+
+  test('unknown volume still defaults to included', () => {
+    // No data is not the same as no demand — Keyword Planner returns nothing
+    // for plenty of valid long-tail terms.
+    const out = rank(['unmeasured term'], {}, new Map());
+    assert.equal(out[0].include, true);
+  });
+
+  test('the list is capped', () => {
+    const many = Array.from({ length: 120 }, (_, i) => `term number ${i}`);
+    assert.equal(rank(many, {}, new Map()).length, 40);
+  });
+});

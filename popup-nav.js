@@ -12,6 +12,7 @@ const actionPlanPanel = document.getElementById('actionplan-panel');
 const hreflangPanel   = document.getElementById('hreflang-panel');
 const faviconPanel    = document.getElementById('favicon-panel');
 const adcopyPanel     = document.getElementById('adcopy-panel');
+const adsbuildPanel   = document.getElementById('adsbuild-panel');
 const negativesPanel  = document.getElementById('negatives-panel');
 const addkwPanel      = document.getElementById('addkw-panel');
 const adgroupPanel    = document.getElementById('adgroup-panel');
@@ -62,6 +63,7 @@ function hideDetailPanels() {
   hreflangPanel.classList.add('hidden');
   faviconPanel.classList.add('hidden');
   adcopyPanel.classList.add('hidden');
+  adsbuildPanel.classList.add('hidden');
   negativesPanel.classList.add('hidden');
   addkwPanel.classList.add('hidden');
   adgroupPanel.classList.add('hidden');
@@ -169,6 +171,15 @@ function showAdCopyPanel() {
   adcopyPanel.classList.remove('hidden');
   // Show cached copy for this page if present, otherwise generate on first open
   if (typeof openAdCopyPanel === 'function') openAdCopyPanel();
+}
+
+// Build an ad group for a page nothing advertises yet. The panel renders
+// itself on open (popup-adsbuild.js) rather than caching, since the campaign
+// list and the already-targeted keywords both go stale quickly.
+function showAdsBuildPanel() {
+  enterDetailPanel();
+  adsbuildPanel.classList.remove('hidden');
+  if (typeof openAdsBuildPanel === 'function') openAdsBuildPanel();
 }
 
 function showNegativesPanel() {
@@ -366,6 +377,7 @@ document.querySelectorAll('#main-tabs [data-tab]').forEach(btn => {
       || !hreflangPanel.classList.contains('hidden')
       || !faviconPanel.classList.contains('hidden')
       || !adcopyPanel.classList.contains('hidden')
+      || !adsbuildPanel.classList.contains('hidden')
       || !negativesPanel.classList.contains('hidden')
       || !addkwPanel.classList.contains('hidden')
       || !adgroupPanel.classList.contains('hidden')

@@ -863,16 +863,28 @@ async function adsGetAllKeywords({ pageUrl }) {
   const cid = adsDigits(customerId);
 
   const res = await adsSearch(accessToken, cid,
-    `SELECT ad_group_criterion.keyword.text
+    `SELECT ad_group_criterion.keyword.text, ad_group.name, campaign.name
      FROM keyword_view
      WHERE ad_group_criterion.status != 'REMOVED' AND campaign.status = 'ENABLED'`);
   if (res.error) return { connected: true, error: res.error, detail: res.detail };
 
-  const texts = [...new Set((res.rows || [])
-    .map(r => (r.adGroupCriterion?.keyword?.text || '').toLowerCase().trim())
-    .filter(Boolean))];
+  const texts = [];
+  const seen = new Set();
+  // Where each term already lives. Callers building a NEW ad group need this:
+  // silently hiding an already-targeted suggestion looks like a weak
+  // recommendation engine, whereas "already in Brand — Roofing" lets the user
+  // choose between moving it, duplicating it, and skipping it. First occurrence
+  // wins; a term in several ad groups is reported by one of them.
+  const placements = {};
+  for (const r of (res.rows || [])) {
+    const text = (r.adGroupCriterion?.keyword?.text || '').toLowerCase().trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    texts.push(text);
+    placements[text] = r.adGroup?.name || r.campaign?.name || 'this account';
+  }
 
-  return { connected: true, texts };
+  return { connected: true, texts, placements };
 }
 
 async function adsAddNegatives({ pageUrl, campaigns }) {

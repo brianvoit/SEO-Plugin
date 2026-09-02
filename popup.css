@@ -4004,31 +4004,39 @@ body.settings-open #update-footer { margin-top: auto; }
    at whatever width its text happens to be. Units live in the header. */
 .adsbuild-asset-row {
   display: grid;
-  grid-template-columns: 1fr 42px 76px 62px;
+  grid-template-columns: minmax(0, 1fr) 44px 80px 68px 22px;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   padding: 3px 0;
 }
 
 .adsbuild-kw-row {
   display: grid;
-  grid-template-columns: 78px 16px 1fr 58px 76px 62px;
+  grid-template-columns: 74px 16px minmax(0, 1fr) 52px 80px 68px;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   padding: 3px 0;
 }
 
-/* Header row: same grid, quieter type, and it should not look clickable. */
+/* Column headings. Deliberately quieter and smaller than .field-label, which
+   heads the SECTION — two headings at the same weight read as competing. */
 .adsbuild-head {
-  font-size: 10px;
-  letter-spacing: 0.04em;
+  font-size: 9px;
+  line-height: 1.5;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  opacity: 0.55;
-  padding-bottom: 2px;
+  opacity: 0.5;
+  padding-bottom: 4px;
+  margin-bottom: 4px;
   border-bottom: 1px solid var(--border, #2a2a2e);
-  margin-bottom: 2px;
   pointer-events: none;
 }
+/* Headings sit over centred values, so they centre too — except the first,
+   which labels the left-aligned text column. */
+.adsbuild-head .adsbuild-col { text-align: center; }
+.adsbuild-head .adsbuild-asset-input,
+.adsbuild-head .adsbuild-kw-text,
+.adsbuild-head .adsbuild-col-match { text-align: left; }
 
 .adsbuild-col { min-width: 0; }
 
@@ -4037,12 +4045,13 @@ body.settings-open #update-footer { margin-top: auto; }
   font-size: 12px;
 }
 
-/* Right-aligned numerics with tabular figures so digits line up column-wise. */
+/* The three data columns are centred as a set: a number, a chip and a chip
+   read as one band that way rather than three differently-anchored edges. */
 .adsbuild-count,
 .adsbuild-col-vol {
-  text-align: right;
+  text-align: center;
   font-size: 11px;
-  opacity: 0.7;
+  opacity: 0.75;
   font-variant-numeric: tabular-nums;
 }
 .adsbuild-count.is-over {
@@ -4051,16 +4060,30 @@ body.settings-open #update-footer { margin-top: auto; }
   font-weight: 600;
 }
 
-/* Chip columns hold at most one chip each and stay put while classification
-   is still resolving, so rows do not reflow when the chips arrive. */
 .adsbuild-col-intent,
 .adsbuild-col-sentiment {
   display: flex;
   align-items: center;
+  justify-content: center;
   overflow: hidden;
 }
 .adsbuild-head .adsbuild-col-intent,
 .adsbuild-head .adsbuild-col-sentiment { display: block; }
+
+/* Per-line rewrite, last and narrow so it does not steal width from the text. */
+.adsbuild-col-regen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+}
+.adsbuild-col-regen:hover { opacity: 1; }
+.adsbuild-col-regen.is-busy { opacity: 0.3; cursor: default; }
 
 .adsbuild-kw-text {
   font-size: 12px;
@@ -4069,9 +4092,46 @@ body.settings-open #update-footer { margin-top: auto; }
   white-space: nowrap;
 }
 
+/* Match type leads the row and is colour-coded, so the list scans as a set of
+   decisions rather than a wall of text. Tighter targeting reads cooler. */
+.adsbuild-kw-match {
+  width: 100%;
+  height: 24px;
+  font-size: 11px;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid var(--border, #333);
+  background: var(--input-bg, #1b1b1f);
+  color: var(--text, #e8e8ea);
+  cursor: pointer;
+}
+.adsbuild-kw-match:focus-visible {
+  outline: 2px solid var(--accent, #4a9eff);
+  outline-offset: 1px;
+}
+.adsbuild-kw-match.is-exact {
+  border-color: #3b82f6;
+  color: #93c5fd;
+  background: color-mix(in srgb, #3b82f6 12%, transparent);
+}
+.adsbuild-kw-match.is-phrase {
+  border-color: #10b981;
+  color: #6ee7b7;
+  background: color-mix(in srgb, #10b981 12%, transparent);
+}
+.adsbuild-kw-match.is-broad {
+  border-color: #f59e0b;
+  color: #fcd34d;
+  background: color-mix(in srgb, #f59e0b 12%, transparent);
+}
 
-
-
+/* Commit buttons sit right, where the eye lands after reading the list. */
+.adsbuild-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
 
 /* Manual keyword entry sits under the filter; its note only appears when
    there is something to say (duplicate, or already targeted elsewhere). */

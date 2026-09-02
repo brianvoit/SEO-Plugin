@@ -311,9 +311,6 @@ function abCampaignSection() {
   if (_abCampaigns.excluded.length) {
     s.appendChild(abHint(`${_abCampaigns.excluded.length} campaign${_abCampaigns.excluded.length === 1 ? '' : 's'} hidden — ${[...new Set(_abCampaigns.excluded.map(c => c.channelLabel))].join(', ')} cannot hold keyword-targeted ad groups.`));
   }
-  if (pausedCount) {
-    s.appendChild(abHint(`${pausedCount} paused Search campaign${pausedCount === 1 ? '' : 's'} hidden — an ad group inside one cannot serve.`));
-  }
   return s;
 }
 
@@ -362,12 +359,6 @@ function abCopySection() {
 
   s.appendChild(abAssetList('Headlines', 'headlines', 30));
   s.appendChild(abAssetList('Descriptions', 'descriptions', 90));
-
-  const regen = document.createElement('button');
-  regen.className = 'save-key-btn';
-  regen.textContent = 'Regenerate';
-  regen.addEventListener('click', () => { _abCopy = null; renderAdsBuild(); });
-  s.appendChild(regen);
   return s;
 }
 
@@ -383,20 +374,17 @@ function abCopySection() {
 function abAssetList(label, key, max) {
   const wrap = document.createElement('div');
   const items = _abCopy[key] || [];
+  const singular = label.replace(/s$/, '');
 
-  const head = document.createElement('div');
-  head.className = 'field-hint';
-  head.textContent = `${label} (${items.length})`;
-  wrap.appendChild(head);
-
-  // Column headings, so the count and the two classifications line up down the
-  // list rather than trailing each line at whatever width it happens to be.
+  // One header per table — the count lives in it rather than on a separate
+  // line above, which read as a competing heading at a different size.
   const cols = document.createElement('div');
   cols.className = 'adsbuild-asset-row adsbuild-head';
-  [['adsbuild-asset-input', label.replace(/s$/, '')],
+  [['adsbuild-asset-input', `${singular} (${items.length})`],
    ['adsbuild-count', `Chars/${max}`],
    ['adsbuild-col-intent', 'Intent'],
-   ['adsbuild-col-sentiment', 'Sentiment']].forEach(([cls, text]) => {
+   ['adsbuild-col-sentiment', 'Sentiment'],
+   ['adsbuild-col-regen', '']].forEach(([cls, text]) => {
     const c = document.createElement('span');
     c.className = `adsbuild-col ${cls}`;
     c.textContent = text;
@@ -404,47 +392,118 @@ function abAssetList(label, key, max) {
   });
   wrap.appendChild(cols);
 
-  items.forEach((text, i) => {
-    const row = document.createElement('div');
-    row.className = 'adsbuild-asset-row';
-    row.dataset.assetText = text;
+  items.forEach((text, i) => wrap.appendChild(abAssetRow(key, i, text, max)));
+  return wrap;
+}
 
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'wp-input adsbuild-col adsbuild-asset-input';
-    input.value = text;
+function abAssetRow(key, i, text, max) {
+  const row = document.createElement('div');
+  row.className = 'adsbuild-asset-row';
+  row.dataset.assetText = text;
 
-    // Bare number — the limit is stated once in the header.
-    const count = document.createElement('span');
-    count.className = 'adsbuild-col adsbuild-count';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'wp-input adsbuild-col adsbuild-asset-input';
+  input.value = text;
 
-    const paintCount = () => {
-      count.textContent = String(input.value.length);
-      count.classList.toggle('is-over', input.value.length > max);
-    };
+  // Bare number — the limit is stated once in the header.
+  const count = document.createElement('span');
+  count.className = 'adsbuild-col adsbuild-count';
+
+  const paintCount = () => {
+    count.textContent = String(input.value.length);
+    count.classList.toggle('is-over', input.value.length > max);
+  };
+  paintCount();
+
+  input.addEventListener('input', () => {
+    _abCopy[key][i] = input.value;
     paintCount();
-
-    input.addEventListener('input', () => {
-      _abCopy[key][i] = input.value;
-      paintCount();
-      abSyncCommit();
-    });
-    // Classification costs an API call, so it waits for the edit to settle
-    // rather than firing on every keystroke.
-    input.addEventListener('change', () => {
-      row.dataset.assetText = input.value;
-      abClassify([input.value], () => abPaintChips(row, input.value));
-    });
-
-    row.appendChild(input);
-    row.appendChild(count);
-    row.appendChild(abChipCell('intent'));
-    row.appendChild(abChipCell('sentiment'));
-    abPaintChips(row, text);
-    wrap.appendChild(row);
+    abSyncCommit();
+  });
+  // Classification costs an API call, so it waits for the edit to settle
+  // rather than firing on every keystroke.
+  input.addEventListener('change', () => {
+    row.dataset.assetText = input.value;
+    abClassify([input.value], () => abPaintChips(row, input.value));
   });
 
-  return wrap;
+  const regen = document.createElement('button');
+  regen.className = 'gen-result-btn adsbuild-col adsbuild-col-regen';
+  regen.title = 'Rewrite this line';
+  regen.appendChild(svgFromString(
+    '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M13.5 8A5.5 5.5 0 1 1 8 2.5a5.5 5.5 0 0 1 3.9 1.6L13.5 5.6"/>' +
+    '<polyline points="13.5 2 13.5 5.6 9.9 5.6"/></svg>'));
+  regen.addEventListener('click', () => abRegenerateLine(key, i, input, paintCount, row, regen, max));
+
+  row.appendChild(input);
+  row.appendChild(count);
+  row.appendChild(abChipCell('intent'));
+  row.appendChild(abChipCell('sentiment'));
+  row.appendChild(regen);
+  abPaintChips(row, text);
+  return row;
+}
+
+/**
+ * Rewrite one headline or description.
+ *
+ * Reuses the Ad Copy panel's line prompt and its sanitising and hard-trim
+ * helpers, but drives this row and this panel's own copy store —
+ * regenerateAdCopyLine writes "25/30" into the count element and updates the
+ * shared _adCopy, neither of which fits here.
+ */
+async function abRegenerateLine(key, index, input, paintCount, row, btn, max) {
+  if (btn.disabled) return;
+  btn.disabled = true;
+  btn.classList.add('is-busy');
+  try {
+    const { claudeApiKey } = await browser.storage.local.get('claudeApiKey');
+    if (!claudeApiKey) throw new Error('No Claude API key');
+
+    const asset = (typeof ADS_GEN_ASSETS !== 'undefined')
+      ? ADS_GEN_ASSETS.find(a => a.key === key) : null;
+    if (!asset) throw new Error('unknown asset type');
+
+    // The other lines in this table, so the rewrite does not repeat one.
+    const existing = (_abCopy[key] || []).filter((t, i) => i !== index && t && t.trim());
+
+    const system = buildAdLineSystem(asset, _adCopyInsights, _adCopyBrandTerms, existing);
+    const data = await claudeFetch({
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: MODEL_MID,
+        max_tokens: 120,
+        thinking: { type: 'disabled' },
+        system,
+        messages: [{ role: 'user', content: _adCopyContext || 'No additional context available.' }]
+      })
+    });
+
+    let out = sanitizeAdText(claudeText(data).trim().replace(/^["']|["']$/g, ''));
+    if (!out) throw new Error('empty');
+    if (out.length > max) out = adcopyHardTrim(out, max);
+
+    input.value = out;
+    _abCopy[key][index] = out;
+    row.dataset.assetText = out;
+    paintCount();
+    abSyncCommit();
+    abClassify([out], () => abPaintChips(row, out));
+  } catch {
+    btn.title = 'Rewrite failed — try again';
+    setTimeout(() => { btn.title = 'Rewrite this line'; }, 2500);
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove('is-busy');
+  }
 }
 
 // Intent and sentiment for one phrase, from the shared classifier cache that
@@ -1152,19 +1211,24 @@ function abCommitSection() {
   const s = abSection('CREATE');
   s.appendChild(abHint('The ad group and ad are created PAUSED. Nothing serves until you enable them in Google Ads.'));
 
+  const actions = document.createElement('div');
+  actions.className = 'adsbuild-actions';
+
   const preview = document.createElement('button');
   preview.className = 'save-key-btn';
   preview.id = 'adsbuild-preview';
   preview.textContent = 'Check with Google';
   preview.addEventListener('click', () => abCommit(true, preview));
-  s.appendChild(preview);
+  actions.appendChild(preview);
 
   const create = document.createElement('button');
   create.className = 'save-key-btn';
   create.id = 'adsbuild-create';
-  create.textContent = 'Create ad group';
+  create.textContent = 'Create Ad Group';
   create.addEventListener('click', () => abCommit(false, create));
-  s.appendChild(create);
+  actions.appendChild(create);
+
+  s.appendChild(actions);
 
   const status = document.createElement('div');
   status.className = 'field-hint';

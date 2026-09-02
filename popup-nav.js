@@ -179,7 +179,11 @@ function showAdCopyPanel() {
 function showAdsBuildPanel() {
   enterDetailPanel();
   adsbuildPanel.classList.remove('hidden');
-  if (typeof openAdsBuildPanel === 'function') openAdsBuildPanel();
+  // Async since it resolves the page itself; a rejection must not surface as
+  // an unhandled rejection with the panel stuck on its loading message.
+  if (typeof openAdsBuildPanel === 'function') {
+    Promise.resolve(openAdsBuildPanel()).catch(e => abMessage(String((e && e.message) || e), true));
+  }
 }
 
 function showNegativesPanel() {

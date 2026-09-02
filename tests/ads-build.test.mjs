@@ -399,3 +399,70 @@ describe('keyword ranking', () => {
     assert.equal(rank(many, {}, new Map()).length, 40);
   });
 });
+
+// ─── Page resolution ─────────────────────────────────────────────────────────
+// Regression cover for a shipped bug: the panel required the global `pageData`,
+// which only the OVERVIEW tab populates. Opening the Ads tab directly — the
+// exact path this feature exists for — left it null, so the button answered
+// "Open this on a regular web page" on a perfectly ordinary page with a linked
+// Ads account.
+
+function loadResolver({ pageData = null, tab = null, fetched = null } = {}) {
+  const from = panelSrc.indexOf('async function abResolvePage');
+  const to = panelSrc.indexOf('async function openAdsBuildPanel');
+  if (from === -1 || to <= from) throw new Error('abResolvePage not found — update the slice markers');
+  const ctx = {
+    pageData,
+    getActiveTab: async () => { if (!tab) throw new Error('no tab'); return tab; },
+    getPageDataFromTab: async () => fetched,
+    URL, Promise, Boolean
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${panelSrc.slice(from, to)}; globalThis.__p = abResolvePage;`, ctx);
+  return ctx.__p;
+}
+
+describe('page resolution', () => {
+  test('falls back to the active tab when pageData is null', async () => {
+    // The bug: Ads tab opened directly, Overview never ran.
+    const resolve = loadResolver({ pageData: null, tab: { id: 1, url: 'https://example.com/services' } });
+    const { url } = await resolve();
+    assert.equal(url, 'https://example.com/services');
+  });
+
+  test('prefers the canonical URL when the Overview has run', async () => {
+    // Matches how the rest of popup-ads.js resolves a page, so the builder and
+    // the reporting it sits next to agree on which URL they mean.
+    const resolve = loadResolver({
+      pageData: { url: 'https://example.com/p?utm=x', canonical: 'https://example.com/p' },
+      tab: { id: 1, url: 'https://example.com/p?utm=x' }
+    });
+    const { url } = await resolve();
+    assert.equal(url, 'https://example.com/p');
+  });
+
+  test('fetches page content for naming when pageData is absent', async () => {
+    const resolve = loadResolver({
+      pageData: null,
+      tab: { id: 1, url: 'https://example.com/x' },
+      fetched: { title: 'Roofing Services', headings: [] }
+    });
+    const { info } = await resolve();
+    assert.equal(info.title, 'Roofing Services');
+  });
+
+  test('still resolves a URL when the page cannot be read', async () => {
+    // A page the content script can't reach still deserves an ad group; the
+    // name just comes from the URL instead.
+    const resolve = loadResolver({ pageData: null, tab: { id: 1, url: 'https://example.com/x' }, fetched: null });
+    const { url, info } = await resolve();
+    assert.equal(url, 'https://example.com/x');
+    assert.equal(info, null);
+  });
+
+  test('returns no URL when there is no tab at all', async () => {
+    const resolve = loadResolver({ pageData: null, tab: null });
+    const { url } = await resolve();
+    assert.equal(url, null);
+  });
+});

@@ -20,6 +20,8 @@ let _abKeywords = [];         // [{ text, matchType, volume, competition, includ
 let _abFinalUrl = null;
 let _abHost = null;           // host the current state was built for
 let _abResult = null;         // after a successful create
+let _abPageUrl = null;        // the page this panel is building for
+let _abPageInfo = null;       // its parsed content, for naming (may be null)
 
 const AB_KEYWORD_CAP = 40;
 
@@ -56,8 +58,35 @@ function abHint(text) {
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
-function openAdsBuildPanel() {
-  const host = pageData && pageData.url ? new URL(pageData.url).hostname : null;
+// The Ads tab is reachable without the Overview tab ever having run, and
+// `pageData` is populated only by the Overview's page read — so this panel
+// cannot depend on it. The URL is resolved the way the rest of popup-ads.js
+// does (canonical when known, otherwise the active tab), and the page's own
+// text is fetched on demand purely to suggest an ad group name.
+async function abResolvePage() {
+  const tab = await getActiveTab().catch(() => null);
+  const url = (pageData && pageData.canonical)
+    || (pageData && pageData.url)
+    || (tab && tab.url)
+    || null;
+  let info = (pageData && pageData.url) ? pageData : null;
+  if (!info && tab) info = await getPageDataFromTab(tab.id).catch(() => null);
+  return { url, info };
+}
+
+async function openAdsBuildPanel() {
+  if (_abLoading) { abMessage('Loading…'); return; }
+  abMessage('Loading…');
+
+  const { url, info } = await abResolvePage();
+  if (!url || !/^https?:\/\//i.test(url)) {
+    abMessage('Open this on a regular web page to build an ad group.', true);
+    return;
+  }
+
+  let host = null;
+  try { host = new URL(url).hostname; } catch { /* leave null */ }
+
   // The campaign list and the account's existing keywords both go stale
   // quickly, so state is rebuilt whenever the page changes rather than cached.
   if (host !== _abHost) {
@@ -65,7 +94,9 @@ function openAdsBuildPanel() {
     _abCampaigns = null; _abCampaignId = null; _abAdGroupName = '';
     _abCopy = null; _abKeywords = []; _abResult = null;
   }
-  if (_abLoading) { abMessage('Loading…'); return; }
+  _abPageUrl = url;
+  _abPageInfo = info;
+
   if (_abResult) { renderAdsBuildResult(); return; }
   if (_abCampaigns) { renderAdsBuild(); return; }
   loadAdsBuild();
@@ -100,12 +131,12 @@ function adsNormUrlSafe(u) {
 }
 
 async function loadAdsBuild() {
-  if (!pageData || !pageData.url) { abMessage('Open this on a regular web page to build an ad group.', true); return; }
+  if (!_abPageUrl) { abMessage('Open this on a regular web page to build an ad group.', true); return; }
   _abLoading = true;
   abMessage('Loading campaigns…');
 
   try {
-    const res = await sendMessageWithTimeout({ action: 'adsListCampaignsForBuild', pageUrl: pageData.url });
+    const res = await sendMessageWithTimeout({ action: 'adsListCampaignsForBuild', pageUrl: _abPageUrl });
     if (!res || res.connected === false) {
       abMessage(res && res.reauthRequired
         ? 'Google Ads needs reconnecting — open Setup (⚙) and reconnect.'
@@ -117,7 +148,7 @@ async function loadAdsBuild() {
     _abCampaigns = { eligible: res.eligible || [], excluded: res.excluded || [] };
     if (_abCampaigns.eligible.length === 1) _abCampaignId = _abCampaigns.eligible[0].campaignId;
 
-    const resolved = await abResolveFinalUrl(pageData.url);
+    const resolved = await abResolveFinalUrl(_abPageUrl);
     _abFinalUrl = resolved.url;
     _abRedirected = resolved.redirected;
     _abFinalStatus = resolved.status;
@@ -139,7 +170,7 @@ async function abSuggestName() {
   if (!_abCampaignId) return base;
   try {
     const res = await sendMessageWithTimeout({
-      action: 'adsGetCampaignAdGroupNames', pageUrl: pageData.url, campaignId: _abCampaignId
+      action: 'adsGetCampaignAdGroupNames', pageUrl: _abPageUrl, campaignId: _abCampaignId
     });
     const taken = new Set(((res && res.names) || []).map(n => String(n).toLowerCase()));
     if (!taken.has(base.toLowerCase())) return base;
@@ -152,12 +183,15 @@ async function abSuggestName() {
 }
 
 // A human label for the page: H1, then title, then the last path segment.
+// _abPageInfo is best-effort — a page the content script cannot read still
+// gets a usable name from its URL.
 function abPageLabel() {
-  const h1 = (pageData.headings || []).find(h => h.level === 1 && h.text && h.text.trim());
+  const info = _abPageInfo || {};
+  const h1 = (info.headings || []).find(h => h.level === 1 && h.text && h.text.trim());
   if (h1) return h1.text.trim().slice(0, 60);
-  if (pageData.title) return String(pageData.title).split(/[|\-—]/)[0].trim().slice(0, 60);
+  if (info.title) return String(info.title).split(/[|\-—]/)[0].trim().slice(0, 60);
   try {
-    const seg = new URL(pageData.url).pathname.split('/').filter(Boolean).pop();
+    const seg = new URL(_abPageUrl).pathname.split('/').filter(Boolean).pop();
     if (seg) return seg.replace(/[-_]+/g, ' ').replace(/\.\w+$/, '').trim().slice(0, 60);
   } catch { /* fall through */ }
   return 'New ad group';
@@ -398,14 +432,14 @@ async function abLoadKeywords(btn) {
     // never silently competes with an existing one.
     const targeted = new Map();
     try {
-      const all = await sendMessageWithTimeout({ action: 'adsGetAllKeywords', pageUrl: pageData.url });
+      const all = await sendMessageWithTimeout({ action: 'adsGetAllKeywords', pageUrl: _abPageUrl });
       const places = (all && all.placements) || {};
       ((all && all.texts) || []).forEach(t => targeted.set(t, places[t] || 'this account'));
     } catch { /* dedupe is best-effort */ }
 
     let volumes = {};
     try {
-      const ideas = await sendMessageWithTimeout({ action: 'adsGetKeywordIdeas', pageUrl: pageData.url, keywords: seeds.slice(0, 60) });
+      const ideas = await sendMessageWithTimeout({ action: 'adsGetKeywordIdeas', pageUrl: _abPageUrl, keywords: seeds.slice(0, 60) });
       volumes = (ideas && ideas.byKeyword) || {};
     } catch { /* volume is enrichment only */ }
 
@@ -424,11 +458,11 @@ async function abLoadKeywords(btn) {
 async function abKeywordSeeds() {
   const out = new Set();
   try {
-    const gsc = await sendMessageWithTimeout({ action: 'gscGetQueryData', pageUrl: pageData.url, range: '3m' });
+    const gsc = await sendMessageWithTimeout({ action: 'gscGetQueryData', pageUrl: _abPageUrl, range: '3m' });
     ((gsc && gsc.rows) || []).forEach(r => { if (r.query) out.add(String(r.query).toLowerCase()); });
   } catch { /* optional source */ }
   try {
-    const wc = await sendMessageWithTimeout({ action: 'webceoGetTrackedKeywords', pageUrl: pageData.url });
+    const wc = await sendMessageWithTimeout({ action: 'webceoGetTrackedKeywords', pageUrl: _abPageUrl });
     ((wc && wc.keywords) || []).forEach(k => out.add(String(k).toLowerCase()));
   } catch { /* optional source */ }
   return [...out].filter(Boolean);
@@ -527,7 +561,7 @@ async function abCommit(validateOnly, btn) {
   try {
     const res = await sendMessageWithTimeout({
       action: 'adsCreateAdGroup',
-      pageUrl: pageData.url,
+      pageUrl: _abPageUrl,
       campaignId: _abCampaignId,
       adGroupName: String(_abAdGroupName).trim(),
       finalUrl: _abFinalUrl,

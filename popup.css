@@ -4100,3 +4100,8 @@ body.settings-open #update-footer { margin-top: auto; }
   display: inline-flex;
   gap: 4px;
 }
+
+/* Manual keyword entry sits under the filter; its note only appears when
+   there is something to say (duplicate, or already targeted elsewhere). */
+.adsbuild-add-note:empty { display: none; }
+.adsbuild-add-note { margin-top: 2px; opacity: 0.8; }

@@ -324,13 +324,34 @@ import { ROOT } from './helpers.mjs';
 const panelSrc = await readFile(`${ROOT}/popup-adsbuild.js`, 'utf8');
 
 function loadRanker() {
-  const from = panelSrc.indexOf('function abRankKeywords');
-  const to = panelSrc.indexOf('// ─── Commit');
-  if (from === -1 || to <= from) throw new Error('abRankKeywords not found — update the slice markers');
-  const ctx = { AB_KEYWORD_CAP: 40, Math, Number, Object, Array, String };
+  // Spans abCoreTerms, abOnSubject and abRankKeywords — the subject gate is
+  // part of ranking now, so slicing the ranker alone would leave it undefined.
+  const from = panelSrc.indexOf('function abCoreTerms');
+  const to = panelSrc.indexOf('async function abRefineKeywords');
+  if (from === -1 || to <= from) throw new Error('ranker block not found — update the slice markers');
+  const stop = panelSrc.slice(panelSrc.indexOf('const AB_STOPWORDS'), panelSrc.indexOf('/**\n * Candidate keyword phrases'));
+  const ctx = {
+    AB_CANDIDATE_CAP: 60, AB_MIN_KEYWORDS: 5, AB_MAX_KEYWORDS: 15,
+    Math, Number, Object, Array, String, Set, Map
+  };
   vm.createContext(ctx);
-  vm.runInContext(`${panelSrc.slice(from, to)}; globalThis.__r = abRankKeywords;`, ctx);
+  vm.runInContext(`${stop}\n${panelSrc.slice(from, to)}
+    ; globalThis.__r = abRankKeywords; globalThis.__core = abCoreTerms;`, ctx);
   return ctx.__r;
+}
+
+function loadCoreTerms() {
+  const from = panelSrc.indexOf('function abCoreTerms');
+  const to = panelSrc.indexOf('async function abRefineKeywords');
+  const stop = panelSrc.slice(panelSrc.indexOf('const AB_STOPWORDS'), panelSrc.indexOf('/**\n * Candidate keyword phrases'));
+  const ctx = {
+    AB_CANDIDATE_CAP: 60, AB_MIN_KEYWORDS: 5, AB_MAX_KEYWORDS: 15,
+    Math, Number, Object, Array, String, Set, Map
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`${stop}\n${panelSrc.slice(from, to)}
+    ; globalThis.__c = { abCoreTerms, abOnSubject };`, ctx);
+  return ctx.__c;
 }
 
 describe('keyword ranking', () => {
@@ -398,9 +419,10 @@ describe('keyword ranking', () => {
     assert.equal(out.length, 1);
   });
 
-  test('the list is capped', () => {
+  test('the candidate list is capped before refinement', () => {
+    // The ranker feeds the relevance pass, which cuts it to at most 15.
     const many = Array.from({ length: 120 }, (_, i) => `term number ${i}`);
-    assert.equal(rank(many, {}, new Map()).length, 40);
+    assert.equal(rank(many, {}, new Map()).length, 60);
   });
 });
 
@@ -679,5 +701,82 @@ describe('keyword filter', () => {
   test('an invalid regex filters nothing rather than blanking the list', () => {
     // Half-typed patterns are normal while someone is still typing.
     assert.equal(shown('tree(').length, 3);
+  });
+});
+
+// ─── Subject relevance gate ──────────────────────────────────────────────────
+// Regression cover for keywords that reached a user's screen: "just take" and
+// "dont just" (mined from a "Don't just take our word for it" testimonials
+// heading), "twin cities", and "take our word". None share a subject word with
+// the page, and none describe the service being sold.
+
+describe('subject gate', () => {
+  const { abCoreTerms, abOnSubject } = loadCoreTerms();
+
+  const page = {
+    title: { text: 'Dead Tree Removal Services | Tree Top Climbers' },
+    headings: [
+      { tag: 'h1', text: 'Dead Tree Removal Services' },
+      { tag: 'h2', text: "Don't just take our word for it" }
+    ]
+  };
+  const core = abCoreTerms(page);
+  const keeps = (t) => abOnSubject(t, core);
+
+  test('the core terms come from the H1 and title only', () => {
+    // A testimonials heading must not widen what counts as on-subject.
+    assert.ok(core.has('tree'));
+    assert.ok(core.has('removal'));
+    assert.ok(!core.has('word'), [...core].join(', '));
+    assert.ok(!core.has('take'), [...core].join(', '));
+  });
+
+  test('rejects the fragments that actually shipped', () => {
+    for (const bad of ['just take', 'dont just', 'take our word', 'twin cities']) {
+      assert.equal(keeps(bad), false, `"${bad}" should not be on-subject`);
+    }
+  });
+
+  test('keeps genuine service phrases', () => {
+    for (const good of ['dead tree removal', 'tree removal cost', 'emergency tree service']) {
+      assert.equal(keeps(good), true, `"${good}" should be on-subject`);
+    }
+  });
+
+  test('matches across singular and plural', () => {
+    // The H1 says "Services"; a searcher types "service".
+    assert.equal(keeps('tree service'), true);
+    assert.equal(keeps('removal service'), true);
+  });
+
+  test('filters nothing when the page has no usable H1 or title', () => {
+    // Better to show an unfiltered list than an empty one.
+    const empty = abCoreTerms({});
+    assert.equal(abOnSubject('anything at all', empty), true);
+  });
+});
+
+describe('subject gate inside ranking', () => {
+  const rank = loadRanker();
+  const core = new Set(['dead', 'tree', 'removal', 'service']);
+
+  test('off-subject page phrases are dropped', () => {
+    const out = rank(
+      [{ text: 'dead tree removal', pageScore: 9, onPage: true },
+       { text: 'just take', pageScore: 4, onPage: true }],
+      {}, new Map(), core
+    );
+    assert.deepEqual(plain(out.map(k => k.text)), ['dead tree removal']);
+  });
+
+  test('Search Console and tracked terms bypass the gate', () => {
+    // These are real queries this page already earns. However oddly they read,
+    // they are evidence rather than a guess.
+    const out = rank(
+      [{ text: 'stump grinding quote', pageScore: 3, onPage: false }],
+      { 'stump grinding quote': { avgMonthlySearches: 200 } },
+      new Map(), core
+    );
+    assert.equal(out.length, 1, 'a proven query was filtered out by the subject gate');
   });
 });

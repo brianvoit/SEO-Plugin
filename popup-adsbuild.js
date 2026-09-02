@@ -24,8 +24,14 @@ let _abPageUrl = null;        // the page this panel is building for
 let _abPageInfo = null;       // its parsed content, for naming (may be null)
 let _abKwFilter = '';         // regex filter over the keyword list
 let _abKwFilterExclude = false;
+let _abTargeted = null;       // term -> where it is already targeted
 
-const AB_KEYWORD_CAP = 40;
+// A new ad group wants a tight, coherent set — not everything the page
+// mentions. Google's own guidance is 5–20 keywords per ad group; more than
+// that and the ad copy can no longer speak to all of them.
+const AB_MIN_KEYWORDS = 5;
+const AB_MAX_KEYWORDS = 15;
+const AB_CANDIDATE_CAP = 60;   // how many go to the relevance pass
 
 function abBody() { return document.getElementById('adsbuild-body'); }
 
@@ -476,6 +482,7 @@ function abKeywordSection() {
   }
 
   s.appendChild(abKeywordFilterBar());
+  s.appendChild(abKeywordAddBar());
 
   const summary = document.createElement('div');
   summary.className = 'field-hint';
@@ -488,6 +495,69 @@ function abKeywordSection() {
 
   abRenderKeywordList(list);
   return s;
+}
+
+/**
+ * Add a keyword by hand.
+ *
+ * The suggestions are mined and filtered, so they will sometimes miss a term
+ * the person actually wants — a new service line, a competitor's phrasing, or
+ * something they simply know converts. A manually added keyword goes to the
+ * top, arrives already selected (typing it IS the deliberate choice), and is
+ * checked against what is already in the list and already in the account.
+ */
+function abKeywordAddBar() {
+  const bar = document.createElement('div');
+  bar.className = 'gsc-query-search-bar';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'gsc-query-search-input';
+  input.placeholder = 'Add your own keyword';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+
+  const note = document.createElement('div');
+  note.className = 'field-hint adsbuild-add-note';
+
+  const add = () => {
+    const text = input.value.trim().toLowerCase();
+    if (!text) return;
+    if (_abKeywords.some(k => k.text === text)) {
+      note.textContent = `"${text}" is already in the list.`;
+      return;
+    }
+    if (_abTargeted && _abTargeted.has(text)) {
+      // Still allowed — the user may want it here deliberately — but say so.
+      note.textContent = `Heads up: "${text}" is already targeted in ${_abTargeted.get(text)}.`;
+    } else {
+      note.textContent = '';
+    }
+    _abKeywords.unshift({
+      text, matchType: 'PHRASE', volume: null, competition: null,
+      onPage: false, targetedIn: null, include: true, manual: true
+    });
+    input.value = '';
+    abRenderKeywordList(document.getElementById('adsbuild-kw-list'));
+    abSyncCommit();
+    // Classify it like any other so its chips match the rest of the list.
+    abClassify([text], () => abRenderKeywordList(document.getElementById('adsbuild-kw-list')));
+  };
+
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+
+  const btn = document.createElement('button');
+  btn.className = 'gsc-query-search-mode-btn';
+  btn.textContent = 'Add';
+  btn.addEventListener('click', add);
+
+  bar.appendChild(input);
+  bar.appendChild(btn);
+
+  const wrap = document.createElement('div');
+  wrap.appendChild(bar);
+  wrap.appendChild(note);
+  return wrap;
 }
 
 /**
@@ -643,6 +713,7 @@ async function abLoadKeywords(btn) {
       const all = await sendMessageWithTimeout({ action: 'adsGetAllKeywords', pageUrl: _abPageUrl });
       const places = (all && all.placements) || {};
       ((all && all.texts) || []).forEach(t => targeted.set(t, places[t] || 'this account'));
+      _abTargeted = targeted;   // kept so a manual add can warn about a clash
     } catch { /* dedupe is best-effort */ }
 
     let volumes = {};
@@ -654,7 +725,9 @@ async function abLoadKeywords(btn) {
       volumes = (ideas && ideas.byKeyword) || {};
     } catch { /* volume is enrichment only */ }
 
-    _abKeywords = abRankKeywords(seeds, volumes, targeted);
+    const mined = abRankKeywords(seeds, volumes, targeted, abCoreTerms(_abPageInfo));
+    btn.textContent = 'Choosing…';
+    _abKeywords = await abRefineKeywords(mined, _abPageInfo);
     renderAdsBuild();
     // Intent and sentiment resolve after the list is on screen — the chips
     // fill in rather than holding up the whole section.
@@ -789,6 +862,34 @@ async function abKeywordSeeds() {
 }
 
 /**
+ * The words that state what this page is actually about.
+ *
+ * Taken from the H1 and title only — those name the product or service, while
+ * body headings wander ("Don't just take our word for it"). Used to reject
+ * candidates with no subject overlap at all, which is what let fragments like
+ * "just take" and "dont just" through.
+ */
+function abCoreTerms(info) {
+  const asText = (v) => (!v ? '' : (typeof v === 'string' ? v : (typeof v.text === 'string' ? v.text : '')));
+  const h1 = (((info || {}).headings) || []).find(h => (h.tag || (h.level != null ? `h${h.level}` : '')) === 'h1');
+  const text = `${asText(h1)} ${asText((info || {}).title)}`.toLowerCase();
+  return new Set(
+    text.split(/[^a-z0-9]+/)
+      .filter(w => w.length > 2 && !AB_STOPWORDS.has(w))
+      // Singular/plural collapse so "services" matches "service".
+      .map(w => w.replace(/s$/, ''))
+  );
+}
+
+// A candidate has to share at least one subject word with the page. This is a
+// blunt gate on purpose: it removes obvious noise cheaply, and the relevance
+// pass afterwards makes the finer judgements.
+function abOnSubject(text, core) {
+  if (!core.size) return true;   // no usable H1/title — do not filter blind
+  return text.split(/\s+/).some(w => core.has(w.replace(/s$/, '')));
+}
+
+/**
  * Order candidates the way a search campaign wants them.
  *
  * Three signals, in order of weight:
@@ -802,8 +903,16 @@ async function abKeywordSeeds() {
  * stay visible: silently dropping them hides the internal competition the user
  * is about to create, and the choice between moving and duplicating is theirs.
  */
-function abRankKeywords(seeds, volumes, targeted) {
-  const scored = seeds.map(seed => {
+function abRankKeywords(seeds, volumes, targeted, core) {
+  const subject = core || new Set();
+  const onSubject = (t) => (subject.size ? abOnSubject(t, subject) : true);
+
+  const scored = seeds
+    // Fragments with no overlap with the page's subject never belong here.
+    // Terms sourced from Search Console or a tracked list are exempt: those
+    // are real queries for this page, however oddly they read.
+    .filter(seed => (typeof seed === 'object' && !seed.onPage) || onSubject(typeof seed === 'string' ? seed : seed.text))
+    .map(seed => {
     const text = typeof seed === 'string' ? seed : seed.text;
     const pageScore = (typeof seed === 'object' && seed.pageScore) || 0;
     const onPage = typeof seed === 'object' ? !!seed.onPage : false;
@@ -834,9 +943,111 @@ function abRankKeywords(seeds, volumes, targeted) {
   available.sort((a, b) => b._score - a._score);
 
   // Nothing is pre-selected: this writes keywords into a live account, so each
-  // one should be a deliberate choice. The regex filter above narrows the list
-  // first, and "Select all" acts on whatever survives that filter.
-  return available.slice(0, AB_KEYWORD_CAP).map(k => ({ ...k, include: false }));
+  // one should be a deliberate choice.
+  return available.slice(0, AB_CANDIDATE_CAP).map(k => ({ ...k, include: false }));
+}
+
+/**
+ * Narrow the mined candidates to the ones worth paying for.
+ *
+ * The deterministic pass is good at finding phrases and bad at judging them:
+ * it cannot tell that "removal by tree" is broken word order, that "emergency
+ * services" is far too broad for a dead-tree-removal page, or that "twin
+ * cities" on its own buys traffic for everything in Minneapolis. This asks for
+ * that judgement, and keeps the result to a set one ad's copy can actually
+ * speak to.
+ *
+ * Best effort: with no API key, or on any failure, the deterministic list is
+ * used as-is. A keyword list is still useful unrefined.
+ */
+async function abRefineKeywords(candidates, info) {
+  if (candidates.length <= AB_MIN_KEYWORDS) return candidates;
+  const { claudeApiKey } = await browser.storage.local.get('claudeApiKey');
+  if (!claudeApiKey) return candidates.slice(0, AB_MAX_KEYWORDS);
+
+  const asText = (v) => (!v ? '' : (typeof v === 'string' ? v : (typeof v.text === 'string' ? v.text : '')));
+  const h1 = ((info || {}).headings || []).find(h => (h.tag || (h.level != null ? `h${h.level}` : '')) === 'h1');
+
+  const system = [
+    'You are a Google Ads strategist choosing keywords for ONE landing page.',
+    '',
+    `Return between ${AB_MIN_KEYWORDS} and ${AB_MAX_KEYWORDS} keywords, best first, as ONLY a JSON array:`,
+    '[{"text":"dead tree removal","matchType":"PHRASE"}, ...]. No prose, no code fences.',
+    '',
+    'Choose from the candidates given. You may fix word order or pluralisation',
+    '("removal by tree" -> "tree removal"), but do not invent a topic the page',
+    'does not cover.',
+    '',
+    'Keep a keyword only if someone searching it wants exactly what this page',
+    'sells. Drop:',
+    '- sentence fragments and non-noun phrases ("just take", "dont just")',
+    '- terms so broad they buy unrelated traffic ("emergency services")',
+    '- bare place names with no service word ("twin cities")',
+    '- anything describing the company rather than the service',
+    '',
+    'matchType: PHRASE for most; EXACT for a tight high-intent term where a',
+    'variant would be wasteful; BROAD only for a term that is already specific.'
+  ].join('\n');
+
+  const content = [
+    `Page: ${asText(h1) || asText((info || {}).title) || _abPageUrl}`,
+    asText((info || {}).metaDescription) ? `Summary: ${asText((info || {}).metaDescription)}` : '',
+    '',
+    'Candidates (volume/mo where known):',
+    ...candidates.map(k => `- ${k.text}${k.volume != null ? ` (${k.volume}/mo)` : ''}`)
+  ].filter(Boolean).join('\n');
+
+  try {
+    const data = await claudeFetch({
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: MODEL_MID,
+        max_tokens: 700,
+        system,
+        messages: [{ role: 'user', content }]
+      })
+    });
+
+    let raw = claudeText(data).trim().replace(/```json/gi, '').replace(/```/g, '').trim();
+    const a = raw.indexOf('['), b = raw.lastIndexOf(']');
+    if (a !== -1 && b > a) raw = raw.slice(a, b + 1);
+    const picked = JSON.parse(raw);
+    if (!Array.isArray(picked) || !picked.length) return candidates.slice(0, AB_MAX_KEYWORDS);
+
+    // Carry the mined metadata across where the text still matches, so volume
+    // and the on-page flag survive a rewording.
+    const byText = new Map(candidates.map(k => [k.text.toLowerCase(), k]));
+    const out = [];
+    const seen = new Set();
+    for (const p of picked) {
+      const text = String((p && p.text) || '').toLowerCase().trim();
+      if (!text || seen.has(text)) continue;
+      seen.add(text);
+      const base = byText.get(text) || {};
+      out.push({
+        text,
+        matchType: ['PHRASE', 'EXACT', 'BROAD'].includes(String(p.matchType || '').toUpperCase())
+          ? String(p.matchType).toUpperCase() : 'PHRASE',
+        volume: base.volume != null ? base.volume : null,
+        competition: base.competition || null,
+        onPage: !!base.onPage,
+        targetedIn: null,
+        include: false
+      });
+      if (out.length >= AB_MAX_KEYWORDS) break;
+    }
+    // A refusal or a mangled reply should not leave the user with two
+    // keywords when the deterministic list had thirty.
+    return out.length >= AB_MIN_KEYWORDS ? out : candidates.slice(0, AB_MAX_KEYWORDS);
+  } catch {
+    return candidates.slice(0, AB_MAX_KEYWORDS);
+  }
 }
 
 // ─── Commit ──────────────────────────────────────────────────────────────────

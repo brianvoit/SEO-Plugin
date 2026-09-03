@@ -4146,7 +4146,10 @@ body.settings-open #update-footer { margin-top: auto; }
 /* The status switch reuses .toggle-btn wholesale (track, thumb, aria-pressed
    colouring) so it matches Follow Tab and the two overlays. It only needs its
    own label, and to sit against the button it governs. */
-.adsbuild-status-toggle { margin-right: auto; }
+/* Sits immediately left of the button it governs, not pushed to the far edge:
+   the switch states what the button is about to do, so they read as one
+   control. */
+.adsbuild-status-toggle { margin-right: 2px; }
 .adsbuild-toggle-label {
   font-size: 11px;
   color: var(--text-muted);

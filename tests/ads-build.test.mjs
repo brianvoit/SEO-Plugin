@@ -807,10 +807,7 @@ function loadCopyGate() {
 
 describe('generate-copy gate', () => {
   const gate = loadCopyGate();
-  const els = () => ({
-    'adsbuild-copy-hint': { textContent: '' },
-    'adsbuild-copy-btn': { disabled: true }
-  });
+  const els = () => ({ 'adsbuild-copy-btn': { disabled: true, title: '' } });
 
   test('enables the button once a keyword is selected', () => {
     const out = gate([{ text: 'a', include: true }, { text: 'b', include: false }], els());
@@ -820,7 +817,13 @@ describe('generate-copy gate', () => {
   test('stays disabled while nothing is selected', () => {
     const out = gate([{ text: 'a', include: false }], els());
     assert.equal(out['adsbuild-copy-btn'].disabled, true);
-    assert.match(out['adsbuild-copy-hint'].textContent, /Select some keywords first/);
+  });
+
+  test('a disabled button still explains itself', () => {
+    // The permanent hint is gone, so the reason has to live somewhere — a
+    // disabled control with no explanation reads as broken.
+    const out = gate([{ text: 'a', include: false }], els());
+    assert.match(out['adsbuild-copy-btn'].title, /Select some keywords first/);
   });
 
   test('re-disables when the last keyword is unticked', () => {
@@ -829,15 +832,15 @@ describe('generate-copy gate', () => {
     assert.equal(out['adsbuild-copy-btn'].disabled, true);
   });
 
-  test('the hint counts the selection and agrees with the button', () => {
+  test('the tooltip counts the selection and agrees with the button', () => {
     const out = gate([{ text: 'a', include: true }, { text: 'b', include: true }], els());
-    assert.match(out['adsbuild-copy-hint'].textContent, /2 keywords selected above/);
+    assert.match(out['adsbuild-copy-btn'].title, /2 keywords selected above/);
     assert.equal(out['adsbuild-copy-btn'].disabled, false);
   });
 
   test('says "keyword" not "keywords" for one', () => {
     const out = gate([{ text: 'a', include: true }], els());
-    assert.match(out['adsbuild-copy-hint'].textContent, /1 keyword selected above/);
+    assert.match(out['adsbuild-copy-btn'].title, /1 keyword selected above/);
   });
 
   test('does nothing once the copy exists and the gate is gone', () => {
@@ -958,5 +961,25 @@ describe('ad group status', () => {
     const b = boot();
     const res = await b.adsCreateAdGroup(validRequest({ status: 'ENABLED' }));
     assert.equal(res.status, 'ENABLED');
+  });
+});
+
+describe('ad group status default', () => {
+  test('the panel starts with the toggle on', () => {
+    // A deliberate reversal: the builder used to default to paused. Pinned
+    // here so flipping it back is a decision rather than a drive-by edit.
+    assert.match(
+      panelSrc,
+      /let _abStartEnabled = true;/,
+      'the builder should default to creating the ad group enabled'
+    );
+  });
+
+  test('the backend still falls back to paused for anything unrecognised', async () => {
+    // The UI default changing must NOT weaken the backend guard — a malformed
+    // status has to stay non-spending.
+    const b = boot();
+    await b.adsCreateAdGroup(validRequest({ status: 'enabeld' }));
+    assert.equal(opsOf(b.mutateCalls[0])[0].adGroupOperation.create.status, 'PAUSED');
   });
 });

@@ -25,7 +25,10 @@ let _abPageInfo = null;       // its parsed content, for naming (may be null)
 let _abKwFilter = '';         // regex filter over the keyword list
 let _abKwFilterExclude = false;
 let _abTargeted = null;       // term -> where it is already targeted
-let _abStartEnabled = false;  // create paused unless explicitly chosen
+// Ad groups are created enabled by default. The backend still falls back to
+// PAUSED for anything it does not recognise, so a bad value can never be the
+// reason something starts spending — but the deliberate choice here is "on".
+let _abStartEnabled = true;
 
 // A new ad group wants a tight, coherent set — not everything the page
 // mentions. Google's own guidance is 5–20 keywords per ad group; more than
@@ -384,14 +387,9 @@ function abNameSection() {
 function abCopySection() {
   const s = abSection('AD COPY');
   if (!_abCopy) {
-    // Both of these are kept in sync by abSyncCopyGate as keywords are ticked.
-    // Rendering them once left the button permanently disabled: the section is
-    // built while nothing is selected, and selecting a keyword re-rendered only
-    // the keyword list.
-    const hint = abHint('');
-    hint.id = 'adsbuild-copy-hint';
-    s.appendChild(hint);
-
+    // Kept in sync by abSyncCopyGate as keywords are ticked. Rendering it once
+    // left the button permanently disabled: the section is built while nothing
+    // is selected, and selecting a keyword re-rendered only the keyword list.
     const btn = document.createElement('button');
     btn.className = 'save-key-btn';
     btn.id = 'adsbuild-copy-btn';
@@ -399,7 +397,7 @@ function abCopySection() {
     btn.addEventListener('click', () => abGenerateCopy(btn));
     s.appendChild(abActionRow(btn));
 
-    abSyncCopyGate(hint, btn);
+    abSyncCopyGate(btn);
     return s;
   }
 
@@ -656,7 +654,6 @@ async function abGenerateCopy(btn) {
 function abKeywordSection() {
   const s = abSection('KEYWORDS');
   if (!_abKeywords.length) {
-    s.appendChild(abHint('Mined from this page\'s own headings, title and meta description, then cross-checked against its Search Console queries and tracked keywords. Terms already targeted elsewhere in the account are left out.'));
     const btn = document.createElement('button');
     btn.className = 'save-key-btn';
     btn.textContent = 'Find keywords';
@@ -898,17 +895,17 @@ function abKeywordHeader() {
   return row;
 }
 
-function abSyncCopyGate(hintEl, btnEl) {
-  const hint = hintEl || document.getElementById('adsbuild-copy-hint');
+function abSyncCopyGate(btnEl) {
   const btn = btnEl || document.getElementById('adsbuild-copy-btn');
-  if (!hint && !btn) return;   // copy already generated — nothing to gate
+  if (!btn) return;   // copy already generated — nothing to gate
   const chosen = _abKeywords.filter(k => k.include).length;
-  if (btn) btn.disabled = !chosen;
-  if (hint) {
-    hint.textContent = chosen
-      ? `15 headlines and 4 descriptions, written from this page's intent and sentiment and the ${chosen} keyword${chosen === 1 ? '' : 's'} selected above.`
-      : 'Select some keywords first — the copy is written to match them.';
-  }
+  btn.disabled = !chosen;
+  // The explanation moves to the tooltip rather than a permanent line of text:
+  // a disabled button should still say why, without narrating at everyone who
+  // has already selected their keywords.
+  btn.title = chosen
+    ? `Write 15 headlines and 4 descriptions around the ${chosen} keyword${chosen === 1 ? '' : 's'} selected above`
+    : 'Select some keywords first — the copy is written to match them';
 }
 
 function abSyncKeywordSummary() {

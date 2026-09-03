@@ -846,3 +846,117 @@ describe('generate-copy gate', () => {
     assert.doesNotThrow(() => gate([{ text: 'a', include: true }], {}));
   });
 });
+
+// ─── Dynamic insertions and ad group status ──────────────────────────────────
+
+describe('dynamic insertions', () => {
+  test('an insertion is measured by its default text, not its source', async () => {
+    // 36 characters written, 26 served. Measuring the source would reject a
+    // perfectly valid headline.
+    const b = boot();
+    const res = await b.adsCreateAdGroup(validRequest({
+      headlines: ['Save on {KeyWord:Tree Removal} Today', 'Plain headline one', 'Plain headline two']
+    }));
+    assert.ok(!res.error, `rejected a valid insertion headline: ${res.detail}`);
+  });
+
+  test('an insertion whose DEFAULT overflows is still rejected', () => {
+    // The point of measuring the served text is that it is measured, not
+    // waved through: a 40-character default is over the limit however it is
+    // written.
+    const b = boot();
+    const out = b.rsaAssets(
+      ['{LOCATION(City):' + 'x'.repeat(40) + '}', 'Plain one', 'Plain two'], 'headline'
+    );
+    assert.equal(out.ok, false, 'an over-length default was accepted');
+    assert.match(out.error, /over 30 characters/);
+  });
+
+  test('an insertion with NO default is left for Google to judge', () => {
+    // The served length is whatever Google fills in, so guessing at it here
+    // would reject valid ads.
+    const b = boot();
+    const out = b.rsaAssets(
+      // Three plain headlines alongside, so this exercises the LENGTH rule
+      // rather than the separate three-plain-headlines requirement.
+      ['Tree Removal In {LOCATION(City)} Today Fast', 'Plain one', 'Plain two', 'Plain three'], 'headline'
+    );
+    assert.equal(out.ok, true, out.error);
+  });
+
+  test('a location insertion with a default is accepted', async () => {
+    const b = boot();
+    const res = await b.adsCreateAdGroup(validRequest({
+      headlines: ['Tree Removal {LOCATION(City):Twin Cities}', 'Plain one', 'Plain two', 'Plain three']
+    }));
+    assert.ok(!res.error, res.detail);
+  });
+
+  test('plain text over the limit is still rejected', () => {
+    // The relaxation must apply ONLY to lines carrying an insertion.
+    const b = boot();
+    const out = b.rsaAssets(['ok one', 'ok two', 'x'.repeat(31)], 'headline');
+    assert.equal(out.ok, false);
+    assert.match(out.error, /over 30 characters/);
+  });
+
+  test('Google needs three headlines free of location insertion', async () => {
+    // Without them an ad cannot be assembled for a viewer whose location
+    // Google cannot resolve, and the API rejects the whole thing.
+    const b = boot();
+    const res = await b.adsCreateAdGroup(validRequest({
+      headlines: [
+        'Tree Removal {LOCATION(City):Here}',
+        'Stump Grinding {LOCATION(City):Here}',
+        'Tree Care {LOCATION(City):Here}',
+        'Plain headline'
+      ]
+    }));
+    assert.equal(res.error, 'INVALID');
+    assert.match(res.detail, /3 headlines without location insertion/);
+    assert.equal(b.mutateCalls.length, 0, 'an ad Google would reject still reached the API');
+  });
+
+  test('keyword insertion does not count against the location rule', () => {
+    // Only LOCATION insertion carries the three-plain-headlines requirement.
+    const b = boot();
+    const out = b.rsaAssets(
+      ['{KeyWord:Tree Removal} Experts', 'Fast Tree Removal', 'Local Tree Team'], 'headline'
+    );
+    assert.equal(out.ok, true, out.error);
+  });
+});
+
+describe('ad group status', () => {
+  test('defaults to paused when nothing is asked for', async () => {
+    const b = boot();
+    await b.adsCreateAdGroup(validRequest());
+    assert.equal(opsOf(b.mutateCalls[0])[0].adGroupOperation.create.status, 'PAUSED');
+  });
+
+  test('starts enabled only on an explicit ENABLED', async () => {
+    const b = boot();
+    await b.adsCreateAdGroup(validRequest({ status: 'ENABLED' }));
+    const ops = opsOf(b.mutateCalls[0]);
+    assert.equal(ops[0].adGroupOperation.create.status, 'ENABLED');
+    assert.equal(ops[1].adGroupAdOperation.create.status, 'ENABLED', 'the ad must follow the ad group');
+  });
+
+  test('anything unrecognised falls back to paused', async () => {
+    // A typo must never be the reason an ad group starts spending.
+    for (const bad of ['enabeld', 'ACTIVE', 'on', true, 1, null]) {
+      const b = boot();
+      await b.adsCreateAdGroup(validRequest({ status: bad }));
+      assert.equal(
+        opsOf(b.mutateCalls[0])[0].adGroupOperation.create.status, 'PAUSED',
+        `status ${JSON.stringify(bad)} was not treated as paused`
+      );
+    }
+  });
+
+  test('the chosen status is reported back', async () => {
+    const b = boot();
+    const res = await b.adsCreateAdGroup(validRequest({ status: 'ENABLED' }));
+    assert.equal(res.status, 'ENABLED');
+  });
+});

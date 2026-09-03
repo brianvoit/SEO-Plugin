@@ -4125,7 +4125,37 @@ body.settings-open #update-footer { margin-top: auto; }
   background: color-mix(in srgb, #f59e0b 12%, transparent);
 }
 
-/* Commit buttons sit right, where the eye lands after reading the list. */
+/* Descriptions wrap rather than clip: 90 characters never fit one sidebar
+   line, and copy that cannot be read in full cannot be proofread. */
+.adsbuild-asset-area {
+  height: auto;
+  min-height: 44px;
+  padding: 5px 7px;
+  line-height: 1.35;
+  resize: vertical;
+  font-family: inherit;
+}
+/* The textarea is taller than the other cells, so the row aligns to its top
+   instead of centring the count and chips against a two-line block. */
+.adsbuild-asset-row:has(.adsbuild-asset-area) { align-items: start; }
+.adsbuild-asset-row:has(.adsbuild-asset-area) .adsbuild-count,
+.adsbuild-asset-row:has(.adsbuild-asset-area) .adsbuild-col-intent,
+.adsbuild-asset-row:has(.adsbuild-asset-area) .adsbuild-col-sentiment,
+.adsbuild-asset-row:has(.adsbuild-asset-area) .adsbuild-col-regen { margin-top: 6px; }
+
+/* Starting an ad group enabled is a deliberate choice, so the control reads as
+   a statement rather than sitting silently among the buttons. */
+.adsbuild-status-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-bottom: 2px;
+}
+.field-hint.is-warn { color: var(--warn, #e3b341); opacity: 1; }
+
+/* Action buttons sit right, where the eye lands after reading a section. */
 .adsbuild-actions {
   display: flex;
   justify-content: flex-end;

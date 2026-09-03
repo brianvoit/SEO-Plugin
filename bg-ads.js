@@ -1231,6 +1231,35 @@ const RSA_LIMITS = {
   description: { max: 90, min: 2,  cap: 4  }
 };
 
+// Google's dynamic insertions. Must mirror AB_MODIFIER_RE in popup-adsbuild.js.
+const RSA_MODIFIER_RE = /\{(?:LOCATION\((?:City|State|Country|Nearby)\)|KeyWord|Keyword|KEYWORD|CUSTOMIZER\.[A-Za-z0-9_]+)(?::([^}]*))?\}/g;
+
+function rsaHasModifier(text) {
+  RSA_MODIFIER_RE.lastIndex = 0;
+  return RSA_MODIFIER_RE.test(String(text || ''));
+}
+
+function rsaHasLocationInsertion(text) {
+  return /\{LOCATION\((?:City|State|Country|Nearby)\)/.test(String(text || ''));
+}
+
+// Length as SERVED, not as written: an insertion counts as its default text,
+// so "Save on {KeyWord:Tree Removal} Today" is 26 characters to a viewer even
+// though the source is 36. Measuring the source would reject valid ads.
+//
+// `exact` is false when an insertion carries no default, because the served
+// length is then whatever Google fills in — unknowable here. Those lines are
+// left for Google to judge rather than guessed at and wrongly rejected.
+function rsaServedLength(text) {
+  let exact = true;
+  const resolved = String(text || '').replace(RSA_MODIFIER_RE, (_m, def) => {
+    if (def && def.trim()) return def.trim();
+    exact = false;
+    return '';
+  });
+  return { length: resolved.length, exact };
+}
+
 // Trim, de-duplicate (case-insensitively) and length-check one asset list.
 // Returns { ok, assets, error } — the caller stops before touching the API if
 // this fails, so a miscounted character never becomes an opaque API error.
@@ -1244,14 +1273,26 @@ function rsaAssets(list, kind) {
     const key = text.toLowerCase();
     if (seen.has(key)) continue;      // Google rejects duplicate assets
     seen.add(key);
-    if (text.length > spec.max) {
-      return { ok: false, error: `${kind} over ${spec.max} characters (${text.length}): "${text}"` };
+    // Checked whenever the served length is knowable — which includes every
+    // insertion that carries a default, the form the generator is told to use.
+    // Only a defaultless insertion escapes to Google's own validation.
+    const { length: served, exact } = rsaServedLength(text);
+    if (exact && served > spec.max) {
+      return { ok: false, error: `${kind} over ${spec.max} characters (${served}): "${text}"` };
     }
     assets.push({ text });
     if (assets.length >= spec.cap) break;
   }
   if (assets.length < spec.min) {
     return { ok: false, error: `Need at least ${spec.min} ${kind}s, got ${assets.length}.` };
+  }
+  // Google requires at least three headlines free of location insertion, so an
+  // ad can still be assembled for a viewer whose location cannot be resolved.
+  if (kind === 'headline') {
+    const plain = assets.filter(a => !rsaHasLocationInsertion(a.text)).length;
+    if (plain < 3) {
+      return { ok: false, error: `Google needs at least 3 headlines without location insertion; only ${plain} of ${assets.length} qualify.` };
+    }
   }
   return { ok: true, assets };
 }
@@ -1307,7 +1348,7 @@ async function adsMutateOperations(accessToken, cid, mutateOperations, { validat
 async function adsCreateAdGroup(message) {
   const {
     pageUrl, campaignId, adGroupName, finalUrl,
-    headlines, descriptions, keywords, cpcBidMicros, validateOnly
+    headlines, descriptions, keywords, cpcBidMicros, validateOnly, status
   } = message || {};
 
   if (!campaignId) return { connected: true, error: 'NO_CAMPAIGN' };
@@ -1339,11 +1380,16 @@ async function adsCreateAdGroup(message) {
   // request refer to the ad group by it, and Google substitutes the real id.
   const TEMP_AD_GROUP = `customers/${cid}/adGroups/-1`;
 
+  // Paused unless the caller explicitly asks otherwise. Anything unrecognised
+  // falls back to PAUSED rather than being passed through — a typo must never
+  // be the reason an ad group starts spending.
+  const adStatus = String(status || '').toUpperCase() === 'ENABLED' ? 'ENABLED' : 'PAUSED';
+
   const adGroup = {
     resourceName: TEMP_AD_GROUP,
     name,
     campaign: `customers/${cid}/campaigns/${adsDigits(campaignId)}`,
-    status: 'PAUSED',
+    status: adStatus,
     type: 'SEARCH_STANDARD'
   };
   // Only meaningful under a manual bidding strategy; the caller omits it
@@ -1356,7 +1402,7 @@ async function adsCreateAdGroup(message) {
     { adGroupOperation: { create: adGroup } },
     { adGroupAdOperation: { create: {
       adGroup: TEMP_AD_GROUP,
-      status: 'PAUSED',
+      status: adStatus,
       ad: { finalUrls: [dest], responsiveSearchAd: { headlines: head.assets, descriptions: desc.assets } }
     } } }
   ];
@@ -1384,7 +1430,7 @@ async function adsCreateAdGroup(message) {
   // A dry run returns empty responses by design — report what WOULD be made.
   if (validateOnly) {
     return {
-      connected: true, validated: true,
+      connected: true, validated: true, status: adStatus,
       adGroupName: name, finalUrl: dest,
       headlines: head.assets.map(a => a.text),
       descriptions: desc.assets.map(a => a.text),
@@ -1398,7 +1444,7 @@ async function adsCreateAdGroup(message) {
   const newAdGroupId = created ? created.split('/').pop() : null;
 
   return {
-    connected: true, created: true,
+    connected: true, created: true, status: adStatus,
     adGroupId: newAdGroupId, adGroupName: name, finalUrl: dest,
     headlines: head.assets.map(a => a.text),
     descriptions: desc.assets.map(a => a.text),

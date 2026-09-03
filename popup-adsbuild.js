@@ -25,6 +25,7 @@ let _abPageInfo = null;       // its parsed content, for naming (may be null)
 let _abKwFilter = '';         // regex filter over the keyword list
 let _abKwFilterExclude = false;
 let _abTargeted = null;       // term -> where it is already targeted
+let _abStartEnabled = false;  // create paused unless explicitly chosen
 
 // A new ad group wants a tight, coherent set — not everything the page
 // mentions. Google's own guidance is 5–20 keywords per ad group; more than
@@ -32,6 +33,42 @@ let _abTargeted = null;       // term -> where it is already targeted
 const AB_MIN_KEYWORDS = 5;
 const AB_MAX_KEYWORDS = 15;
 const AB_CANDIDATE_CAP = 60;   // how many go to the relevance pass
+
+// Google's dynamic insertions, as they appear in ad text:
+//   {LOCATION(City):Twin Cities}   city/state/country/nearby, optional default
+//   {KeyWord:Tree Removal}         the matched keyword, with a fallback
+//   {CUSTOMIZER.Name:default}      a value from an ad customizer feed
+// The capture is the default text after the colon, which is what a viewer sees
+// when the insertion cannot resolve.
+const AB_MODIFIER_RE = /\{(?:LOCATION\((?:City|State|Country|Nearby)\)|KeyWord|Keyword|KEYWORD|CUSTOMIZER\.[A-Za-z0-9_]+)(?::([^}]*))?\}/g;
+
+// Stand-in width for an insertion with no default. A real city ranges from
+// "Ely" to "Saint Louis Park", so any single number is a guess — the count is
+// flagged approximate rather than presented as fact, and the generator is told
+// to supply defaults precisely so this case is rare.
+const AB_INSERTION_ESTIMATE = 12;
+
+function abHasModifier(text) {
+  AB_MODIFIER_RE.lastIndex = 0;
+  return AB_MODIFIER_RE.test(String(text || ''));
+}
+
+/**
+ * How long the line will look to a viewer.
+ *
+ * Google counts what is served, not the source, so an insertion counts as its
+ * default text rather than its literal "{LOCATION(City):Twin Cities}" form.
+ * Counting the source would wrongly flag valid ads as over-length.
+ */
+function abServedLength(text) {
+  let approx = false;
+  const resolved = String(text || '').replace(AB_MODIFIER_RE, (_m, def) => {
+    if (def && def.trim()) return def.trim();
+    approx = true;
+    return 'x'.repeat(AB_INSERTION_ESTIMATE);
+  });
+  return { length: resolved.length, approx };
+}
 
 function abBody() { return document.getElementById('adsbuild-body'); }
 
@@ -55,6 +92,15 @@ function abSection(label) {
   header.appendChild(span);
   section.appendChild(header);
   return section;
+}
+
+// Right-aligns a section's action button, so every button in the panel sits
+// on the same edge rather than each section starting its own alignment.
+function abActionRow(...buttons) {
+  const row = document.createElement('div');
+  row.className = 'adsbuild-actions';
+  buttons.forEach(b => row.appendChild(b));
+  return row;
 }
 
 function abHint(text) {
@@ -349,9 +395,9 @@ function abCopySection() {
     const btn = document.createElement('button');
     btn.className = 'save-key-btn';
     btn.id = 'adsbuild-copy-btn';
-    btn.textContent = 'Generate ad copy';
+    btn.textContent = 'Generate Ad Copy';
     btn.addEventListener('click', () => abGenerateCopy(btn));
-    s.appendChild(btn);
+    s.appendChild(abActionRow(btn));
 
     abSyncCopyGate(hint, btn);
     return s;
@@ -381,7 +427,7 @@ function abAssetList(label, key, max) {
   const cols = document.createElement('div');
   cols.className = 'adsbuild-asset-row adsbuild-head';
   [['adsbuild-asset-input', `${singular} (${items.length})`],
-   ['adsbuild-count', `Chars/${max}`],
+   ['adsbuild-count', 'Chars'],
    ['adsbuild-col-intent', 'Intent'],
    ['adsbuild-col-sentiment', 'Sentiment'],
    ['adsbuild-col-regen', '']].forEach(([cls, text]) => {
@@ -401,9 +447,14 @@ function abAssetRow(key, i, text, max) {
   row.className = 'adsbuild-asset-row';
   row.dataset.assetText = text;
 
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'wp-input adsbuild-col adsbuild-asset-input';
+  // Headlines fit a single line at 30 characters; descriptions run to 90 and
+  // were being clipped, so they get a wrapping textarea instead. Copy that
+  // cannot be read in full cannot be proofread.
+  const multiline = max > 40;
+  const input = document.createElement(multiline ? 'textarea' : 'input');
+  if (!multiline) input.type = 'text';
+  input.className = `wp-input adsbuild-col adsbuild-asset-input${multiline ? ' adsbuild-asset-area' : ''}`;
+  if (multiline) input.rows = 2;
   input.value = text;
 
   // Bare number — the limit is stated once in the header.
@@ -411,8 +462,12 @@ function abAssetRow(key, i, text, max) {
   count.className = 'adsbuild-col adsbuild-count';
 
   const paintCount = () => {
-    count.textContent = String(input.value.length);
-    count.classList.toggle('is-over', input.value.length > max);
+    const { length, approx } = abServedLength(input.value);
+    count.textContent = approx ? `~${length}` : String(length);
+    count.classList.toggle('is-over', length > max);
+    count.title = approx
+      ? `About ${length} of ${max} characters — this line has an insertion with no default text, so the served length depends on what Google fills in. Add a default to make it exact.`
+      : `${length} of ${max} characters as served`;
   };
   paintCount();
 
@@ -489,7 +544,7 @@ async function abRegenerateLine(key, index, input, paintCount, row, btn, max) {
 
     let out = sanitizeAdText(claudeText(data).trim().replace(/^["']|["']$/g, ''));
     if (!out) throw new Error('empty');
-    if (out.length > max) out = adcopyHardTrim(out, max);
+    if (abServedLength(out).length > max && !abHasModifier(out)) out = adcopyHardTrim(out, max);
 
     input.value = out;
     _abCopy[key][index] = out;
@@ -558,9 +613,21 @@ async function abGenerateCopy(btn) {
     // The hint above promises the copy is written to match these, so they have
     // to actually reach the model — buildAdCopyGrounding only knows about
     // tracked keywords and organic queries, not this ad group's selection.
-    const extra = chosen.length
-      ? `This ad group targets these keywords. Work the important ones into the headlines naturally, without forcing every one in:\n${chosen.map(k => `- ${k.text}`).join('\n')}`
-      : '';
+    const extra = [
+      chosen.length
+        ? `This ad group targets these keywords. Work the important ones into the headlines naturally, without forcing every one in:\n${chosen.map(k => `- ${k.text}`).join('\n')}`
+        : '',
+      // Location insertion is worth using on a local service page and pointless
+      // on a national one, so the model is told when it helps rather than told
+      // to always use it. The default text is not optional: without it the ad
+      // cannot serve to anyone whose location Google cannot resolve.
+      'You may use Google dynamic insertion where it genuinely helps, at most 2 headlines and 1 description:',
+      '  {LOCATION(City):Default Text} — inserts the viewer\'s city',
+      '  {KeyWord:Default Text} — inserts the matched keyword',
+      'ALWAYS include the default text after the colon. Count the DEFAULT text',
+      'toward the character limit, not the whole token. Leave at least 3',
+      'headlines with no insertion at all — Google requires them.'
+    ].filter(Boolean).join('\n\n');
     // generateAdCopy populates the shared _adCopy used by the Ad Copy panel.
     await generateAdCopy(true, extra);
     const copy = typeof _adCopy !== 'undefined' ? _adCopy : null;
@@ -594,7 +661,7 @@ function abKeywordSection() {
     btn.className = 'save-key-btn';
     btn.textContent = 'Find keywords';
     btn.addEventListener('click', () => abLoadKeywords(btn));
-    s.appendChild(btn);
+    s.appendChild(abActionRow(btn));
     return s;
   }
 
@@ -1209,7 +1276,32 @@ async function abRefineKeywords(candidates, info) {
 
 function abCommitSection() {
   const s = abSection('CREATE');
-  s.appendChild(abHint('The ad group and ad are created PAUSED. Nothing serves until you enable them in Google Ads.'));
+
+  // Paused is the default and stays the default. Starting enabled is a real
+  // choice some people want — the ad group is ready and they would rather not
+  // go to Google Ads to flip it — but it has to be chosen, not stumbled into.
+  const toggle = document.createElement('label');
+  toggle.className = 'adsbuild-status-toggle';
+
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = _abStartEnabled;
+  cb.addEventListener('change', () => {
+    _abStartEnabled = cb.checked;
+    abSyncStatusNote();
+  });
+
+  const label = document.createElement('span');
+  label.textContent = 'Start serving immediately';
+
+  toggle.appendChild(cb);
+  toggle.appendChild(label);
+  s.appendChild(toggle);
+
+  const note = document.createElement('div');
+  note.className = 'field-hint';
+  note.id = 'adsbuild-status-note';
+  s.appendChild(note);
 
   const actions = document.createElement('div');
   actions.className = 'adsbuild-actions';
@@ -1234,7 +1326,20 @@ function abCommitSection() {
   status.className = 'field-hint';
   status.id = 'adsbuild-status';
   s.appendChild(status);
+
+  abSyncStatusNote();
   return s;
+}
+
+// Spells out what the button is about to do, so the consequence is visible at
+// the moment of clicking rather than in a setting read earlier.
+function abSyncStatusNote() {
+  const el = document.getElementById('adsbuild-status-note');
+  if (!el) return;
+  el.textContent = _abStartEnabled
+    ? 'The ad group and ad will be created ENABLED and can start serving as soon as Google approves them.'
+    : 'The ad group and ad are created PAUSED. Nothing serves until you enable them in Google Ads.';
+  el.classList.toggle('is-warn', _abStartEnabled);
 }
 
 function abReady() {
@@ -1270,6 +1375,7 @@ async function abCommit(validateOnly, btn) {
       headlines: _abCopy.headlines,
       descriptions: _abCopy.descriptions,
       keywords: _abKeywords.filter(k => k.include).map(k => ({ text: k.text, matchType: k.matchType })),
+      status: _abStartEnabled ? 'ENABLED' : 'PAUSED',
       validateOnly
     }, 60000);
 
@@ -1303,7 +1409,9 @@ function renderAdsBuildResult() {
   body.innerHTML = '';
   const s = abSection('CREATED');
   s.appendChild(abHint(`"${_abResult.adGroupName}" was created with ${_abResult.headlines.length} headlines, ${_abResult.descriptions.length} descriptions and ${_abResult.keywords.length} keyword${_abResult.keywords.length === 1 ? '' : 's'}.`));
-  s.appendChild(abHint('It is PAUSED. Enable it in Google Ads when you are ready for it to serve.'));
+  s.appendChild(abHint(_abResult.status === 'ENABLED'
+    ? 'It is ENABLED and will start serving once Google approves the ad.'
+    : 'It is PAUSED. Enable it in Google Ads when you are ready for it to serve.'));
 
   const again = document.createElement('button');
   again.className = 'save-key-btn';

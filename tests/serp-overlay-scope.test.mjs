@@ -20,6 +20,7 @@ const serp    = await readFile(path.join(ROOT, 'content-serp.js'), 'utf8');
 const content = await readFile(path.join(ROOT, 'content.js'), 'utf8');
 const core    = await readFile(path.join(ROOT, 'bg-core.js'), 'utf8');
 const popup   = await readFile(path.join(ROOT, 'popup-inspector.js'), 'utf8');
+const nav     = await readFile(path.join(ROOT, 'popup-nav.js'), 'utf8');
 const manifest = JSON.parse(await readFile(path.join(ROOT, 'manifest.base.json'), 'utf8'));
 
 describe('no SERP overlay state survives a page load', () => {
@@ -110,6 +111,26 @@ describe('everything that displays the toggle was wired up', () => {
     assert.match(popup, /function renderSerpOverlayToggle\(active\)/);
     assert.match(popup, /btn-serp-overlay/);
     assert.match(popup, /action: 'toggleSerpOverlay'/);
+  });
+});
+
+describe('the Option/Alt+O keyboard shortcut', () => {
+  test('the page-side listener matches the physical O key, not e.key', () => {
+    // e.code, not e.key — macOS rewrites Option+O's e.key to "ø".
+    assert.match(serp, /e\.code !== 'KeyO'/);
+  });
+
+  test('it is skipped while an editable element has focus, so Google\'s own search box still works', () => {
+    assert.match(serp, /function serpEditableHasFocus\(\)/);
+    assert.match(serp, /if \(serpEditableHasFocus\(\)\) return;/);
+  });
+
+  test('it calls the same toggle function the popup button and message handler use', () => {
+    assert.match(serp, /if \(e\.code !== 'KeyO'\) return;[\s\S]{0,120}toggleSerpOverlayState\(\);/);
+  });
+
+  test('the panel-side shortcut table maps Alt+O to the SERP toggle button', () => {
+    assert.match(nav, /KeyO: 'btn-serp-overlay'/);
   });
 });
 

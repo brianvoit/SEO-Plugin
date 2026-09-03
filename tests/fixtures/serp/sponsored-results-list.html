@@ -1,0 +1,122 @@
+<!--
+  SYNTHETIC fixture, reconstructed from real evidence, not a full live capture.
+
+  Google serves a second ad layout distinct from the classic #tads text-ad
+  block already covered by ads-synthetic.html: a card-based "Sponsored
+  results" list (the on-page label capitalizes to "Sponsored Results" via
+  CSS, but the actual DOM text is lowercase "results" — confirmed live, see
+  below), collapsible via a "Show/Hide sponsored results" toggle, with each
+  individual card carrying its OWN short "Sponsored" label a couple of
+  nesting levels away from its own title anchor rather than as a direct
+  sibling.
+
+  The real bug this fixture exists to pin: adUnitFor() used to climb a fixed
+  6 ancestor levels checking only each level's DIRECT children for a
+  Sponsored/Ad label. On a real page running this exact widget, the reported
+  bug was that a genuine sponsored card went undetected and got miscounted as
+  organic -- the per-card label sits deeper than a direct child of any
+  ancestor within that climb. The fix bounds the climb by an h3-count
+  invariant instead (stop the moment an ancestor spans more than one result's
+  heading) and searches each still-safe ancestor's WHOLE subtree.
+
+  Class names below (ENsxge, xnnzce, gghBu U3A9Ac qV8iec, GUyUUb, ki3Mlf
+  qqZaXc CfKAg, LoygGf) are copied verbatim from a live diagnostic dump of the
+  real page (a "ADHD testing near me" search), not invented -- only the
+  surrounding nesting/wiring between them is reconstructed, since the full
+  live capture wasn't obtainable through this session's own automated
+  browsing (Google didn't serve it real ads either, the same limitation noted
+  in ads-synthetic.html).
+-->
+<!DOCTYPE html>
+<html>
+<body>
+<div id="search">
+  <div id="rso">
+
+    <div class="TxZNbc">
+      <div class="o2YxLc">
+        <div class="j32ow">
+          <div class="GUyUUb">
+            <div class="ki3Mlf qqZaXc CfKAg">
+              <span class="LoygGf">Sponsored results</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="uEierd sponsored-card">
+      <div class="wrap-a">
+        <div class="wrap-b">
+          <div class="ENsxge">Sponsored</div>
+        </div>
+      </div>
+      <a class="zReHs" href="/goto?url=CAESfakeredirecttokenAAA111">
+        <h3 class="LC20lb MBeuO DKV0Md">1-Day ADHD Assessment | ADHD Evaluation &amp; Diagnosis</h3>
+        <div class="CA5RN">
+          <div><span class="VuuXrf">Minnesota Neuropsychology</span></div>
+          <div class="byrV5b"><cite class="qLRx3b tjvcx GvPZzd cHaqb" role="text">https://www.mnneuropsychology.com<span class="ylgVCe ob9lvb" role="text"> › adhd</span></cite></div>
+        </div>
+      </a>
+      <span><em>ADHD assessments in a welcoming space.</em> Get answers and support. A neuropsychological evaluation&nbsp;...</span>
+    </div>
+
+    <div class="uEierd sponsored-card">
+      <div class="wrap-a">
+        <div class="wrap-b">
+          <div class="xnnzce">Sponsored</div>
+        </div>
+      </div>
+      <a class="zReHs" href="/goto?url=CAESfakeredirecttokenBBB222">
+        <h3 class="LC20lb MBeuO DKV0Md">ADHD, Autism, &amp; More - Assessments for ADHD</h3>
+        <div class="CA5RN">
+          <div><span class="VuuXrf">Mindful Evaluations</span></div>
+          <div class="byrV5b"><cite class="qLRx3b tjvcx GvPZzd cHaqb" role="text">https://www.mindfulevaluations.com</cite></div>
+        </div>
+      </a>
+      <span>Mental Health Assessment With Psychologist Dr. Christine Schuster, Psy.D</span>
+    </div>
+
+    <div class="uEierd sponsored-card">
+      <div class="wrap-a">
+        <div class="wrap-b">
+          <span class="gghBu U3A9Ac qV8iec">Sponsored</span>
+        </div>
+      </div>
+      <a class="zReHs" href="/goto?url=CAESfakeredirecttokenCCC333">
+        <h3 class="LC20lb MBeuO DKV0Md">Located In Arden Hills - Schedule a No-Cost Assessment</h3>
+        <div class="CA5RN">
+          <div><span class="VuuXrf">thousandbrancheswellness.com</span></div>
+          <div class="byrV5b"><cite class="qLRx3b tjvcx GvPZzd cHaqb" role="text">https://www.thousandbrancheswellness.com</cite></div>
+        </div>
+      </a>
+      <span>Thousand Branches Arden Hills. Here To Help You Reach Your Mental Health Goals.</span>
+    </div>
+
+    <div class="GUyUUb">
+      <div class="MmMIvd jRKCUd SKsNHb">
+        <div class="ZFiwCf">
+          <span class="LGwnxb JGD2rd">
+            <span class="PBBEhf JGD2rd">Show sponsored results</span>
+            <span class="iInZTe JGD2rd">Hide sponsored results</span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="MjjYud">
+      <div class="yuRUbf">
+        <a class="zReHs" href="/goto?url=CAESfakeredirecttokenDDD444">
+          <h3 class="LC20lb MBeuO DKV0Md">Associated Clinic of Psychology - ADHD Testing</h3>
+          <div class="CA5RN">
+            <div><span class="VuuXrf">Associated Clinic of Psychology</span></div>
+            <div class="byrV5b"><cite class="qLRx3b tjvcx GvPZzd cHaqb" role="text">https://www.acp-mn.com<span class="ylgVCe ob9lvb" role="text"> › adhd</span></cite></div>
+          </div>
+        </a>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

@@ -48,6 +48,17 @@ function parse(html, url = 'https://www.google.com/search?q=test') {
   return parseSerpResults(window.document);
 }
 
+/** Loads the full parser module (Phase 2's pure functions included) against a page. */
+function load(html, url = 'https://www.google.com/search?q=test') {
+  const dom = new JSDOM(html, { url });
+  const { window } = dom;
+  const mod = new Function(
+    'document', 'location', 'window',
+    `${source}; return { parseSerpResults, resultSnippetText, findSnippetSpan, resultCardEl, titlesDiffer, descriptionsDiffer, serpQuery };`
+  )(window.document, window.location, window);
+  return { ...mod, doc: window.document };
+}
+
 describe('organic results, from a real captured page (running-shoes-organic.html)', () => {
   let html;
   test('fixture loads', async () => { html = await loadFixture('running-shoes-organic.html'); assert.ok(html.length > 1000); });
@@ -145,6 +156,92 @@ describe('ads, from the synthetic fixture (ads-synthetic.html — see its header
   });
 });
 
+describe('ads, from the card-list layout (sponsored-results-list.html — reconstructed from a real bug report)', () => {
+  // Real bug: a genuine sponsored card on a live page went undetected and
+  // was miscounted as organic. adUnitFor() used to climb a fixed 6 ancestor
+  // levels checking only each level's direct children for a Sponsored/Ad
+  // label — this widget's per-card label sits deeper than a direct child of
+  // any of those levels. The fix bounds the climb by an h3-count invariant
+  // (stop the moment an ancestor spans more than one result's heading)
+  // instead of a fixed depth, and searches each still-safe ancestor's whole
+  // subtree.
+  let html;
+  test('fixture loads', async () => { html = await loadFixture('sponsored-results-list.html'); assert.ok(html.length > 500); });
+
+  test('all three sponsored cards are detected as ads, not organic', async () => {
+    const parsed = parse(html);
+    assert.equal(parsed.topAds.length, 3, `expected 3 sponsored cards detected as ads, got ${parsed.topAds.length}`);
+    assert.deepEqual(parsed.topAds.map(a => a.domain), ['mnneuropsychology.com', 'mindfulevaluations.com', 'thousandbrancheswellness.com']);
+  });
+
+  test('a per-card label nested deeper than a direct child of any climbed ancestor is still found', async () => {
+    // The specific structural shape of the real bug: <div class="wrap-a">
+    // <div class="wrap-b"><div class="ENsxge">Sponsored</div></div></div> —
+    // the label is two levels below the ad-unit wrapper, not a direct child.
+    const parsed = parse(html);
+    assert.ok(parsed.topAds.some(a => a.domain === 'mnneuropsychology.com'));
+  });
+
+  test('the genuine organic result below the sponsored list is not swept up as an ad', async () => {
+    const parsed = parse(html);
+    assert.equal(parsed.organic.length, 1);
+    assert.equal(parsed.organic[0].domain, 'acp-mn.com');
+  });
+
+  test('the shared "Sponsored results" section heading is never itself mistaken for a result', async () => {
+    // Its own ancestor spans all three ad cards' h3s at once, so the
+    // h3-count guard must stop climbing before ever reaching it.
+    const parsed = parse(html);
+    const allDomains = [...parsed.organic, ...parsed.topAds, ...parsed.bottomAds].map(r => r.domain);
+    assert.equal(allDomains.length, 4, 'expected exactly 4 real results (3 ads + 1 organic), no phantom entries');
+  });
+});
+
+describe('ads, from a THIRD real layout with no per-card label at all (sponsored-results-no-label.html)', () => {
+  // A real bug report screenshot: cards under a "Sponsored Results" heading
+  // that carry no "Sponsored" text anywhere near them at all — a photo
+  // carousel, rating stars, Website/Directions/Call pill buttons, otherwise
+  // indistinguishable from a rich organic result. adUnitFor()'s per-card
+  // label search can never catch this — there is no label to find. Detection
+  // instead comes from sponsoredSectionRanges: the section heading opens a
+  // range, closed by the next real accessible heading or known
+  // section-transition phrase found afterward (here, "Hide sponsored
+  // results" — the same toggle both real captures of ad-card layouts carry).
+  let html;
+  test('fixture loads', async () => { html = await loadFixture('sponsored-results-no-label.html'); assert.ok(html.length > 500); });
+
+  test('both unlabeled sponsored cards are detected as ads', async () => {
+    const parsed = parse(html);
+    assert.equal(parsed.topAds.length, 2, `expected 2 sponsored cards detected as ads, got ${parsed.topAds.length}`);
+    assert.deepEqual(parsed.topAds.map(a => a.domain), ['mnneuropsychology.com', 'lifestance.com']);
+  });
+
+  test('the genuine organic result after the "Hide sponsored results" toggle is not swept up as an ad', async () => {
+    const parsed = parse(html);
+    assert.equal(parsed.organic.length, 1);
+    assert.equal(parsed.organic[0].domain, 'acp-mn.com');
+  });
+});
+
+describe('sponsoredSectionRanges never leaves a range open-ended', () => {
+  // The regression this guards: a per-card "Sponsored" label (the classic
+  // #tads layout's OWN detection mechanism) also matches the range opener's
+  // shape. On a page with no closing boundary anywhere after it, treating
+  // that as open-ended swept every later organic result into the range —
+  // caught by re-running ads-synthetic.html's own "not miscounted" test
+  // while building this fix. A range must have both ends confidently known,
+  // or it must not exist at all.
+  test('a page with a per-card label but no closing boundary produces no range at all', async () => {
+    const html = await loadFixture('ads-synthetic.html');
+    const { parseSerpResults, doc } = load(html);
+    const parsed = parseSerpResults(doc);
+    // The organic Allstate result on that fixture must stay organic — this
+    // is the same assertion as ads-synthetic.html's own test, re-asserted
+    // here because it's specifically what this fix protects.
+    assert.ok(parsed.organic.some(r => r.domain === 'allstate.com'));
+  });
+});
+
 describe('fail gracefully: an ambiguous block is skipped, never guessed at', () => {
   test('an h3 with neither a cite nor a sponsored label increments skipped, not organic or ad', () => {
     const html = `<!doctype html><html><body>
@@ -157,5 +254,155 @@ describe('fail gracefully: an ambiguous block is skipped, never guessed at', () 
     assert.equal(parsed.organic.length, 1);
     assert.equal(parsed.organic[0].domain, 'real.example');
     assert.ok(parsed.skipped >= 1, `expected the ambiguous block to be counted as skipped, got ${parsed.skipped}`);
+  });
+});
+
+// ─── Phase 2: WebCEO enrichment's pure helpers ────────────────────────────────
+
+describe('resultSnippetText, against real captured pages', () => {
+  test('every organic result on running-shoes-organic.html resolves a plausible snippet', async () => {
+    const html = await loadFixture('running-shoes-organic.html');
+    const { parseSerpResults, resultSnippetText, doc } = load(html);
+    const parsed = parseSerpResults(doc);
+    assert.ok(parsed.organic.length >= 5, 'fixture sanity: expected several organic results');
+    parsed.organic.forEach(r => {
+      const snippet = resultSnippetText(r.el);
+      assert.ok(snippet && snippet.length >= 20, `no plausible snippet found for ${r.domain}: ${JSON.stringify(snippet)}`);
+    });
+  });
+
+  test('the Fleet Feet result resolves its real, known snippet text', async () => {
+    const html = await loadFixture('running-shoes-organic.html');
+    const { parseSerpResults, resultSnippetText, doc } = load(html);
+    const parsed = parseSerpResults(doc);
+    const fleetFeet = parsed.organic.find(r => r.domain === 'fleetfeet.com');
+    assert.ok(fleetFeet, 'fixture sanity: expected a fleetfeet.com result');
+    assert.match(resultSnippetText(fleetFeet.el), /free shipping/i);
+  });
+
+  test('every organic result on car-insurance-quotes.html resolves a plausible snippet', async () => {
+    const html = await loadFixture('car-insurance-quotes.html');
+    const { parseSerpResults, resultSnippetText, doc } = load(html);
+    const parsed = parseSerpResults(doc);
+    assert.ok(parsed.organic.length >= 5, 'fixture sanity: expected several organic results');
+    parsed.organic.forEach(r => {
+      const snippet = resultSnippetText(r.el);
+      assert.ok(snippet && snippet.length >= 20, `no plausible snippet found for ${r.domain}: ${JSON.stringify(snippet)}`);
+    });
+  });
+
+  test('the title itself is never mistaken for the snippet', async () => {
+    const html = await loadFixture('running-shoes-organic.html');
+    const { parseSerpResults, resultSnippetText, doc } = load(html);
+    const parsed = parseSerpResults(doc);
+    const fleetFeet = parsed.organic.find(r => r.domain === 'fleetfeet.com');
+    const titleText = fleetFeet.el.querySelector('h3').textContent;
+    assert.notEqual(resultSnippetText(fleetFeet.el), titleText);
+  });
+});
+
+describe('resultCardEl: the hover-reveal target covers the whole visible card', () => {
+  // Reported bug: the badge only revealed on hovering the title/URL line —
+  // the description text sits outside the anchor entirely (a sibling, not
+  // nested inside it), so hovering it did nothing. The fix derives the card
+  // boundary structurally (the smallest ancestor containing both the title
+  // and the snippet) rather than a hardcoded depth or class name.
+  test('the derived card contains both the title anchor and its snippet, for every organic result on both real fixtures', async () => {
+    for (const name of ['running-shoes-organic.html', 'car-insurance-quotes.html']) {
+      const html = await loadFixture(name);
+      const { parseSerpResults, resultCardEl, findSnippetSpan, doc } = load(html);
+      const parsed = parseSerpResults(doc);
+      assert.ok(parsed.organic.length >= 3, `fixture sanity: expected several organic results in ${name}`);
+      parsed.organic.forEach(r => {
+        const card = resultCardEl(r.el);
+        const span = findSnippetSpan(r.el);
+        assert.ok(card.contains(r.el), `${name}/${r.domain}: card does not contain its own title anchor`);
+        assert.ok(span && card.contains(span), `${name}/${r.domain}: card does not contain its snippet`);
+      });
+    }
+  });
+
+  test('the card is strictly larger than the anchor alone, not just the anchor itself', async () => {
+    const html = await loadFixture('running-shoes-organic.html');
+    const { parseSerpResults, resultCardEl, doc } = load(html);
+    const parsed = parseSerpResults(doc);
+    const fleetFeet = parsed.organic.find(r => r.domain === 'fleetfeet.com');
+    assert.notEqual(resultCardEl(fleetFeet.el), fleetFeet.el);
+  });
+
+  test('with no snippet found, the card falls back to the anchor itself rather than throwing', () => {
+    const html = `<!doctype html><html><body>
+      <div id="search"><div id="rso">
+        <a href="/goto?url=abc"><h3>A result with no snippet nearby</h3><cite>https://real.example</cite></a>
+      </div></div>
+    </body></html>`;
+    const { parseSerpResults, resultCardEl, doc } = load(html);
+    const parsed = parseSerpResults(doc);
+    assert.equal(parsed.organic.length, 1);
+    assert.equal(resultCardEl(parsed.organic[0].el), parsed.organic[0].el);
+  });
+});
+
+describe('serpQuery', () => {
+  test('reads the q= param from the SERP URL', () => {
+    const { serpQuery } = load('<!doctype html><html><body></body></html>', 'https://www.google.com/search?q=buy+running+shoes+online');
+    assert.equal(serpQuery(), 'buy running shoes online');
+  });
+
+  test('a page with no query returns an empty string, not null/undefined', () => {
+    const { serpQuery } = load('<!doctype html><html><body></body></html>', 'https://www.google.com/search');
+    assert.equal(serpQuery(), '');
+  });
+});
+
+describe('titlesDiffer: truncation-aware, not literal equality', () => {
+  test('an exact match never differs', () => {
+    const { titlesDiffer } = load('<html><body></body></html>');
+    assert.equal(titlesDiffer('Fleet Feet', 'Fleet Feet'), false);
+  });
+
+  test('a Google-truncated title (real title is a longer superstring) does not differ', () => {
+    const { titlesDiffer } = load('<html><body></body></html>');
+    assert.equal(titlesDiffer('Running Shoes | Free Shipping...', 'Running Shoes | Free Shipping Orders $99+ | Fleet Feet'), false);
+  });
+
+  test('case and whitespace differences alone do not count as differing', () => {
+    const { titlesDiffer } = load('<html><body></body></html>');
+    assert.equal(titlesDiffer('  fleet feet  ', 'Fleet Feet'), false);
+  });
+
+  test('genuinely different wording differs', () => {
+    const { titlesDiffer } = load('<html><body></body></html>');
+    assert.equal(titlesDiffer('Best Running Shoes 2024', 'Home Page - Fleet Feet'), true);
+  });
+
+  test('a missing value on either side never claims a difference', () => {
+    const { titlesDiffer } = load('<html><body></body></html>');
+    assert.equal(titlesDiffer('', 'Fleet Feet'), false);
+    assert.equal(titlesDiffer('Fleet Feet', null), false);
+  });
+});
+
+describe('descriptionsDiffer: word-overlap, not literal equality', () => {
+  test('a paraphrased-but-related snippet does not count as differing', () => {
+    const { descriptionsDiffer } = load('<html><body></body></html>');
+    assert.equal(descriptionsDiffer(
+      'Shop running shoes with free shipping on orders over $99',
+      'Free shipping on all running shoe orders over ninety-nine dollars'
+    ), false);
+  });
+
+  test('an unrelated snippet (Google ignoring the meta tag entirely) differs', () => {
+    const { descriptionsDiffer } = load('<html><body></body></html>');
+    assert.equal(descriptionsDiffer(
+      'Shop running shoes with free shipping',
+      'Contact us for store hours and location information'
+    ), true);
+  });
+
+  test('a missing value on either side never claims a difference', () => {
+    const { descriptionsDiffer } = load('<html><body></body></html>');
+    assert.equal(descriptionsDiffer('', 'Something real'), false);
+    assert.equal(descriptionsDiffer('Something shown', null), false);
   });
 });

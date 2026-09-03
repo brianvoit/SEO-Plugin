@@ -107,6 +107,7 @@ function routeMessage(message) {
     case 'clientRegistrySetCompetitors': return clientRegistrySetCompetitors(message);
     case 'clientRegistrySetTrust':       return clientRegistrySetTrust(message);
     case 'serpClientIndex':      return serpClientIndex();
+    case 'fetchPageMeta':        return fetchPageMeta(message);
     case 'driveConnectBrowse':   return driveConnectBrowse();
     case 'driveListFolders':     return driveListFolders(message);
     case 'driveListSharedDrives': return driveListSharedDrives(message);

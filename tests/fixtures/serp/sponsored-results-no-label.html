@@ -1,0 +1,71 @@
+<!--
+  SYNTHETIC fixture, reconstructed from a real bug report screenshot, not a
+  live capture.
+
+  A THIRD real Google ad layout, distinct from both ads-synthetic.html
+  (classic #tads block) and sponsored-results-list.html (card list with a
+  per-card "Sponsored" label): a "Sponsored Results" section heading over a
+  list of cards that carry NO per-card label at all — each card looks
+  exactly like a rich organic result (photo carousel, rating stars,
+  Website/Directions/Call pill buttons), confirmed from a real screenshot
+  where no "Sponsored" text appears anywhere near the individual cards, only
+  the section heading above them and a "Hide sponsored results" toggle
+  after them.
+
+  This is the case adUnitFor()'s per-card-label climb can never catch, no
+  matter how it's tuned — there is no label to find near the card. Detection
+  has to come from the section heading itself instead (sponsoredSectionRanges
+  / inSponsoredRange), bounded by the next heading-shaped element found
+  afterward (here, the "Hide sponsored results" toggle).
+-->
+<!DOCTYPE html>
+<html>
+<body>
+<div id="search">
+  <div id="rso">
+
+    <div class="sponsored-section-heading">Sponsored Results</div>
+
+    <div class="uEierd">
+      <a class="zReHs" href="/goto?url=CAESfakeredirecttokenEEE555">
+        <h3 class="LC20lb MBeuO DKV0Md">1-Day ADHD Assessment | ADHD Evaluation &amp; Diagnosis</h3>
+        <div class="CA5RN">
+          <div><span class="VuuXrf">Minnesota Neuropsychology</span></div>
+          <div class="byrV5b"><cite class="qLRx3b tjvcx GvPZzd cHaqb" role="text">https://www.mnneuropsychology.com<span class="ylgVCe ob9lvb" role="text"> › adhd</span></cite></div>
+        </div>
+      </a>
+      <div>Neuropsychologist · 370 Selby Avenue · Closed · Opens 8 AM Fri</div>
+      <div>4.2 (20)</div>
+      <span>ADHD assessments in a welcoming space. Get answers and support. A neuropsychological evaluation&nbsp;...</span>
+      <button>Website</button><button>Directions</button><button>Call us</button>
+    </div>
+
+    <div class="uEierd">
+      <a class="zReHs" href="/goto?url=CAESfakeredirecttokenFFF666">
+        <h3 class="LC20lb MBeuO DKV0Md">LifeStance Health - Focus Better Now</h3>
+        <div class="CA5RN">
+          <div><span class="VuuXrf">LifeStance Health, Inc.</span></div>
+          <div class="byrV5b"><cite class="qLRx3b tjvcx GvPZzd cHaqb" role="text">https://www.lifestance.com</cite></div>
+        </div>
+      </a>
+      <span>ADHD is a Common Disorder That Can Affect a Person's Attention, Impulsivity, and Memory. Take&nbsp;...</span>
+    </div>
+
+    <div class="hide-sponsored-toggle">Hide sponsored results</div>
+
+    <div class="MjjYud">
+      <div class="yuRUbf">
+        <a class="zReHs" href="/goto?url=CAESfakeredirecttokenGGG777">
+          <h3 class="LC20lb MBeuO DKV0Md">Associated Clinic of Psychology - ADHD Testing</h3>
+          <div class="CA5RN">
+            <div><span class="VuuXrf">Associated Clinic of Psychology</span></div>
+            <div class="byrV5b"><cite class="qLRx3b tjvcx GvPZzd cHaqb" role="text">https://www.acp-mn.com<span class="ylgVCe ob9lvb" role="text"> › adhd</span></cite></div>
+          </div>
+        </a>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

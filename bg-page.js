@@ -551,6 +551,91 @@ async function checkLinkStatuses({ urls }) {
   }
 }
 
+// ─── Page meta fetch (SERP overlay: title/description diff) ──────────────────
+// Fetches a client's own ranked URL (resolved elsewhere via WebCEO's rankings
+// data — Google's own href on a SERP result is always its click-tracking
+// redirect, never the destination) and reads its real <title>/meta
+// description, so content-serp.js can flag when Google is displaying
+// something different from what's actually on the page.
+//
+// Regex extraction, not DOMParser: Chrome's MV3 service worker has no DOM at
+// all, so this has to stay portable across both backgrounds rather than
+// relying on a parser only one of them has.
+
+const PAGE_META_FETCH_TIMEOUT_MS = 8000;
+const PAGE_META_CACHE_TTL_MS = 30 * 60 * 1000;   // a page's title/meta rarely changes minute to minute
+const pageMetaCache = new Map();   // url -> { ok, title, description, fetchedAt }
+
+const HTML_ENTITIES = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', mdash: '—', ndash: '–',
+  hellip: '…', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“'
+};
+function decodeHtmlEntitiesBasic(s) {
+  return String(s || '').replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (m, code) => {
+    if (code[0] === '#') {
+      const cp = code[1].toLowerCase() === 'x' ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10);
+      return Number.isFinite(cp) ? String.fromCodePoint(cp) : m;
+    }
+    return HTML_ENTITIES[code.toLowerCase()] || m;
+  });
+}
+function cleanExtractedText(s) {
+  return decodeHtmlEntitiesBasic(s).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function extractTitle(html) {
+  const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const text = m ? cleanExtractedText(m[1]) : '';
+  return text || null;
+}
+
+// <meta> attributes can appear in either order and with either quote style, so
+// this scans whole tags rather than assuming name= comes before content=.
+function extractMetaDescription(html) {
+  const tags = html.match(/<meta\b[^>]*>/gi) || [];
+  for (const tag of tags) {
+    if (!/\bname\s*=\s*["']description["']/i.test(tag)) continue;
+    const m = tag.match(/\bcontent\s*=\s*"([^"]*)"/i) || tag.match(/\bcontent\s*=\s*'([^']*)'/i);
+    if (m) { const text = cleanExtractedText(m[1]); if (text) return text; }
+  }
+  return null;
+}
+
+async function fetchPageMeta({ url }) {
+  if (!url || !/^https?:\/\//i.test(url)) return { url, ok: false, title: null, description: null, error: 'BAD_URL' };
+
+  const cached = pageMetaCache.get(url);
+  if (cached && Date.now() - cached.fetchedAt < PAGE_META_CACHE_TTL_MS) return { url, ...cached };
+
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), PAGE_META_FETCH_TIMEOUT_MS);
+  let out;
+  try {
+    const res = await fetch(url, { method: 'GET', redirect: 'follow', cache: 'no-store', credentials: 'omit', signal: abort.signal });
+    if (!res.ok) { out = { ok: false, title: null, description: null, error: `HTTP ${res.status}` }; }
+    else {
+      const contentType = (res.headers.get('content-type') || '').toLowerCase();
+      if (contentType && !contentType.includes('html')) {
+        out = { ok: false, title: null, description: null, error: 'NOT_HTML' };
+      } else {
+        const html = await res.text();
+        out = { ok: true, title: extractTitle(html), description: extractMetaDescription(html), error: null };
+      }
+    }
+  } catch (err) {
+    out = { ok: false, title: null, description: null, error: String((err && err.message) || err) };
+  } finally {
+    clearTimeout(timer);
+  }
+
+  pageMetaCache.set(url, { ...out, fetchedAt: Date.now() });
+  if (pageMetaCache.size > 200) {
+    const oldest = [...pageMetaCache.entries()].sort((a, b) => a[1].fetchedAt - b[1].fetchedAt).slice(0, pageMetaCache.size - 200);
+    oldest.forEach(([k]) => pageMetaCache.delete(k));
+  }
+  return { url, ...out };
+}
+
 // Live-check every declared icon URL (+ the legacy /favicon.ico) and parse the
 // web app manifest for its icon set. All best-effort; a failed fetch just
 // reports status 0.

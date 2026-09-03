@@ -81,15 +81,15 @@ function isNonResultChrome(el) {
 // Known container ids (#tvcap/#tads/#tadsb/#bottomads) are NOT required here
 // — they are the least stable part of Google's markup and are treated only
 // as a region hint once a label has already been found (see adRegionFor).
-// Checks only `container`'s OWN direct children, not its whole subtree — a
-// full-subtree search would falsely match once ancestor-climbing (below)
-// reaches a container broad enough to also contain OTHER, unrelated ad units
-// elsewhere on the page (e.g. a shared ancestor like <body>), misattributing
-// an organic result several sections away as an ad. A real Sponsored/Ad
-// label sits as a near-sibling of its own ad's anchor, not buried deep in a
-// shared ancestor.
+// Searches container's WHOLE subtree for a Sponsored/Ad label — safe only
+// because adUnitFor (below) never lets `container` grow past a boundary that
+// still contains just one result heading. A real per-item label (confirmed
+// against a live "Sponsored Results" list widget, a card-based ad layout
+// distinct from the classic #tads block) can sit more than one level below
+// its own ad's anchor — a direct-children-only search missed it there.
 function hasSponsoredLabel(container) {
-  for (const el of container.children) {
+  const els = container.querySelectorAll('[aria-label], span, div');
+  for (const el of els) {
     const aria = (el.getAttribute('aria-label') || '').trim();
     if (/^(ad|sponsored)$/i.test(aria)) return true;
     let ownText = '';
@@ -100,11 +100,17 @@ function hasSponsoredLabel(container) {
 }
 
 // Climbs from an h3-bearing anchor looking for the ad-unit container — the
-// nearest ancestor that carries a Sponsored/Ad label. Returns null if the
-// anchor is not inside an ad unit at all (i.e. it's a plain organic result).
+// nearest ancestor that carries a Sponsored/Ad label. The climb stops the
+// moment an ancestor contains more than one result heading — that's the real
+// safety boundary (a shared ancestor spanning multiple results, like <body>,
+// is exactly what previously caused a distant, unrelated ad's label to be
+// found and misattribute an organic result as an ad), not an arbitrary level
+// count. Bounded to 10 climbs as a sane outer limit, not the load-bearing
+// guard. Returns null if the anchor is not inside an ad unit at all.
 function adUnitFor(anchor) {
   let el = anchor;
-  for (let i = 0; i < 6 && el; i++, el = el.parentElement) {
+  for (let i = 0; i < 10 && el; i++, el = el.parentElement) {
+    if (el.querySelectorAll('h3').length > 1) return null;
     if (hasSponsoredLabel(el)) return el;
   }
   return null;
@@ -166,11 +172,76 @@ function visualTop(el) {
   return r.top + (window.scrollY || window.pageYOffset || 0);
 }
 
-function extractOrganicResults(root) {
+// Second, independent ad signal, for a layout with no per-card label at all
+// — only a single "Sponsored Results" section heading above a list of cards
+// that otherwise look exactly like organic results (confirmed live: a card
+// with a photo carousel, rating stars, and Website/Directions/Call pill
+// buttons, no "Sponsored" text anywhere near the card itself). adUnitFor()
+// finds nothing here, since there IS no per-card label to find.
+//
+// A heading-shaped leaf element (short, no child elements) whose text starts
+// "Sponsored" opens a range; it closes at the next heading-shaped element
+// found afterward, whatever it says — in practice that's usually the "Hide
+// sponsored results" toggle both real captures of this layout carry, but the
+// rule doesn't depend on that exact wording, just on SOME other heading
+// eventually marking the run's end. An anchor whose document position falls
+// inside any such range is treated as an ad even with no label of its own.
+function isHeadingLike(el) {
+  if (el.children.length > 0) return false;
+  const t = el.textContent.trim();
+  return t.length > 0 && t.length <= 60;
+}
+// Deliberately stricter than isHeadingLike, and used ONLY to find where a
+// sponsored range ENDS — a real accessible heading (explicit role="heading",
+// the same attribute confirmed live on Google's own "People also ask"
+// label) or a known section-transition phrase. isHeadingLike alone is too
+// broad for this: a rating ("4.2 (20)"), an address, or "Closed" are all
+// short leaf text too, and would close the range right after the FIRST ad
+// card — before ever reaching the second one.
+function isSectionBoundaryLike(el) {
+  if (el.getAttribute && el.getAttribute('role') === 'heading') return true;
+  const t = el.textContent.trim().toLowerCase();
+  return /^(hide|show) sponsored|^people also ask|^related searches/.test(t);
+}
+function sponsoredSectionRanges(doc) {
+  const all = Array.from(doc.querySelectorAll('*'));
+  // A per-card "Sponsored" label (the classic #tads layout already handles
+  // via adUnitFor) also matches this opener shape — harmless on its own, but
+  // an unbounded range is not: with no closing boundary nearby, it would
+  // otherwise extend to the end of the document and sweep up every genuine
+  // organic result after it. Discard rather than leave it open-ended; a
+  // range only exists where both ends are confidently known.
+  const openers = all.filter(el => isHeadingLike(el) && /^sponsored\b/i.test(el.textContent.trim()));
+  const boundaries = all.filter(isSectionBoundaryLike);
+  const F = window.Node.DOCUMENT_POSITION_FOLLOWING;
+  return openers
+    .map(opener => [opener, boundaries.find(b => opener.compareDocumentPosition(b) & F) || null])
+    .filter(([, end]) => end !== null);
+}
+function inSponsoredRange(el, ranges) {
+  const F = window.Node.DOCUMENT_POSITION_FOLLOWING;
+  // Every range here has a real, known end (sponsoredSectionRanges discards
+  // any that don't), so both bounds are always checked.
+  return ranges.some(([start, end]) =>
+    (start.compareDocumentPosition(el) & F) && (el.compareDocumentPosition(end) & F));
+}
+// Union of both ad signals — a per-card label (adUnitFor) OR falling inside
+// a sponsored section range. `unit` prefers adUnitFor's more precise
+// boundary when a per-card label exists; otherwise the anchor itself stands
+// in (its own cite/breadcrumb structure is organic-shaped for this layout,
+// confirmed live, so resultDomain() still resolves correctly against it).
+function adInfoFor(anchor, ranges) {
+  const unit = adUnitFor(anchor);
+  if (unit) return { isAd: true, unit };
+  if (inSponsoredRange(anchor, ranges)) return { isAd: true, unit: anchor };
+  return { isAd: false, unit: null };
+}
+
+function extractOrganicResults(root, ranges) {
   const anchors = Array.from(root.querySelectorAll('a[href]')).filter(isOrganicAnchor);
   const candidates = [];
   for (const a of anchors) {
-    if (adUnitFor(a)) continue;           // structurally organic-shaped ad, still excluded
+    if (adInfoFor(a, ranges).isAd) continue;   // structurally organic-shaped ad, still excluded
     if (isNonResultChrome(a)) continue;
     candidates.push({ el: a, domain: resultDomain(a, a.getAttribute('href')) });
   }
@@ -178,13 +249,13 @@ function extractOrganicResults(root) {
   return candidates.map((c, i) => ({ ...c, position: i + 1 }));
 }
 
-function extractAdResults(root) {
+function extractAdResults(root, ranges) {
   const anchors = Array.from(root.querySelectorAll('a[href]')).filter(a => a.querySelector('h3'));
   const top = [], bottom = [];
   const seenUnits = new Set();
   for (const a of anchors) {
-    const unit = adUnitFor(a);
-    if (!unit || seenUnits.has(unit)) continue;   // one badge per ad unit, not per anchor inside it
+    const { isAd, unit } = adInfoFor(a, ranges);
+    if (!isAd || seenUnits.has(unit)) continue;   // one badge per ad unit, not per anchor inside it
     seenUnits.add(unit);
     const entry = { el: a, domain: resultDomain(unit, a.getAttribute('href')) };
     (adRegionFor(unit) === 'bottom' ? bottom : top).push(entry);
@@ -200,15 +271,15 @@ function extractAdResults(root) {
 // Anything with an h3 that qualifies for neither organic nor ad extraction —
 // not guessed at, just counted, so a parser miss is visible rather than
 // silently mislabeled.
-function countSkipped(root, organic, topAds, bottomAds) {
+function countSkipped(root, organic, topAds, bottomAds, ranges) {
   const claimed = new Set([...organic, ...topAds, ...bottomAds].map(c => c.el));
   const anchors = Array.from(root.querySelectorAll('a[href]')).filter(a => a.querySelector('h3'));
   const claimedUnits = new Set();
   let skipped = 0;
   for (const a of anchors) {
     if (claimed.has(a)) continue;
-    const unit = adUnitFor(a);
-    if (unit) {
+    const { isAd, unit } = adInfoFor(a, ranges);
+    if (isAd) {
       if (!claimedUnits.has(unit)) { claimedUnits.add(unit); skipped++; }
     } else if (!isOrganicAnchor(a) || isNonResultChrome(a)) {
       // Has an h3 but either no cite (fails the organic test) or sits under
@@ -221,9 +292,95 @@ function countSkipped(root, organic, topAds, bottomAds) {
 
 function parseSerpResults(doc = document) {
   const root = doc.getElementById('rso') || doc.getElementById('search') || doc.body;
-  const organic = extractOrganicResults(root);
-  const { topAds, bottomAds } = extractAdResults(doc.body);
-  return { organic, topAds, bottomAds, skipped: countSkipped(root, organic, topAds, bottomAds) };
+  const ranges = sponsoredSectionRanges(doc);   // computed once — reused by both extractors and countSkipped
+  const organic = extractOrganicResults(root, ranges);
+  const { topAds, bottomAds } = extractAdResults(doc.body, ranges);
+  return { organic, topAds, bottomAds, skipped: countSkipped(root, organic, topAds, bottomAds, ranges) };
+}
+
+// The on-screen query — the one thing that lets a WebCEO tracked-keyword row
+// be matched to what the user is actually looking at right now.
+function serpQuery() {
+  try { return new URLSearchParams(location.search).get('q') || ''; } catch { return ''; }
+}
+
+// A <span> whose only element children are <em> (Google boldfaces
+// query-matched terms this way inside the snippet) — the structural shape of
+// a real snippet text run, not a wrapping layout div. Climbing from the
+// anchor mirrors adUnitFor's bounded-ancestor approach; searching for the
+// LONGEST such span within that scope (rather than the first) avoids picking
+// up short incidental UI labels that happen to share the shape.
+function isLeafyTextSpan(el) {
+  if (el.tagName !== 'SPAN') return false;
+  for (const child of el.children) if (child.tagName !== 'EM') return false;
+  return true;
+}
+function findSnippetSpan(anchor) {
+  let container = anchor;
+  for (let i = 0; i < 6 && container.parentElement; i++) container = container.parentElement;
+  const candidates = Array.from(container.querySelectorAll('span')).filter(isLeafyTextSpan);
+  let best = null, bestLen = 0;
+  for (const el of candidates) {
+    if (anchor.contains(el)) continue;   // the title itself, not the snippet
+    if (el.closest('cite')) continue;
+    const len = el.textContent.trim().length;
+    if (len > bestLen) { best = el; bestLen = len; }
+  }
+  return bestLen >= 20 ? best : null;
+}
+function resultSnippetText(anchor) {
+  const span = findSnippetSpan(anchor);
+  return span ? span.textContent.trim() : null;
+}
+
+// The smallest ancestor containing BOTH the title link and its snippet text
+// — the true visual result card, derived structurally (no hardcoded depth or
+// class name) rather than guessed. This is the hover-reveal target: the
+// snippet text sits outside the anchor entirely (a sibling, not nested
+// inside it, confirmed against the real fixtures), so hovering only the
+// anchor left most of the visible card dead to the badge.
+function commonAncestor(a, b) {
+  const ancestors = new Set();
+  for (let el = a; el; el = el.parentElement) ancestors.add(el);
+  for (let el = b; el; el = el.parentElement) if (ancestors.has(el)) return el;
+  return a;
+}
+function resultCardEl(anchor) {
+  const span = findSnippetSpan(anchor);
+  return span ? commonAncestor(anchor, span) : anchor;
+}
+
+function normalizeCompareText(s) {
+  return String(s || '').toLowerCase().replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/\s+/g, ' ').trim();
+}
+
+// Google routinely truncates a long title with an ellipsis rather than
+// rewriting it — that's not a mismatch. Only flag when the displayed text
+// isn't a prefix-consistent match of the real title either way.
+function titlesDiffer(displayed, real) {
+  if (!displayed || !real) return false;
+  const d = normalizeCompareText(displayed).replace(/[.…]+$/, '');
+  const r = normalizeCompareText(real);
+  if (!d || !r || r === d) return false;
+  return !r.startsWith(d) && !d.startsWith(r);
+}
+
+function wordOverlapRatio(a, b) {
+  const words = (s) => new Set(normalizeCompareText(s).split(/\W+/).filter(w => w.length > 2));
+  const wa = words(a), wb = words(b);
+  if (!wa.size || !wb.size) return 0;
+  let shared = 0;
+  wa.forEach(w => { if (wb.has(w)) shared++; });
+  return shared / Math.min(wa.size, wb.size);
+}
+
+// Google frequently rewrites the snippet from page content even when the meta
+// tag is perfectly fine — expected behavior, not a mismatch. Only flag when
+// overlap is low enough to suggest the meta tag isn't being used at all.
+const DESCRIPTION_OVERLAP_THRESHOLD = 0.35;
+function descriptionsDiffer(displayed, real) {
+  if (!displayed || !real) return false;
+  return wordOverlapRatio(displayed, real) < DESCRIPTION_OVERLAP_THRESHOLD;
 }
 // ─── SERP parser: end ─────────────────────────────────────────────────────────
 
@@ -281,10 +438,25 @@ function serpBadgeLabel(entry, kind) {
   return `${n} #${entry.position}`;
 }
 
+// No visible name — the URL and favicon already say which site this is; the
+// dot's color is the at-a-glance signal (own vs. competitor). The name still
+// reaches the user, just on demand: title + aria-label carry it for anyone
+// who hovers or uses a screen reader.
 function serpBadgeAccent(entry) {
-  if (entry.role === 'own') return { color: SERP_COLORS.own, text: `Client · ${entry.clientName}` };
-  if (entry.role === 'competitor') return { color: SERP_COLORS.competitor, text: `Competitor · ${entry.clientName}` };
+  if (entry.role === 'own') return { color: SERP_COLORS.own, detail: `Client · ${entry.clientName}` };
+  if (entry.role === 'competitor') return { color: SERP_COLORS.competitor, detail: `Competitor · ${entry.clientName}` };
   return null;
+}
+
+// A row per line, not one long flex row — a badge wide enough to reach the
+// actual result text (a long client name, or the mismatch flag's text) used
+// to render right over the result it's describing. max-width bounds it
+// further so an unusually long single line still wraps rather than growing
+// past the result column.
+function badgeRow() {
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;align-items:center;gap:6px';
+  return row;
 }
 
 function makeSerpBadge(entry, kind, soleId) {
@@ -293,24 +465,29 @@ function makeSerpBadge(entry, kind, soleId) {
     'position:fixed', 'opacity:0', 'pointer-events:none', 'transition:opacity 120ms ease',
     'background:rgba(15,23,42,0.94)', 'color:#fff', 'padding:4px 8px', 'border-radius:6px',
     'font:600 11px/1.4 -apple-system,system-ui,sans-serif', 'box-shadow:0 2px 8px rgba(0,0,0,0.3)',
-    'z-index:2147483646', 'display:flex', 'align-items:center', 'gap:6px', 'white-space:nowrap'
+    'z-index:2147483646', 'display:flex', 'flex-direction:column', 'align-items:flex-start', 'gap:3px',
+    'white-space:nowrap', 'max-width:220px'
   ].join(';');
 
+  const posRow = badgeRow();
   const posColor = kind === 'organic' ? SERP_COLORS.organic : SERP_COLORS.ad;
   const posSpan = document.createElement('span');
   posSpan.textContent = serpBadgeLabel(entry, kind);
   posSpan.style.cssText = `color:${posColor === SERP_COLORS.organic ? '#cbd5e1' : '#fcd34d'}`;
-  badge.appendChild(posSpan);
+  posRow.appendChild(posSpan);
 
   const accent = serpBadgeAccent(entry);
   if (accent) {
     const dot = document.createElement('span');
-    dot.style.cssText = `width:7px;height:7px;border-radius:50%;background:${accent.color};flex:none`;
-    const label = document.createElement('span');
-    label.textContent = accent.text;
-    badge.appendChild(dot);
-    badge.appendChild(label);
-  } else if (entry.domain && soleId) {
+    dot.style.cssText = `width:7px;height:7px;border-radius:50%;background:${accent.color};flex:none;pointer-events:auto`;
+    dot.title = accent.detail;
+    dot.setAttribute('aria-label', accent.detail);
+    posRow.appendChild(dot);
+  }
+  badge.appendChild(posRow);
+
+  if (!accent && entry.domain && soleId) {
+    const chipRow = badgeRow();
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.textContent = '+ Competitor';
@@ -319,7 +496,8 @@ function makeSerpBadge(entry, kind, soleId) {
       'padding:2px 6px', 'font:600 10px/1.4 -apple-system,system-ui,sans-serif', 'cursor:pointer', 'pointer-events:auto'
     ].join(';');
     chip.addEventListener('click', (e) => addCompetitorFromChip(e, chip, entry.domain, soleId));
-    badge.appendChild(chip);
+    chipRow.appendChild(chip);
+    badge.appendChild(chipRow);
   }
   return badge;
 }
@@ -337,10 +515,11 @@ async function addCompetitorFromChip(e, chip, domain, clientId) {
       action: 'clientRegistrySetCompetitors', id: clientId, competitors: merged, markPulled: false
     });
     if (!res || !res.ok) throw new Error('save failed');
-    const label = document.createElement('span');
-    label.textContent = `Competitor · ${client.name}`;
-    label.style.cssText = `color:${SERP_COLORS.competitor}`;
-    chip.replaceWith(label);
+    const dot = document.createElement('span');
+    dot.style.cssText = `width:7px;height:7px;border-radius:50%;background:${SERP_COLORS.competitor};flex:none`;
+    dot.title = `Competitor · ${client.name}`;
+    dot.setAttribute('aria-label', `Competitor · ${client.name}`);
+    chip.replaceWith(dot);
     patchSummaryOnCompetitorAdded(client.id, client.name);
   } catch {
     chip.disabled = false;
@@ -367,6 +546,7 @@ function applySerpOverlay() {
     const matched = matchClients(parsed, index || { domains: {} });
     renderSerpResults(container, matched);
     renderSerpSummary(matched);
+    enrichOwnResults(container, matched);
   }).catch(() => {
     // No background reply — still badge positions/types, just with no
     // client/competitor context.
@@ -388,11 +568,29 @@ function renderSerpResults(container, matched) {
   entries.forEach(({ e, kind }) => {
     const badge = makeSerpBadge(e, kind, soleId);
     container.appendChild(badge);
-    const enter = () => { badge.style.opacity = '1'; badge.style.pointerEvents = 'auto'; };
-    const leave = () => { badge.style.opacity = '0'; badge.style.pointerEvents = 'none'; };
-    e.el.addEventListener('mouseenter', enter);
-    e.el.addEventListener('mouseleave', leave);
-    pairs.push({ el: e.el, badge, enter, leave });
+    // Hovering only the anchor left most of the visible card dead to the
+    // badge — the description text sits outside the anchor entirely, a
+    // sibling rather than nested inside it. hoverEl is the true result card
+    // (organic: the common ancestor of the title and its snippet; ads: the
+    // ad unit adUnitFor() already establishes) — everything visible in that
+    // card reveals the badge, not just the title/URL line. Positioning still
+    // reads from e.el (unchanged; the anchor's own top edge is a fine anchor
+    // point for the badge regardless of the wider hover zone).
+    const hoverEl = kind === 'organic' ? resultCardEl(e.el) : (adUnitFor(e.el) || e.el);
+    // The badge sits physically apart from the result (to its left, with a
+    // gap), not overlapping it, so hovering only the result and hiding the
+    // instant the cursor leaves it means the badge disappears mid-transit,
+    // before a click on "+Competitor" can land. Both the result AND the
+    // badge itself keep it shown; a short grace delay on hide covers the gap
+    // between them, so crossing it doesn't flicker the badge away.
+    let hideTimer = null;
+    const show = () => { clearTimeout(hideTimer); badge.style.opacity = '1'; badge.style.pointerEvents = 'auto'; };
+    const hide = () => { hideTimer = setTimeout(() => { badge.style.opacity = '0'; badge.style.pointerEvents = 'none'; }, 150); };
+    hoverEl.addEventListener('mouseenter', show);
+    hoverEl.addEventListener('mouseleave', hide);
+    badge.addEventListener('mouseenter', show);
+    badge.addEventListener('mouseleave', hide);
+    pairs.push({ el: e.el, hoverEl, badge, show, hide });
   });
   container._hoverPairs = pairs;
 
@@ -402,8 +600,18 @@ function renderSerpResults(container, matched) {
       const offscreen = r.bottom < 0 || r.top > window.innerHeight || r.right < 0 || r.left > window.innerWidth;
       if (offscreen) { badge.style.display = 'none'; return; }
       badge.style.display = 'flex';
-      badge.style.top = `${Math.max(4, r.top - 22)}px`;
-      badge.style.left = `${r.left}px`;
+      // Always to the left of the result, never above it (sitting above
+      // collided with the previous/next result's own title row), and never a
+      // different layout for a wider badge (a client's own result, carrying
+      // extra WebCEO enrichment content, is wider than a plain competitor
+      // chip) — every badge behaves identically. offsetWidth reads real
+      // layout even at opacity:0 (only paint is suppressed). Clamped to
+      // never go off-screen left; a badge wider than the available margin
+      // may edge under the result rather than relocate, which reads better
+      // than jumping to an inconsistent position.
+      const bw = badge.offsetWidth || 140;
+      badge.style.left = `${Math.max(4, r.left - bw - 8)}px`;
+      badge.style.top = `${Math.max(4, r.top)}px`;
     });
   }
   updatePositions();
@@ -412,6 +620,107 @@ function renderSerpResults(container, matched) {
   window.addEventListener('resize', container._update, { passive: true });
 }
 
+// ─── WebCEO enrichment (position-change + title/meta diff) ───────────────────
+// Fires automatically for the client's own result(s) only — unlike ad copy
+// capture (deliberately on-demand, since that's a competitor's content), this
+// reads the client's OWN site, squarely within the tool's normal scope.
+// Patches the already-rendered badge in place rather than re-rendering, so it
+// arrives as a small addition once the lookups resolve, never a flicker.
+//
+// Gated on a WebCEO tracked-keyword match for the on-screen query — there is
+// no other reliable source of the result's real destination URL (see the
+// parser's resultDomain() comment: every real href is Google's own
+// click-tracking redirect). No match, no WebCEO, or a fetch failure all mean
+// the same thing here: stay silent, leave the plain Phase 1 badge as-is.
+
+function enrichOwnResults(container, matched) {
+  const query = serpQuery();
+  if (!query) return;
+  matched.organic
+    .filter(e => e.role === 'own' && e.domain)
+    .forEach(entry => enrichOneOwnResult(container, entry, query));
+}
+
+async function enrichOneOwnResult(container, entry, query) {
+  let rankings;
+  try {
+    rankings = await browser.runtime.sendMessage({ action: 'webceoGetRankings', pageUrl: `https://${entry.domain}/` });
+  } catch { return; }
+  if (!rankings || !rankings.connected || rankings.error || !Array.isArray(rankings.rows)) return;
+  const row = rankings.rows.find(r => (r.keyword || '').trim().toLowerCase() === query.trim().toLowerCase());
+  if (!row) return;
+
+  const badge = findLiveBadge(container, entry);
+  if (!badge) return;   // toggled off, or this entry's badge no longer exists
+
+  if (row.position != null && row.previous != null) {
+    const delta = row.previous - row.position;   // positive = improved (moved to a lower/better position number)
+    if (delta) appendDeltaToBadge(badge, delta);
+  }
+
+  if (!row.url) return;
+  let dest;
+  try { dest = new URL(row.url); } catch { return; }
+  // WebCEO's last scan can be stale — if its ranked URL isn't even on the
+  // domain the live page just showed, comparing against it would be
+  // comparing against the wrong page entirely. Skip rather than mislead.
+  if (normalizeDomainSerp(dest.hostname) !== entry.domain) return;
+
+  let meta;
+  try { meta = await browser.runtime.sendMessage({ action: 'fetchPageMeta', url: row.url }); } catch { return; }
+  if (!meta || !meta.ok) return;
+
+  const liveBadge = findLiveBadge(container, entry);
+  if (!liveBadge) return;
+
+  const displayedTitle = entry.el.querySelector('h3')?.textContent || '';
+  const displayedSnippet = resultSnippetText(entry.el) || '';
+  const mismatches = [];
+  if (titlesDiffer(displayedTitle, meta.title)) mismatches.push({ kind: 'Title', shown: displayedTitle, real: meta.title });
+  if (descriptionsDiffer(displayedSnippet, meta.description)) mismatches.push({ kind: 'Description', shown: displayedSnippet, real: meta.description });
+  if (mismatches.length) appendMismatchFlagToBadge(liveBadge, mismatches);
+}
+
+function findLiveBadge(container, entry) {
+  const live = document.getElementById(SERP_CONTAINER_ID);
+  if (!live || live !== container) return null;
+  const pair = (container._hoverPairs || []).find(p => p.el === entry.el);
+  return pair ? pair.badge : null;
+}
+
+// Both land on the position row (delta) or their own new row (the mismatch
+// flag) — badge's children are rows now (see badgeRow()), not flat spans, so
+// this has to reach into the first row rather than badge itself.
+function appendDeltaToBadge(badge, delta) {
+  const span = document.createElement('span');
+  span.textContent = delta > 0 ? `▲${delta}` : `▼${Math.abs(delta)}`;
+  span.style.cssText = `color:${delta > 0 ? '#4ade80' : '#f87171'};font-weight:700`;
+  const posRow = badge.firstChild;
+  posRow.insertBefore(span, posRow.firstChild.nextSibling);
+}
+
+// A kind label per block only when there's more than one (Title AND
+// Description both differing) — with just one, the visible flag text
+// ("Description differs") already says which, so repeating it would be
+// redundant clutter in the tooltip.
+function mismatchDetail(m, labelKind) {
+  return `${labelKind ? `${m.kind}\n` : ''}Displayed:\n"${m.shown}"\n\nOn page:\n"${m.real}"`;
+}
+
+function appendMismatchFlagToBadge(badge, mismatches) {
+  const row = badgeRow();
+  const flag = document.createElement('span');
+  flag.textContent = `${mismatches.map(m => m.kind).join('/')} differs`;
+  flag.title = mismatches.map(m => mismatchDetail(m, mismatches.length > 1)).join('\n\n\n');
+  // Underline-dotted alone is the hover affordance — cursor:help renders a
+  // large OS-level "?" cursor on top of it, which read as heavier than
+  // intended for a small inline flag.
+  flag.style.cssText = 'color:#fcd34d;text-decoration:underline dotted;pointer-events:auto';
+  row.appendChild(flag);
+  badge.appendChild(row);
+}
+// ─── WebCEO enrichment: end ───────────────────────────────────────────────────
+
 function removeSerpOverlay() {
   const container = document.getElementById(SERP_CONTAINER_ID);
   if (container) {
@@ -419,9 +728,11 @@ function removeSerpOverlay() {
       window.removeEventListener('scroll', container._update);
       window.removeEventListener('resize', container._update);
     }
-    (container._hoverPairs || []).forEach(({ el, enter, leave }) => {
-      el.removeEventListener('mouseenter', enter);
-      el.removeEventListener('mouseleave', leave);
+    (container._hoverPairs || []).forEach(({ hoverEl, badge, show, hide }) => {
+      hoverEl.removeEventListener('mouseenter', show);
+      hoverEl.removeEventListener('mouseleave', hide);
+      badge.removeEventListener('mouseenter', show);
+      badge.removeEventListener('mouseleave', hide);
     });
     container.remove();
   }
@@ -435,7 +746,8 @@ function removeSerpOverlay() {
 
 // ─── Summary pill ─────────────────────────────────────────────────────────────
 // Same visual family as content.js's linkIndicator() (dark translucent,
-// rounded, box-shadow), mirrored to the top-left corner. Unlike
+// rounded, box-shadow), placed bottom-left rather than linkIndicator's
+// bottom-right, out of the way of Google's own UI chrome. Unlike
 // removeLinkIndicator's delete-on-fade, the nonzero-match case shrinks the
 // SAME element to a small persistent pill rather than removing it, so it
 // stays re-openable without a reparse.
@@ -450,7 +762,9 @@ function serpSummaryEl() {
     el = document.createElement('div');
     el.id = SERP_SUMMARY_ID;
     el.style.cssText = [
-      'position:fixed', 'top:12px', 'left:12px', 'z-index:2147483647',
+      // 40px, not 12 — most browsers show their own bottom-left link-preview
+      // status bar over a hovered link, which would otherwise cover this.
+      'position:fixed', 'bottom:40px', 'left:12px', 'z-index:2147483647',
       'background:rgba(15,15,15,0.9)', 'color:#fff', 'padding:6px 10px',
       'border-radius:6px', 'font:600 12px/1.4 -apple-system,system-ui,sans-serif',
       'box-shadow:0 2px 10px rgba(0,0,0,0.35)', 'max-width:280px', 'cursor:pointer'
@@ -565,5 +879,29 @@ browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 });
+
+// ─── Keyboard shortcut: Option/Alt + O ───────────────────────────────────────
+// content.js has its own Alt+F/I/L listener, but this is a separate content
+// script (a different isolated world) and can't reuse it. Matches e.code —
+// the physical key — since macOS rewrites Option+O's e.key to "ø". Skipped
+// while an editable element has focus, most importantly Google's own search
+// box, so that glyph can still be typed there. No IS_TOP_FRAME guard needed
+// the way content.js's listener needs one — this script only ever loads in
+// the top frame (manifest.base.json: all_frames:false).
+function serpEditableHasFocus() {
+  const el = document.activeElement;
+  if (!el) return false;
+  if (el.isContentEditable) return true;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+}
+
+window.addEventListener('keydown', (e) => {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.repeat) return;
+  if (e.code !== 'KeyO') return;
+  if (serpEditableHasFocus()) return;
+  e.preventDefault();
+  toggleSerpOverlayState();
+}, true);   // capture, so the page can't swallow it first
 
 }

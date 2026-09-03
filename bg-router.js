@@ -106,6 +106,7 @@ function routeMessage(message) {
     case 'clientRegistrySetImageSeo': return clientRegistrySetImageSeo(message);
     case 'clientRegistrySetCompetitors': return clientRegistrySetCompetitors(message);
     case 'clientRegistrySetTrust':       return clientRegistrySetTrust(message);
+    case 'serpClientIndex':      return serpClientIndex();
     case 'driveConnectBrowse':   return driveConnectBrowse();
     case 'driveListFolders':     return driveListFolders(message);
     case 'driveListSharedDrives': return driveListSharedDrives(message);

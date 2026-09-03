@@ -1,0 +1,82 @@
+<!--
+  SYNTHETIC fixture, not a live capture.
+
+  Every real Google search attempted for this feature (via the extension's
+  own automated browser tooling) returned genuinely empty ad-slot containers
+  (#tvcap/#tads/#tadsb/#bottomads all present in the DOM but with zero
+  rendered content) even for highly commercial queries like "car insurance
+  quotes" that reliably show ads in normal browsing. Google appears to
+  suppress ad serving for this automated context, the same class of problem
+  already known from this project's WebCEO IP-filtering issue.
+
+  This block is hand-authored from well-documented, long-standing Google ad
+  markup conventions, and deliberately reuses the exact `.CA5RN`/`.VuuXrf`/
+  `cite` breadcrumb structure confirmed present in the two real organic-result
+  fixtures (running-shoes-organic.html, car-insurance-quotes.html), since ads
+  visually mimic organic result styling with an added Sponsored label. The
+  aclk href is the real, well-known Google Ads click-tracking redirect
+  pattern -- this is specifically the case resultDomain()'s breadcrumb-first
+  fallback chain exists to handle, since the href itself never reveals the
+  advertiser's actual domain.
+-->
+<!DOCTYPE html>
+<html>
+<body>
+<div id="tvcap">
+  <div id="tads">
+    <div class="uEierd" data-text-ad="1">
+      <span class="OkkX2d" aria-label="Ad">Sponsored</span>
+      <div class="CA5RN">
+        <div><span class="VuuXrf">Progressive</span></div>
+        <div class="byrV5b"><cite class="qLRx3b tjvcx GvPZzd cHaqb" role="text">https://www.progressive.com<span class="ylgVCe ob9lvb" role="text"> › auto</span></cite></div>
+      </div>
+      <a class="sVXRqc" href="https://www.googleadservices.com/pagead/aclk?sa=L&ai=abcXYZ123&adurl=https://www.progressive.com/auto/">
+        <h3 class="LC20lb MBeuO DKV0Md">Car Insurance Quotes - Progressive Official Site</h3>
+      </a>
+      <div class="MUxGbd yDYNvb lyLwlc">Compare rates and save. Get a free quote in minutes.</div>
+    </div>
+    <div class="uEierd" data-text-ad="1">
+      <span class="OkkX2d" aria-label="Ad">Sponsored</span>
+      <div class="CA5RN">
+        <div><span class="VuuXrf">GEICO</span></div>
+        <div class="byrV5b"><cite class="qLRx3b tjvcx GvPZzd cHaqb" role="text">https://www.geico.com<span class="ylgVCe ob9lvb" role="text"> › quote</span></cite></div>
+      </div>
+      <a class="sVXRqc" href="https://www.googleadservices.com/pagead/aclk?sa=L&ai=defUVW456&adurl=https://www.geico.com/auto-insurance/">
+        <h3 class="LC20lb MBeuO DKV0Md">GEICO® Car Insurance - Get A Free Quote</h3>
+      </a>
+      <div class="MUxGbd yDYNvb lyLwlc">15 minutes could save you 15% or more.</div>
+    </div>
+  </div>
+</div>
+
+<div id="search">
+  <div id="rso">
+    <div class="MjjYud">
+      <div class="yuRUbf">
+        <a class="zReHs" href="/goto?url=CAESXwHfakeorganicresultredirecttoken000111222333444555">
+          <h3 class="LC20lb MBeuO DKV0Md">Allstate Auto Insurance | Get A Free Quote</h3>
+          <div class="CA5RN">
+            <div><span class="VuuXrf">Allstate</span></div>
+            <div class="byrV5b"><cite class="qLRx3b tjvcx GvPZzd cHaqb" role="text">https://www.allstate.com<span class="ylgVCe ob9lvb" role="text"> › auto-insurance</span></cite></div>
+          </div>
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="bottomads">
+  <div class="uEierd" data-text-ad="1">
+    <span class="OkkX2d" aria-label="Ad">Sponsored</span>
+    <div class="CA5RN">
+      <div><span class="VuuXrf">State Farm</span></div>
+      <div class="byrV5b"><cite class="qLRx3b tjvcx GvPZzd cHaqb" role="text">https://www.statefarm.com<span class="ylgVCe ob9lvb" role="text"> › auto</span></cite></div>
+    </div>
+    <a class="sVXRqc" href="https://www.googleadservices.com/pagead/aclk?sa=L&ai=ghiJKL789&adurl=https://www.statefarm.com/insurance/auto">
+      <h3 class="LC20lb MBeuO DKV0Md">State Farm® Auto Insurance - Official Site</h3>
+    </a>
+    <div class="MUxGbd yDYNvb lyLwlc">Bundle and save on car insurance today.</div>
+  </div>
+</div>
+</body>
+</html>

@@ -23,8 +23,9 @@
 // once it had been switched on anywhere. So their checkmarks are read from the
 // tab, not from storage, and an unreachable tab means "off".
 const SEO_TOGGLE_MENUS = [
-  { id: 'seo-toggle-alt',    title: 'Alt Text Overlay',    key: 'altOverlayActive',  fallback: false, perPage: true },
-  { id: 'seo-toggle-links',  title: 'Link Health Overlay', key: 'linkOverlayActive', fallback: false, perPage: true },
+  { id: 'seo-toggle-alt',    title: 'Alt Text Overlay',    key: 'altOverlayActive',  fallback: false, perPage: true, action: 'toggleAltOverlay' },
+  { id: 'seo-toggle-links',  title: 'Link Health Overlay', key: 'linkOverlayActive', fallback: false, perPage: true, action: 'toggleLinkOverlay' },
+  { id: 'seo-toggle-serp',   title: 'SERP Overlay',        key: 'serpOverlayActive', fallback: false, perPage: true, action: 'toggleSerpOverlay' },
   { id: 'seo-toggle-follow', title: 'Follow Active Tab',   key: 'followActiveTab',   fallback: true }
 ];
 
@@ -149,9 +150,8 @@ menus.onClicked.addListener(async (info, tab) => {
   // The overlays are owned by the content script — it holds the per-page state
   // AND applies/removes the on-page chips. Top frame only, matching every other
   // page read (see TOP_FRAME in popup-shared.js).
-  const action = item.key === 'altOverlayActive' ? 'toggleAltOverlay' : 'toggleLinkOverlay';
   try {
-    await browser.tabs.sendMessage(tab.id, { action }, { frameId: 0 });
+    await browser.tabs.sendMessage(tab.id, { action: item.action }, { frameId: 0 });
   } catch {
     // No content script here (about:, PDF viewer, AMO), so nothing was
     // flipped — but the browser has already ticked the checkbox optimistically.

@@ -1779,6 +1779,10 @@ function renderLinkOverlayToggle(active) {
   document.getElementById('btn-link-overlay').setAttribute('aria-pressed', String(active));
 }
 
+function renderSerpOverlayToggle(active) {
+  document.getElementById('btn-serp-overlay').setAttribute('aria-pressed', String(active));
+}
+
 // The overlays can also be flipped from the toolbar button's right-click menu
 // or the Alt+I/Alt+L shortcuts, so the header buttons have to reflect a change
 // this panel didn't initiate — visibly so in sidebar mode, where the panel
@@ -1788,8 +1792,13 @@ function renderLinkOverlayToggle(active) {
 // the content script, so the content script announces it instead.
 browser.runtime.onMessage.addListener((msg) => {
   if (!msg || msg.action !== 'overlayStateChanged') return;
-  renderOverlayToggle(!!msg.altOverlayActive);
-  renderLinkOverlayToggle(!!msg.linkOverlayActive);
+  // content.js and content-serp.js each broadcast this action independently
+  // (separate isolated worlds, see content-serp.js) and only carry their own
+  // field — guard on presence so one script's broadcast can't stomp the
+  // other's button back to "off".
+  if ('altOverlayActive' in msg) renderOverlayToggle(!!msg.altOverlayActive);
+  if ('linkOverlayActive' in msg) renderLinkOverlayToggle(!!msg.linkOverlayActive);
+  if ('serpOverlayActive' in msg) renderSerpOverlayToggle(!!msg.serpOverlayActive);
 });
 
 // ─── Render: all ────────────────────────────────────────────────────────────
@@ -1813,6 +1822,7 @@ function render(data, expandMeta = false) {
   if (typeof renderPhrasesEntry === 'function') renderPhrasesEntry(data);
   renderOverlayToggle(data.altOverlayActive);
   renderLinkOverlayToggle(data.linkOverlayActive);
+  renderSerpOverlayToggle(data.serpOverlayActive);
   if (typeof loadPageSpeedData === 'function') loadPageSpeedData(false);
   if (typeof loadBacklinksData === 'function') loadBacklinksData(false);
   if (typeof loadSiteAuditData === 'function') loadSiteAuditData(false);
@@ -1911,6 +1921,19 @@ document.getElementById('btn-link-overlay').addEventListener('click', async () =
   try {
     const response = await browser.tabs.sendMessage(tab.id, { action: 'toggleLinkOverlay' }, TOP_FRAME);
     renderLinkOverlayToggle(response.linkOverlayActive);
+  } catch { /* ignore */ }
+});
+
+// ─── SERP overlay toggle ─────────────────────────────────────────────────────
+// Handled by content-serp.js, a separate content script that only loads on
+// www.google.com/search — the sendMessage silently rejects everywhere else,
+// same as the two toggles above do on a page with no content script at all.
+
+document.getElementById('btn-serp-overlay').addEventListener('click', async () => {
+  const tab = await getActiveTab();
+  try {
+    const response = await browser.tabs.sendMessage(tab.id, { action: 'toggleSerpOverlay' }, TOP_FRAME);
+    renderSerpOverlayToggle(response.serpOverlayActive);
   } catch { /* ignore */ }
 });
 

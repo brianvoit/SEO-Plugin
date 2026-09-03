@@ -80,6 +80,19 @@ for (const browser of BROWSERS) {
         assert.equal(new Set(list).size, list.length, `${field} contains duplicates`);
       }
     });
+
+    test('ships content-serp.js as its own entry, scoped off <all_urls>', async () => {
+      // Merging it into the <all_urls> entry (or the base/override merge
+      // dropping it) would defeat the whole point of only parsing SERP DOM on
+      // an actual Google search page — see tests/serp-overlay-scope.test.mjs
+      // for the deeper invariants against manifest.base.json directly.
+      const m = await buildManifest(browser);
+      const serpEntry = m.content_scripts.find(e => (e.js || []).includes('content-serp.js'));
+      assert.ok(serpEntry, 'no content_scripts entry ships content-serp.js');
+      assert.deepEqual(serpEntry.matches, ['*://www.google.com/search*']);
+      const allUrlsEntry = m.content_scripts.find(e => (e.matches || []).includes('<all_urls>'));
+      assert.ok(!(allUrlsEntry.js || []).includes('content-serp.js'));
+    });
   });
 }
 

@@ -2115,6 +2115,16 @@ wpsInit();
 let _altOverlayOn = false;
 let _linkOverlayOn = false;
 
+// The SERP overlay lives entirely in content-serp.js — a separate content
+// script matched only on www.google.com/search, running in its own isolated
+// world with no access to this file's module state. A DOM attribute on
+// <html> is the only channel two isolated worlds share, so that toggle
+// announces its state there instead of through a shared variable. Reads
+// false on every page content-serp.js never loaded on, which is correct.
+function seoSerpOverlayActive() {
+  return document.documentElement.dataset.seoSerpOverlayActive === 'true';
+}
+
 // The panel's header buttons and the toolbar's right-click menu both need to
 // reflect a toggle they didn't initiate — the keyboard shortcuts and the menu
 // can flip these while the sidebar sits open. Storage used to carry that news;
@@ -2199,7 +2209,7 @@ browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // so it is answered synchronously from the module variables.
     let data;
     try { data = getPageData(); } catch (e) { data = { _readError: String((e && e.message) || e) }; }
-    sendResponse({ ...data, altOverlayActive: _altOverlayOn, linkOverlayActive: _linkOverlayOn });
+    sendResponse({ ...data, altOverlayActive: _altOverlayOn, linkOverlayActive: _linkOverlayOn, serpOverlayActive: seoSerpOverlayActive() });
     return true;
   }
 
@@ -2253,7 +2263,7 @@ browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // Read-only peek at this page's overlay state, for the toolbar menu's
   // checkmarks. Synchronous — it is just the two module variables.
   if (message.action === 'getOverlayState') {
-    sendResponse({ altOverlayActive: _altOverlayOn, linkOverlayActive: _linkOverlayOn });
+    sendResponse({ altOverlayActive: _altOverlayOn, linkOverlayActive: _linkOverlayOn, serpOverlayActive: seoSerpOverlayActive() });
     return true;
   }
 

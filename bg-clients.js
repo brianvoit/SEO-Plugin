@@ -47,6 +47,14 @@ function clientRegistryId() {
   return (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `c${Date.now()}${Math.random().toString(36).slice(2)}`;
 }
 
+// Shared bare-hostname form used everywhere a domain is stored or matched
+// (a client's own domains, its competitors, and the SERP client index below)
+// so the same input always normalizes the same way regardless of entry point.
+function normalizeDomain(x) {
+  return String(x || '').trim().toLowerCase()
+    .replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+}
+
 // businessModel drives which trust rules can fire at all; ymyl adds the
 // credentialing rules. `regulated` covers verticals that need licensure
 // surfaced but are not Your-Money-Your-Life — engineering, water treatment —
@@ -292,7 +300,7 @@ async function clientRegistryDelete({ id }) {
 
 async function clientRegistryAddDomain({ id, domain }) {
   await ensureClientRegistryMigrated();
-  const host = (domain || '').trim().toLowerCase().replace(/^www\./, '');
+  const host = normalizeDomain(domain);
   if (!host) return { ok: false, error: 'BAD_DOMAIN' };
   const client = await clientRegistryGetRaw(id);
   if (!client) return { ok: false, error: 'NOT_FOUND' };
@@ -424,10 +432,36 @@ async function clientRegistrySetCompetitors({ id, competitors, markPulled }) {
   if (!client) return { ok: false, error: 'NOT_FOUND' };
   if (markPulled) client.competitorsPulledAt = Date.now();
   client.competitors = [...new Set((Array.isArray(competitors) ? competitors : [])
-    .map(c => String(c || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, ''))
+    .map(normalizeDomain)
     .filter(Boolean))];
   await clientRegistrySaveRaw(client);
   return { ok: true, client };
+}
+
+// A slim, page-safe lookup for the SERP overlay: which normalized domains
+// belong to (or are tracked as a competitor of) any client. Sent to every
+// www.google.com SERP the user visits with the overlay on, so the response
+// deliberately carries only {clientId, clientName, role} — never full client
+// records (GSC/GA/Ads ids, the trust profile, keywords).
+//
+// Each domain maps to an ARRAY of relations, not a single one, because a
+// domain can legitimately be one client's own domain while also being a
+// different client's tracked competitor, or a competitor shared by two
+// clients — collapsing to one relation would silently drop a real fact.
+async function serpClientIndex() {
+  await ensureClientRegistryMigrated();
+  const { clients } = await clientRegistryListRaw();
+  const domains = {};
+  const add = (domain, rel) => {
+    const d = normalizeDomain(domain);
+    if (!d) return;
+    (domains[d] ||= []).push(rel);
+  };
+  for (const c of clients) {
+    for (const d of c.domains || []) add(d.domain, { clientId: c.id, clientName: c.name, role: 'own' });
+    for (const comp of c.competitors || []) add(comp, { clientId: c.id, clientName: c.name, role: 'competitor' });
+  }
+  return { domains };
 }
 
 // Image SEO prompt guidance for the WP Media Library generators — same

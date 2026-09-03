@@ -47,6 +47,12 @@
       "js": ["content.js"],
       "run_at": "document_idle",
       "all_frames": true
+    },
+    {
+      "matches": ["*://www.google.com/search*"],
+      "js": ["content-serp.js"],
+      "run_at": "document_idle",
+      "all_frames": false
     }
   ]
 }

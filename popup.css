@@ -4143,21 +4143,22 @@ body.settings-open #update-footer { margin-top: auto; }
 .adsbuild-asset-row:has(.adsbuild-asset-area) .adsbuild-col-sentiment,
 .adsbuild-asset-row:has(.adsbuild-asset-area) .adsbuild-col-regen { margin-top: 6px; }
 
-/* Starting an ad group enabled is a deliberate choice, so the control reads as
-   a statement rather than sitting silently among the buttons. */
-.adsbuild-status-toggle {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12px;
-  cursor: pointer;
-  margin-bottom: 2px;
+/* The status switch reuses .toggle-btn wholesale (track, thumb, aria-pressed
+   colouring) so it matches Follow Tab and the two overlays. It only needs its
+   own label, and to sit against the button it governs. */
+.adsbuild-status-toggle { margin-right: auto; }
+.adsbuild-toggle-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
-.field-hint.is-warn { color: var(--warn, #e3b341); opacity: 1; }
 
-/* Action buttons sit right, where the eye lands after reading a section. */
+/* Action buttons sit right, where the eye lands after reading a section. A
+   toggle in this row pushes itself left via margin-right:auto, so the button
+   it governs stays on the same edge as every other action in the panel. */
 .adsbuild-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 6px;

@@ -1277,41 +1277,43 @@ async function abRefineKeywords(candidates, info) {
 function abCommitSection() {
   const s = abSection('CREATE');
 
-  // Paused is the default and stays the default. Starting enabled is a real
-  // choice some people want — the ad group is ready and they would rather not
-  // go to Google Ads to flip it — but it has to be chosen, not stumbled into.
-  const toggle = document.createElement('label');
-  toggle.className = 'adsbuild-status-toggle';
+  // Same switch as Follow Tab and the two overlays, so a toggle looks like a
+  // toggle everywhere in the panel. Paused stays the default: starting enabled
+  // is a real choice, but it has to be made rather than stumbled into.
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'toggle-btn adsbuild-status-toggle';
+  toggle.id = 'adsbuild-status-toggle';
+  toggle.setAttribute('aria-pressed', String(_abStartEnabled));
+  toggle.title = 'Create the ad group enabled instead of paused';
+  toggle.setAttribute('aria-label', 'Create the ad group enabled instead of paused');
 
-  const cb = document.createElement('input');
-  cb.type = 'checkbox';
-  cb.checked = _abStartEnabled;
-  cb.addEventListener('change', () => {
-    _abStartEnabled = cb.checked;
-    abSyncStatusNote();
-  });
+  const track = document.createElement('span');
+  track.className = 'toggle-track';
+  const thumb = document.createElement('span');
+  thumb.className = 'toggle-thumb';
+  thumb.appendChild(svgFromString(
+    '<svg aria-hidden="true" focusable="false" class="toggle-icon" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+    '<polygon points="5.5 3.5 12 8 5.5 12.5"/></svg>'));
+  track.appendChild(thumb);
+  toggle.appendChild(track);
 
   const label = document.createElement('span');
-  label.textContent = 'Start serving immediately';
-
-  toggle.appendChild(cb);
+  label.className = 'adsbuild-toggle-label';
+  label.id = 'adsbuild-status-label';
   toggle.appendChild(label);
-  s.appendChild(toggle);
 
-  const note = document.createElement('div');
-  note.className = 'field-hint';
-  note.id = 'adsbuild-status-note';
-  s.appendChild(note);
+  toggle.addEventListener('click', () => {
+    _abStartEnabled = !_abStartEnabled;
+    toggle.setAttribute('aria-pressed', String(_abStartEnabled));
+    abSyncStatusLabel();
+  });
 
+  // Toggle and button share one row: the switch states what the button will
+  // do, so they belong side by side rather than a setting read further up.
   const actions = document.createElement('div');
   actions.className = 'adsbuild-actions';
-
-  const preview = document.createElement('button');
-  preview.className = 'save-key-btn';
-  preview.id = 'adsbuild-preview';
-  preview.textContent = 'Check with Google';
-  preview.addEventListener('click', () => abCommit(true, preview));
-  actions.appendChild(preview);
+  actions.appendChild(toggle);
 
   const create = document.createElement('button');
   create.className = 'save-key-btn';
@@ -1327,19 +1329,15 @@ function abCommitSection() {
   status.id = 'adsbuild-status';
   s.appendChild(status);
 
-  abSyncStatusNote();
+  abSyncStatusLabel();
   return s;
 }
 
-// Spells out what the button is about to do, so the consequence is visible at
-// the moment of clicking rather than in a setting read earlier.
-function abSyncStatusNote() {
-  const el = document.getElementById('adsbuild-status-note');
-  if (!el) return;
-  el.textContent = _abStartEnabled
-    ? 'The ad group and ad will be created ENABLED and can start serving as soon as Google approves them.'
-    : 'The ad group and ad are created PAUSED. Nothing serves until you enable them in Google Ads.';
-  el.classList.toggle('is-warn', _abStartEnabled);
+// The switch carries its own meaning — Paused or Enabled — so no sentence of
+// helper text is needed beneath it.
+function abSyncStatusLabel() {
+  const el = document.getElementById('adsbuild-status-label');
+  if (el) el.textContent = _abStartEnabled ? 'Enabled' : 'Paused';
 }
 
 function abReady() {
@@ -1349,10 +1347,8 @@ function abReady() {
 
 function abSyncCommit() {
   const ready = abReady();
-  ['adsbuild-preview', 'adsbuild-create'].forEach(id => {
-    const b = document.getElementById(id);
-    if (b) b.disabled = !ready;
-  });
+  const b = document.getElementById('adsbuild-create');
+  if (b) b.disabled = !ready;
 }
 
 async function abCommit(validateOnly, btn) {

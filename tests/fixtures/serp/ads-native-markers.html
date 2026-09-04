@@ -1,0 +1,137 @@
+<!--
+  Real capture (live "ADHD Testing Near me" search), trimmed and de-noised —
+  jsaction/jscontroller/inline scripts/tracking params stripped, but every
+  structurally significant marker (ids, roles, aria-level, data-text-ad,
+  class names on the elements this fixture exists to pin) copied verbatim
+  from the real page.
+
+  A FOURTH real Google ad layout, distinct from every fixture above: BOTH the
+  top (#tvcap/#tads) and bottom (#bottomads/#tadsb) ad blocks on this real
+  page carry NEITHER an <h3> NOR a <cite> anywhere inside them. Titles are a
+  role="heading" div (aria-level="3") instead of <h3>, and the domain
+  breadcrumb is a data-dtld="..." attribute instead of a <cite> element.
+
+  The reported bug: neither ad block was detected at all — "1 in the top and
+  1 in the bottom" went missing entirely — because extractAdResults' (and
+  countSkipped's) candidate-anchor filter required `a.querySelector('h3')`,
+  which is never true anywhere in either block.
+
+  Two distinct ad-card shapes appear here, both real, each needing its own
+  detection path via hasResultHeading():
+    - a plain text ad (role="heading" nested INSIDE the title anchor, e.g.
+      "thousandbrancheswellness.com" below — a.querySelector('[role="heading"]'))
+    - an extended/local-pack-style ad with a photo/rating card (role="heading"
+      WRAPPING the title anchor instead, e.g. "Minnesota Neuropsychology"
+      below — a.closest('[role="heading"]'))
+
+  The fix: nativeAdUnitFor() trusts data-text-ad="1" (present on every ad
+  unit here) and the #tads/#tadsb/role=region[aria-label="Ads"] containers as
+  a first-class, most-precise ad signal — checked ahead of the per-card-label
+  climb and the section-heading-range fallback, neither of which can see
+  these units (no per-card label, and the range fallback would incorrectly
+  close right after the very first card since each ad's own title also
+  carries role="heading" — see isSectionBoundaryLike's aria-level="3" guard,
+  added alongside this fixture).
+
+  Ad title-anchor hrefs here are the real destination URL directly (not a
+  /goto or aclk redirect — the click-tracking rewrite lives in data-rw,
+  stripped from this fixture), confirmed against the real capture — so
+  resultDomain()'s existing href fallback resolves these correctly with no
+  changes needed.
+-->
+<!DOCTYPE html>
+<html>
+<body>
+<div id="search">
+  <div id="rso">
+
+    <div id="tvcap">
+      <div role="region" id="tads" aria-label="Ads">
+        <div class="ki3Mlf qqZaXc CfKAg"><span class="L8u9l" aria-level="2" role="heading">Sponsored results</span></div>
+
+        <div data-ta-slot="0" data-ta-slot-pos="1" data-text-ad="1">
+          <div class="vt6azd xpd EtOod pkphOe">
+            <a class="sVXRqc" href="https://www.mnneuropsychology.com/evaluations/adhd-testing/">
+              <div class="CCgQ5 EE3Upf" aria-level="3" role="heading"><span>1-Day ADHD Assessment | ADHD Evaluation &amp; Diagnosis</span></div>
+              <span class="OSrXXb VN4UC chcHdb"><span class="x2VHCd OSrXXb ob9lvb" data-dtld="mnneuropsychology.com" role="text">https://www.mnneuropsychology.com › adhd</span></span>
+            </a>
+          </div>
+        </div>
+
+        <div data-ta-slot="0" data-ta-slot-pos="2" data-text-ad="1">
+          <div class="vt6azd xpd EtOod pkphOe">
+            <a class="sVXRqc" href="https://www.thousandbrancheswellness.com/">
+              <div class="CCgQ5 EE3Upf" aria-level="3" role="heading"><span>Located In Arden Hills - Schedule a No-Cost Assessment</span></div>
+              <span class="OSrXXb VN4UC chcHdb"><span class="x2VHCd OSrXXb ob9lvb" data-dtld="thousandbrancheswellness.com" role="text">https://www.thousandbrancheswellness.com</span></span>
+            </a>
+          </div>
+        </div>
+
+        <div data-ta-slot="0" data-ta-slot-pos="3" data-text-ad="1">
+          <div class="vt6azd xpd EtOod pkphOe">
+            <a class="sVXRqc" href="https://www.adhdadvisor.org/">
+              <div class="CCgQ5 EE3Upf" aria-level="3" role="heading"><span>ADHD Testing &amp; Diagnosis - Find a Specialist</span></div>
+              <span class="OSrXXb VN4UC chcHdb"><span class="x2VHCd OSrXXb ob9lvb" data-dtld="adhdadvisor.org" role="text">https://www.adhdadvisor.org</span></span>
+            </a>
+          </div>
+        </div>
+
+        <div class="MmMIvd jRKCUd SKsNHb">
+          <span class="LGwnxb JGD2rd"><span class="PBBEhf JGD2rd">Show sponsored results</span><span class="iInZTe JGD2rd">Hide sponsored results</span></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="MjjYud">
+      <div class="yuRUbf">
+        <a class="zReHs" href="/goto?url=CAESfakeredirecttokenORG111">
+          <h3 class="LC20lb MBeuO DKV0Md">Associated Clinic of Psychology - ADHD Testing</h3>
+          <div class="CA5RN">
+            <div><span class="VuuXrf">Associated Clinic of Psychology</span></div>
+            <div class="byrV5b"><cite class="qLRx3b tjvcx GvPZzd cHaqb" role="text">https://www.acp-mn.com<span class="ylgVCe ob9lvb" role="text"> › adhd</span></cite></div>
+          </div>
+        </a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div id="bottomads">
+  <div role="region" id="tadsb" aria-label="Ads">
+    <div class="ki3Mlf qqZaXc CfKAg"><span class="L8u9l" aria-level="2" role="heading">Sponsored results</span></div>
+
+    <div data-ta-slot="3" data-ta-slot-pos="1" data-text-ad="1">
+      <div class="vt6azd xpd EtOod pkphOe">
+        <div class="veJ6Bb" role="link" tabindex="0">
+          <a class="Zlr9V" data-pcu="https://www.mnneuropsychology.com/" href="https://www.mnneuropsychology.com/evaluations/adhd-testing/">
+            <div class="LbKnXb J0EDnf">
+              <div class="R8BTeb q8U8x LJEGod i0Rdmd">Minnesota Neuropsychology</div>
+              <div class="xuPcX yUTMj OSrXXb al4kQ"><span class="F1cY0b ob9lvb" role="text">https://www.mnneuropsychology.com › adhd</span></div>
+            </div>
+          </a>
+          <div class="UCccb" aria-level="3" role="heading">
+            <a href="https://www.mnneuropsychology.com/evaluations/adhd-testing/">
+              <span class="uDVmCf bkEfV CAvEcc">1-Day ADHD Assessment | ADHD Neuropsychologist</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div data-ta-slot="3" data-ta-slot-pos="2" data-text-ad="1">
+      <div class="vt6azd xpd EtOod pkphOe">
+        <a class="sVXRqc" href="https://thousandbrancheswellness.com/locations/minnesota/arden-hills/">
+          <div class="CCgQ5 EE3Upf" aria-level="3" role="heading"><span>Located In Arden Hills - Behavioral Health Services</span></div>
+          <span class="OSrXXb VN4UC chcHdb"><span class="x2VHCd OSrXXb ob9lvb" data-dtld="thousandbrancheswellness.com" role="text">https://www.thousandbrancheswellness.com</span></span>
+        </a>
+      </div>
+    </div>
+
+    <div class="MmMIvd jRKCUd SKsNHb">
+      <span class="LGwnxb JGD2rd"><span class="PBBEhf JGD2rd">Show sponsored results</span><span class="iInZTe JGD2rd">Hide sponsored results</span></span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

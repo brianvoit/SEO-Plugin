@@ -116,6 +116,33 @@ function adUnitFor(anchor) {
   return null;
 }
 
+// Explicit, first-class ad markers Google supplies directly on some layouts
+// — the individual ad-content wrapper (data-text-ad="1") and the outer
+// ad-block containers (#tads/#tadsb, role="region" aria-label="Ads").
+// Confirmed against a real live capture (a plain text ad AND a
+// local-pack-style extended ad, both inside a real #tads block) where
+// titles use a role="heading" div instead of <h3> and breadcrumbs use a
+// data-dtld attribute instead of <cite> — neither the h3/cite structural
+// test nor the per-card "Sponsored" label search (adUnitFor, below) can see
+// these units at all. Checked FIRST in adInfoFor, ahead of every other ad
+// signal, since it's the most precise one available whenever Google
+// supplies it.
+function nativeAdUnitFor(anchor) {
+  return anchor.closest('[data-text-ad="1"]') ||
+    anchor.closest('#tads, #tadsb, [role="region"][aria-label="Ads" i]');
+}
+
+// A title-bearing anchor test broader than the classic <h3> tag alone —
+// Google's newer ad layouts (confirmed live) use a role="heading" div
+// instead, nested either as a descendant of the anchor (a plain text ad) or
+// as an ancestor wrapping it (an extended/local-pack-style ad card with a
+// photo/rating card, where the visible title sits in a <span> inside an <a>
+// that role="heading" div wraps). isOrganicAnchor is deliberately untouched
+// — every real organic result seen so far still uses classic h3/cite.
+function hasResultHeading(a) {
+  return !!(a.querySelector('h3') || a.querySelector('[role="heading"]') || a.closest('[role="heading"]'));
+}
+
 // #bottomads is the one durable-enough signal worth trusting for region —
 // everything else (top vs some other placement) defaults to "top", since
 // that's the overwhelmingly common case and a wrong "top" label is a much
@@ -199,7 +226,16 @@ function isHeadingLike(el) {
 // short leaf text too, and would close the range right after the FIRST ad
 // card — before ever reaching the second one.
 function isSectionBoundaryLike(el) {
-  if (el.getAttribute && el.getAttribute('role') === 'heading') return true;
+  if (el.getAttribute && el.getAttribute('role') === 'heading') {
+    // A result's own title can carry role="heading" too on some layouts
+    // (confirmed live: aria-level="3" on an individual ad's title, vs.
+    // aria-level="2" on the real "Sponsored results" section heading above
+    // it) — treating it as a boundary would close a sponsored range right
+    // after the very first card. A true section-level heading is never
+    // level 3.
+    if (el.getAttribute('aria-level') === '3') return false;
+    return true;
+  }
   const t = el.textContent.trim().toLowerCase();
   return /^(hide|show) sponsored|^people also ask|^related searches/.test(t);
 }
@@ -231,6 +267,8 @@ function inSponsoredRange(el, ranges) {
 // in (its own cite/breadcrumb structure is organic-shaped for this layout,
 // confirmed live, so resultDomain() still resolves correctly against it).
 function adInfoFor(anchor, ranges) {
+  const native = nativeAdUnitFor(anchor);
+  if (native) return { isAd: true, unit: native };
   const unit = adUnitFor(anchor);
   if (unit) return { isAd: true, unit };
   if (inSponsoredRange(anchor, ranges)) return { isAd: true, unit: anchor };
@@ -250,7 +288,7 @@ function extractOrganicResults(root, ranges) {
 }
 
 function extractAdResults(root, ranges) {
-  const anchors = Array.from(root.querySelectorAll('a[href]')).filter(a => a.querySelector('h3'));
+  const anchors = Array.from(root.querySelectorAll('a[href]')).filter(hasResultHeading);
   const top = [], bottom = [];
   const seenUnits = new Set();
   for (const a of anchors) {
@@ -273,7 +311,7 @@ function extractAdResults(root, ranges) {
 // silently mislabeled.
 function countSkipped(root, organic, topAds, bottomAds, ranges) {
   const claimed = new Set([...organic, ...topAds, ...bottomAds].map(c => c.el));
-  const anchors = Array.from(root.querySelectorAll('a[href]')).filter(a => a.querySelector('h3'));
+  const anchors = Array.from(root.querySelectorAll('a[href]')).filter(hasResultHeading);
   const claimedUnits = new Set();
   let skipped = 0;
   for (const a of anchors) {
@@ -699,25 +737,53 @@ function appendDeltaToBadge(badge, delta) {
   posRow.insertBefore(span, posRow.firstChild.nextSibling);
 }
 
-// A kind label per block only when there's more than one (Title AND
-// Description both differing) — with just one, the visible flag text
-// ("Description differs") already says which, so repeating it would be
-// redundant clutter in the tooltip.
-function mismatchDetail(m, labelKind) {
-  return `${labelKind ? `${m.kind}\n` : ''}Displayed:\n"${m.shown}"\n\nOn page:\n"${m.real}"`;
+// No kind label needed here — one flag renders per mismatch now (see
+// appendMismatchFlagToBadge below), and its own visible text ("Description
+// differs") already says which, so repeating it in the tooltip would be
+// redundant clutter.
+function mismatchDetail(m) {
+  return `Displayed:\n"${m.shown}"\n\nOn page:\n"${m.real}"`;
 }
 
+// One row per mismatch, not one combined flag — each needs its own click
+// target, since Title and Description copy different text.
 function appendMismatchFlagToBadge(badge, mismatches) {
+  mismatches.forEach(m => appendOneMismatchFlag(badge, m));
+}
+
+function appendOneMismatchFlag(badge, m) {
   const row = badgeRow();
   const flag = document.createElement('span');
-  flag.textContent = `${mismatches.map(m => m.kind).join('/')} differs`;
-  flag.title = mismatches.map(m => mismatchDetail(m, mismatches.length > 1)).join('\n\n\n');
+  const label = `${m.kind} differs`;
+  flag.textContent = label;
+  flag.title = `${mismatchDetail(m)}\n\nClick to copy the real ${m.kind.toLowerCase()}`;
   // Underline-dotted alone is the hover affordance — cursor:help renders a
   // large OS-level "?" cursor on top of it, which read as heavier than
   // intended for a small inline flag.
-  flag.style.cssText = 'color:#fcd34d;text-decoration:underline dotted;pointer-events:auto';
+  flag.style.cssText = 'color:#fcd34d;text-decoration:underline dotted;pointer-events:auto;cursor:pointer';
+  flag.addEventListener('click', (e) => copyRealTextToClipboard(e, flag, label, m.real));
   row.appendChild(flag);
   badge.appendChild(row);
+}
+
+// Copies the actual on-page text (not what Google is displaying) — the
+// whole point of the flag is that the two differ, so this is the one the
+// user actually wants on their clipboard, e.g. to paste into the CMS as a
+// starting point for a rewrite. Mirrors content.js's own copy-and-flash
+// feedback pattern (showGeneratorResult's "Copy" button).
+async function copyRealTextToClipboard(e, flag, label, text) {
+  e.preventDefault();
+  e.stopPropagation();
+  try {
+    await navigator.clipboard.writeText(text);
+    flag.textContent = 'Copied!';
+    flag.style.color = '#4ade80';
+    setTimeout(() => { flag.textContent = label; flag.style.color = '#fcd34d'; }, 1200);
+  } catch {
+    // Clipboard write blocked (permissions, non-secure context) — the
+    // tooltip already told them what it would've copied; fail quiet rather
+    // than clutter the badge with an error state.
+  }
 }
 // ─── WebCEO enrichment: end ───────────────────────────────────────────────────
 

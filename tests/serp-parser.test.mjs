@@ -223,6 +223,38 @@ describe('ads, from a THIRD real layout with no per-card label at all (sponsored
   });
 });
 
+describe('ads, from a real layout with NO h3/cite anywhere in the ad block (ads-native-markers.html)', () => {
+  // Real bug report: "It didn't catch that there were two sponsored results.
+  // 1 in the top and 1 in the bottom." — a real live capture where BOTH the
+  // top and bottom ad blocks were missed entirely, because every candidate-
+  // anchor filter required an <h3> descendant, and this layout's ad titles
+  // are a role="heading" div instead (never an <h3>), with a data-dtld
+  // attribute standing in for <cite>. Fixed via nativeAdUnitFor() trusting
+  // data-text-ad="1"/#tads/#tadsb/role=region[aria-label="Ads"] directly,
+  // and hasResultHeading() recognizing a role="heading" descendant OR
+  // ancestor of the anchor, not just a nested <h3>.
+  let html;
+  test('fixture loads', async () => { html = await loadFixture('ads-native-markers.html'); assert.ok(html.length > 500); });
+
+  test('all three top ads are detected, none of them missed for lacking an h3', async () => {
+    const parsed = parse(html);
+    assert.equal(parsed.topAds.length, 3, `expected 3 top ads, got ${parsed.topAds.length}`);
+    assert.deepEqual(parsed.topAds.map(a => a.domain), ['mnneuropsychology.com', 'thousandbrancheswellness.com', 'adhdadvisor.org']);
+  });
+
+  test('both bottom ads are detected, including the local-pack-style card whose role="heading" wraps the anchor instead of nesting inside it', async () => {
+    const parsed = parse(html);
+    assert.equal(parsed.bottomAds.length, 2, `expected 2 bottom ads, got ${parsed.bottomAds.length}`);
+    assert.deepEqual(parsed.bottomAds.map(a => a.domain), ['mnneuropsychology.com', 'thousandbrancheswellness.com']);
+  });
+
+  test('the genuine organic result between the two ad blocks is not swept up as an ad', async () => {
+    const parsed = parse(html);
+    assert.equal(parsed.organic.length, 1);
+    assert.equal(parsed.organic[0].domain, 'acp-mn.com');
+  });
+});
+
 describe('sponsoredSectionRanges never leaves a range open-ended', () => {
   // The regression this guards: a per-card "Sponsored" label (the classic
   // #tads layout's OWN detection mechanism) also matches the range opener's
